@@ -1,0 +1,10 @@
+[package]
+name = "mahjong-tiles"
+description = "Mahjong tile vocabulary: the 34 playing kinds and 8 bonus tiles, tile counts, and text notation."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true

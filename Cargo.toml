@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/tiles", "crates/pybind"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+mahjong-tiles = { path = "crates/tiles" }
+rand = { version = "0.8", features = ["small_rng"] }
+proptest = "1.5"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = 1  # keep symbols so profilers show function names
