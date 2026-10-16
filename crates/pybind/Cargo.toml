@@ -1,0 +1,14 @@
+[package]
+name = "mahjong-pybind"
+description = "Python bindings: the `mahjong._core` extension module."
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+bench = false
+
+[dependencies]
+mahjong-tiles.workspace = true
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"] }

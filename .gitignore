@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.so
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Node / web
+node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+
+# Experiment outputs (large; results that matter are summarized in docs/study-results/)
+/runs/
+/checkpoints/
+/logs/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

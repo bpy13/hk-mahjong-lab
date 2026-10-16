@@ -1,0 +1,8 @@
+# Python extension modules on macOS resolve Python's symbols when the module is
+# loaded, not at link time (https://pyo3.rs/latest/building-and-distribution).
+# Needed so `cargo build`/`cargo test --workspace` can link crates/pybind.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

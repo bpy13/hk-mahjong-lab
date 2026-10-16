@@ -1,0 +1,9 @@
+name: mahjong
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - rust>=1.82      # Rust compiler + cargo (kept inside the env; no global rustup)
+  - nodejs=20       # for the React UI in web/ (Phase 2)
+  - maturin>=1.7    # builds the Rust crates into the `mahjong._core` Python module
