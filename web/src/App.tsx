@@ -206,15 +206,20 @@ export default function App() {
           ))}
           <div className="center">
             <Wall left={obs.wall_remaining} />
-            {claim && (
-              <div className="claim">
-                {WINDS[claim[1]]}家{obs.phase === 'rob' ? '槓' : '打出'}
-                <Tile tile={claim[0]} size="md" highlight />
-              </div>
-            )}
-            {!view.result && !humanToAct && obs.current_player !== null && (
-              <div className="muted">{WINDS[obs.current_player]}家思考中…</div>
-            )}
+            {/* Fixed slots: they keep their space when empty, so nothing moves. */}
+            <div className={`claim${claim ? '' : ' empty'}`}>
+              {claim ? (
+                <>
+                  {WINDS[claim[1]]}家{obs.phase === 'rob' ? '槓' : '打出'}
+                  <Tile tile={claim[0]} size="md" highlight />
+                </>
+              ) : (
+                <Tile size="md" faceDown />
+              )}
+            </div>
+            <div className="muted thinking">
+              {!view.result && !humanToAct && obs.current_player !== null ? `${WINDS[obs.current_player]}家思考中…` : '\u00a0'}
+            </div>
           </div>
           <div className="mine">
             <div className="my-melds">
@@ -234,16 +239,15 @@ export default function App() {
               onSelect={onSelect}
               danger={danger}
             />
-            {humanToAct && (
-              <>
-                <div className="prompt" data-testid="prompt">
-                  {obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
-                  {obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
-                  {obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
-                </div>
-                <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />
-              </>
-            )}
+            <div className="prompt" data-testid={humanToAct ? 'prompt' : undefined}>
+              {!humanToAct && '\u00a0'}
+              {humanToAct && obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
+              {humanToAct && obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
+              {humanToAct && obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
+            </div>
+            <div className="action-slot">
+              {humanToAct && <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />}
+            </div>
           </div>
         </section>
         <StudyPanel

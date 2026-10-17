@@ -29,6 +29,7 @@ export function Hand({ hand, lastDrawn, canDiscard, selected, onSelect, danger }
       size="lg"
       selected={selected === t}
       danger={danger ? danger[t] : undefined}
+      reserveDanger
       onClick={canDiscard ? () => onSelect(t) : undefined}
       testId={`hand-${t}`}
     />
@@ -36,7 +37,8 @@ export function Hand({ hand, lastDrawn, canDiscard, selected, onSelect, danger }
   return (
     <div className="hand" data-testid="hand">
       {tiles.map((t, i) => tile(t, `h${i}`))}
-      {drawn !== null && <span className="drawn">{tile(drawn, 'drawn')}</span>}
+      {/* The drawn tile's slot is always there, so the hand never shifts. */}
+      <span className="drawn">{drawn !== null ? tile(drawn, 'drawn') : <span className="drawn-slot" />}</span>
     </div>
   )
 }
