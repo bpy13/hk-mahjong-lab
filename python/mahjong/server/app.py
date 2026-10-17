@@ -33,7 +33,7 @@ class RulesIn(BaseModel):
 
 
 class NewGame(BaseModel):
-    level: str = "medium"
+    level: str = "hard"
     seat: int | None = Field(default=None, ge=0, le=3)
     seed: int | None = None
     rules: RulesIn = RulesIn()
