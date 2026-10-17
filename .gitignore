@@ -29,3 +29,7 @@ web/playwright-report/
 .DS_Store
 .idea/
 .vscode/
+
+# Trained networks (the chosen one is committed explicitly)
+/models/*
+!/models/*.md

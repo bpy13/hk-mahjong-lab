@@ -16,4 +16,5 @@ mahjong-hk.workspace = true
 mahjong-analysis.workspace = true
 mahjong-search.workspace = true
 rand.workspace = true
+rayon.workspace = true
 pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"] }

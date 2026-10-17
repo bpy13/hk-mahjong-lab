@@ -4,6 +4,7 @@ use crate::convert::rules_from;
 use crate::{rng_from, value_error, PyState};
 use mahjong_analysis::{discards, faan_shanten, shanten, Structure, SuitPlan, Target};
 use mahjong_games::{Game, Policy};
+use mahjong_hk::State;
 use mahjong_search::{duplicate, pimc, solo as solo_sim, Agent, Danger, PimcConfig, SeatView};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -41,19 +42,27 @@ fn require_live(state: &PyState) -> PyResult<usize> {
         .ok_or_else(|| value_error("the hand is over"))
 }
 
+/// A copy of the state, taken without holding the borrow while the caller
+/// computes with the GIL released (so Python may change the original meanwhile).
+fn snapshot(state: &Bound<'_, PyState>) -> PyResult<State> {
+    let s = state.borrow();
+    require_live(&s)?;
+    Ok(s.inner.clone())
+}
+
 /// Runs the PIMC solver for the player to act. Returns the candidates, best
 /// first, with mean points, 95% interval, win, deal-in and draw rates.
 #[pyfunction]
 #[pyo3(signature = (state, samples=400, candidates=6, time_ms=None, seed=0))]
 pub(crate) fn analyze<'py>(
     py: Python<'py>,
-    state: &PyState,
+    state: &Bound<'py, PyState>,
     samples: usize,
     candidates: usize,
     time_ms: Option<u64>,
     seed: u64,
 ) -> PyResult<Bound<'py, PyDict>> {
-    require_live(state)?;
+    let s = snapshot(state)?;
     let config = PimcConfig {
         samples,
         candidates,
@@ -61,7 +70,6 @@ pub(crate) fn analyze<'py>(
         seed,
         ..PimcConfig::default()
     };
-    let s = state.inner.clone();
     let a = py.detach(move || pimc(&s, &config));
     let d = PyDict::new(py);
     d.set_item("seat", a.seat)?;
@@ -94,13 +102,12 @@ pub(crate) fn analyze<'py>(
 #[pyo3(signature = (state, spec, seed=None))]
 pub(crate) fn agent_action(
     py: Python<'_>,
-    state: &PyState,
+    state: &Bound<'_, PyState>,
     spec: &str,
     seed: Option<u64>,
 ) -> PyResult<u16> {
-    require_live(state)?;
+    let s = snapshot(state)?;
     let agent = Agent::parse(spec).map_err(value_error)?;
-    let s = state.inner.clone();
     Ok(py.detach(move || {
         let legal = s.legal_actions_vec();
         agent.choose(&s, &legal, &mut rng_from(seed)).code()
@@ -186,17 +193,18 @@ pub(crate) fn discard_table<'py>(py: Python<'py>, state: &PyState) -> PyResult<B
 #[pyo3(signature = (state, draws=None, samples=200, seed=0))]
 pub(crate) fn solo<'py>(
     py: Python<'py>,
-    state: &PyState,
+    state: &Bound<'py, PyState>,
     draws: Option<usize>,
     samples: usize,
     seed: u64,
 ) -> PyResult<Bound<'py, PyList>> {
-    let seat = require_live(state)?;
-    if state.inner.phase_name() != "turn" {
+    let s = snapshot(state)?;
+    let seat = s.current_player().expect("live");
+    if s.phase_name() != "turn" {
         return Err(value_error("solo needs a turn decision"));
     }
-    let view = SeatView::of(&state.inner, seat);
-    let draws = draws.unwrap_or(state.inner.wall_remaining() / 4);
+    let view = SeatView::of(&s, seat);
+    let draws = draws.unwrap_or(s.wall_remaining() / 4);
     let rows = py.detach(move || solo_sim(&view, draws, samples, seed));
     let out = PyList::empty(py);
     for r in rows {

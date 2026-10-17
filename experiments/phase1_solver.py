@@ -47,12 +47,22 @@ def row(res: dict[str, Any], i: int) -> dict[str, float]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true", help="tiny run to check the script")
+    parser.add_argument(
+        "--only", choices=["solver"], help="re-run one section and merge it into results.json"
+    )
     args = parser.parse_args()
     scale = 0.05 if args.quick else 1.0
     deals = lambda n: max(2, int(n * scale))  # noqa: E731
     OUT.mkdir(parents=True, exist_ok=True)
-    results: dict[str, Any] = {}
+    path = OUT / ("results-quick.json" if args.quick else "results.json")
+    results: dict[str, Any] = json.loads(path.read_text()) if args.only and path.exists() else {}
     default = Rules()
+    if args.only == "solver":
+        results["solver_naive"] = results.pop("solver", results.get("solver_naive", []))
+        results["solver"] = solver_section(deals, default)
+        path.write_text(json.dumps(results, indent=2))
+        print("wrote", path)
+        return
 
     # 1. Bot ladder: each candidate against three value bots.
     ladder = []
@@ -63,16 +73,7 @@ def main() -> None:
     results["ladder"] = ladder
 
     # 2. Solver strength against thinking time.
-    solver = []
-    for samples in [16, 32, 64, 128]:
-        spec = f"pimc:samples={samples},candidates=4"
-        res = run([spec, "value", "value", "value"], deals(80 if samples < 128 else 50), 12, default)
-        r = row(res, 0)
-        r["samples"] = samples
-        r["seconds"] = res["seconds"]
-        solver.append(r)
-        print("solver", r, flush=True)
-    results["solver"] = solver
+    results["solver"] = solver_section(deals, default)
 
     # 3. The faan minimum: efficiency vs value under different minimums.
     minimum = []
@@ -112,9 +113,23 @@ def main() -> None:
         print("seats", seats[-1], flush=True)
     results["seats"] = seats
 
-    path = OUT / ("results-quick.json" if args.quick else "results.json")
     path.write_text(json.dumps(results, indent=2))
     print("wrote", path)
+
+
+def solver_section(deals: Any, rules: Rules) -> list[dict[str, Any]]:
+    """PIMC (structured sampling, anchored on the value bot) against three value
+    bots, for several sample counts."""
+    solver = []
+    for samples in [32, 64, 128]:
+        spec = f"pimc:samples={samples},candidates=4,z=2"
+        res = run([spec, "value", "value", "value"], deals(60), 12, rules)
+        r: dict[str, Any] = row(res, 0)
+        r["samples"] = samples
+        r["seconds"] = res["seconds"]
+        solver.append(r)
+        print("solver", r, flush=True)
+    return solver
 
 
 if __name__ == "__main__":
