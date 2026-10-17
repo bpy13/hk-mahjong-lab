@@ -25,7 +25,7 @@ from mahjong.rl.model import POINT_SCALE, Net, inputs, masked, to_arrays
 
 def distill(
     out: Path,
-    hands: int = 12_000,
+    hands: int = 48_000,
     chunk: int = 600,
     teacher: str = "value",
     lr: float = 1e-3,

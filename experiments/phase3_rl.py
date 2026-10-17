@@ -47,7 +47,7 @@ def main() -> None:
     if not m("distill").exists():
         distill(
             m("distill"),
-            hands=max(40, int(24_000 * q)),
+            hands=max(40, int(48_000 * q)),
             chunk=600 if not args.quick else 20,
             log=RUNS / f"distill{tag}.json",
         )
