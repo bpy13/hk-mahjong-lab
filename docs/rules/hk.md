@@ -8,8 +8,7 @@ the code and this document disagree, the code is wrong.
 Rules that differ between tables are collected in a `RuleSet`. The **default** value
 of each variant is marked *(default)*.
 
-> **Status: draft for review.** Points marked **[confirm]** are defaults I chose where
-> house rules commonly differ. They are listed together in §11.
+> **Status: approved 2026-10-17.**
 
 ## 1. Tiles
 
@@ -97,7 +96,7 @@ Each of the other three players may declare at most one claim on the discard:
 6. There is no restriction on passing up a win and winning later on the same tile
    (Hong Kong mahjong has no *furiten* rule).
 7. The **last discard** of the hand (after the wall is exhausted) can be claimed
-   only for a win. **[confirm]**
+   only for a win; if nobody wins on it, the hand is an exhaustive draw (§9).
 
 ## 5. Kongs and bonus tiles
 
@@ -261,8 +260,3 @@ A match is four rounds (East, South, West, North prevailing wind). The dealer ke
 the deal after winning the hand or after an exhaustive draw; otherwise the deal
 passes to the next seat. Phase 1 studies single hands; matches are added
 when the study needs them.
-
-## 11. Points to confirm
-
-1. §4.1.7: the last discard of the hand (made after the last wall tile has been
-   drawn) can be claimed only for a win, not for a pung, kong or chow.
