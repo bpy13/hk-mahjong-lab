@@ -95,7 +95,7 @@ export function StudyPanel({ mode, setMode, hints, loading, showDanger, setShowD
           <li>期望分：以電腦模擬對手打到完局的平均得分。</li>
           <li>勝率：自己食糊的機會；出銃率：打出的牌被人食糊的機會。</li>
           <li>向聽：離聽牌尚欠幾隻牌；番數向聽：離「夠三番」的聽牌尚欠幾隻。</li>
-          <li>危險度：按公開資訊估計每隻牌出銃的機會（綠安全，紅危險）。</li>
+          <li>危險度：而家打出呢隻牌即刻被人食糊的機會，按公開資訊估計（綠 &lt; 1%，黃 &lt; 4%，紅更高；滑鼠停喺牌上睇數字）。</li>
         </ul>
       </details>
     </aside>
