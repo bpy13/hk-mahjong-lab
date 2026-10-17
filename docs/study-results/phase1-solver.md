@@ -8,39 +8,42 @@ minimum, 10-faan limit, half-spicy, flowers on). "±" is a 95% confidence interv
 Unless stated otherwise, the candidate plays against three `value` bots (the
 reference field), so a score of 0 means "as good as `value`".
 
-> **Rule note.** These results were measured when bonus-tile faan (#3–#5) still
-> counted toward the 3-faan minimum. The rules now treat flowers as bonus only
-> (docs/rules/hk.md §6), so some numbers, especially those involving flowers
-> (§3), will shift slightly when the study is re-run.
+> **Re-run 2026-10-18** under the current rules: bonus-tile faan (#3–#5) no
+> longer count toward the 3-faan minimum (docs/rules/hk.md §6). The re-run also
+> includes the calibrated danger model, defending rollout opponents and honour-
+> weighted determinization (docs/solver.md). The earlier numbers are kept in
+> brackets where they help.
 
 ## 1. The bot ladder
 
 1,600 hands per row (400 walls × 4 seatings).
 
-| Bot | Points / hand | Win | Deal-in | Avg faan of wins |
-|---|---|---|---|---|
-| `value` (the field itself) | 0.0 | 24.2% | 17.9% | 3.85 |
-| `defensive` | −2.3 ± 1.0 | 16.6% | **13.9%** | 3.67 |
-| `fast` (rollout bot) | −2.3 ± 1.1 | 17.6% | 20.1% | 3.83 |
-| `closed` (never claims) | −3.3 ± 1.1 | 15.2% | 19.1% | 3.68 |
-| `efficiency` | −5.1 ± 0.9 | 10.6% | 21.6% | 3.27 |
-| `random` | −8.7 ± 0.7 | 0% | 26.9% | – |
+| Bot | Points / hand | Win | Deal-in | Avg faan of wins | (before) |
+|---|---|---|---|---|---|
+| `value` (the field itself) | 0.0 | 23.9% | 17.9% | 4.77 | |
+| `defensive` | −1.9 ± 1.5 | 18.9% | **14.8%** | 4.68 | (−2.3) |
+| `fast` (rollout bot) | −5.4 ± 1.5 | 12.2% | 24.4% | 4.68 | (−2.3) |
+| `closed` (never claims) | −7.4 ± 1.7 | 6.8% | 22.0% | 5.76 | (−3.3) |
+| `efficiency` | −10.3 ± 1.1 | 2.9% | 22.3% | 4.02 | (−5.1) |
+| `random` | −13.1 ± 1.2 | 0.1% | 25.0% | – | (−8.7) |
 
 What this says about the game:
 
-* **Playing for faan matters most.** The `efficiency` bot plays for any complete
-  hand as fast as possible. It wins less than half as often as `value`, because
-  many of its completed hands are worth fewer than 3 faan and cannot be declared.
-  It loses 5.1 points per hand.
-* **Claiming is worth about 3 points a hand.** `closed` keeps the 門前清 faan by
-  never claiming, but wins far less often (15% against 24%). Under this table,
-  speed from claimed melds outweighs the concealed-hand bonus.
-* **A naive fold rule costs more than it saves.** `defensive` cuts deal-ins from
-  17.9% to 13.9% of hands but gives up a third of its wins, for −2.3 points.
-  Defense has to be selective, and this is the gap the solver and learning
-  should close.
-* The cheap rollout bot `fast` (no acceptance counting) is 2.3 points worse than
-  `value`: acceptance counting is worth having when decisions are not rushed.
+* **Playing for faan matters even more now.** With flower faan no longer helping
+  to reach 3 faan, `efficiency` (any complete hand, as fast as possible) wins
+  only 2.9% of hands and loses 10.3 points per hand; most of its complete hands
+  cannot be declared. Wins are worth more on average (4.8 faan against 3.9
+  before), because every win now needs 3 faan from the hand itself.
+* **Claiming is worth about 7 points a hand.** `closed` keeps the 門前清 faan by
+  never claiming, but wins a quarter as often (6.8% against 23.9%). The cost of
+  staying concealed more than doubled under the new rule: claimed melds are the
+  main way to build faan (dragon and wind pungs, flushes, all pungs).
+* **Defense is now close to free.** With the calibrated danger model,
+  `defensive` cuts deal-ins from 17.9% to 14.8% and gives up less than before
+  (−1.9 ± 1.5 points, against −2.3 and, with the first fitted tables, −5.8).
+* **The rollout bot is weaker.** `fast` (no acceptance counting) is 5.4 points
+  worse than `value` (2.3 before). The solver's rollouts therefore under-play
+  every seat, which is part of its remaining miscalibration (docs/solver.md).
 
 ## 2. Why the 3-faan minimum changes the game
 
@@ -50,13 +53,14 @@ What this says about the game:
 | Minimum faan | `efficiency` points / hand | `efficiency` win | Avg faan of all wins (value self-play) |
 |---|---|---|---|
 | 0 | −0.1 ± 0.4 | 25.7% | 1.6 |
-| 1 | −0.1 ± 0.4 | 25.3% | 1.9 |
-| 3 | **−4.5 ± 0.9** | 11.9% | 3.8 |
+| 1 | −0.1 ± 0.6 | 23.6% | 2.2 |
+| 3 | **−11.0 ± 1.2** | 2.6% | 4.9 |
 
 With a minimum of 0 or 1, playing for speed alone is as good as playing for
-value: almost every complete hand can be declared. At 3 faan it becomes a large
-handicap. This is the core of HK strategy, and the reason for the faan-aware
-measure in [solver.md](../solver.md).
+value: almost every complete hand can be declared. At 3 faan it is a disaster.
+(Before the flower-rule change it cost 4.5 points per hand; flower faan used to
+carry many cheap hands over the line.) This is the core of HK strategy, and the
+reason for the faan-aware measure in [solver.md](../solver.md).
 
 ## 3. Seats and flowers
 
@@ -65,15 +69,17 @@ dealer, with 14 tiles at the start):
 
 | Flowers | East (dealer) | South | West | North | Draws | Avg faan | Self-drawn share of wins |
 |---|---|---|---|---|---|---|---|
-| on | +0.8 | −0.8 | +2.3 | −2.2 | 5.5% | 3.8 | 24% |
+| on | −3.3 | +1.8 | +0.3 | +1.3 | 5.8% | 4.7 | 24% |
 | off | +0.6 | +0.6 | +1.2 | −2.4 | 8.5% | 4.2 | 22% |
 
-The intervals here are about ±1.2. **North is consistently about 2 points per
-hand worse off**, with or without flowers. North discards directly before the
-dealer, who has an extra tile to start with, so North's discards are the ones the
-dealer can chow. Flowers add faan for nothing (無花, seat flowers), so they make
-the minimum easier to reach: fewer draws (5.5% against 8.5%), and wins that need
-less from the hand itself (3.8 faan on average against 4.2).
+The intervals are about ±1.2 to ±1.5, so only differences of about 3 points
+stand out. Without flowers, North is again about 2 points per hand worse off
+(North discards directly before the dealer, who can chow them). With flowers the
+dealer is now the one behind (−3.3). A plausible cause: on a self-drawn win the
+dealer pays like everyone else, while flowers make self-drawn and bonus-heavy
+wins more frequent and larger (4.7 faan against 4.2), so being the dealer buys
+less. That is a hypothesis to test, not a result. Flowers still mean fewer draws
+(5.8% against 8.5%).
 
 ## 4. The solver
 
@@ -83,7 +89,8 @@ why was the most instructive result of this phase.
 ### 4.1 Naive PIMC
 
 The textbook version re-deals hidden tiles uniformly at random, then plays the
-candidate with the highest mean. 320 hands per row (200 for 128 samples):
+candidate with the highest mean. Measured in the first run (old flower rule; not
+re-run), 320 hands per row (200 for 128 samples):
 
 | Samples per decision | Points / hand | Win | Deal-in |
 |---|---|---|---|
@@ -125,22 +132,25 @@ Two causes:
   solver deviates only when a candidate is better by more than two standard
   errors, and it always declares a legal win.
 
-240 hands per row:
+240 hands per row (re-run with the current solver and rules; the earlier
+numbers in brackets):
 
-| Samples per decision | Points / hand | Win | Deal-in | Avg faan |
-|---|---|---|---|---|
-| 32 | +2.9 ± 5.2 | 25.0% | 18.3% | 4.1 |
-| 64 | +1.8 ± 4.5 | 25.8% | 18.8% | 4.2 |
-| 128 | +3.6 ± 5.5 | 25.0% | 18.3% | 4.5 |
+| Samples per decision | Points / hand | Win | Deal-in | Avg faan | (before) |
+|---|---|---|---|---|---|
+| 32 | +2.0 ± 5.6 | 22.1% | 19.6% | 5.0 | (+2.9 ± 5.2) |
+| 64 | +1.0 ± 6.1 | 22.9% | 16.3% | 5.2 | (+1.8 ± 4.5) |
+| 128 | +2.0 ± 5.1 | 22.9% | 17.9% | 4.7 | (+3.6 ± 5.5) |
 
-Win and deal-in rates are now those of the `value` field (24.2% and 17.9%), and
-wins are bigger (4.1–4.5 faan against 3.9). Pooled over the three rows the
-solver scores **+2.8 ± 2.9 points per hand**. That is a likely gain, but not yet
-significant at 95%. More samples barely help, which points at the remaining
-limits:
-* the rollout bot (`fast`, itself 2.3 points worse than `value`) plays out every
+Win and deal-in rates are close to those of the `value` field (23.9% and 17.9%),
+and wins are slightly bigger (4.7–5.2 faan against 4.8). Pooled over the three
+rows the solver scores **+1.7 ± 3.2 points per hand**: still positive, still not
+significant at 95%, and as before more samples barely help. The limits are the
+model of the future, not the sample count:
+* the rollout bot (`fast`, now 5.4 points worse than `value`) plays out every
   future;
-* sampled opponents are shaped by shanten alone, not by what they discarded.
+* sampled opponents are shaped by shanten (and, now, how often honours are
+  held), not by what they discarded. A learned opponent model is the top item in
+  [research/related-work.md](../research/related-work.md).
 
 ### 4.3 What it costs
 
@@ -150,12 +160,13 @@ samples about 0.8 s. The UI's 高級 bot uses 96 samples with a 0.5 s cap.
 ## 5. Summary
 
 * The 3-faan minimum is what makes Hong Kong strategy different: playing for speed
-  alone costs 4.5 points per hand at 3 faan and nothing at 0–1.
-* Claiming melds is worth about 3 points per hand under this table, more than the
-  concealed bonus it gives up.
-* Simple folding gives up more than it saves.
+  alone costs 11 points per hand at 3 faan (flowers bonus-only) and nothing at
+  0–1.
+* Claiming melds is worth about 7 points per hand under this table, much more
+  than the concealed bonus it gives up.
+* With a calibrated danger model, folding costs little (−1.9 ± 1.5).
 * PIMC needs opponent hands sampled as developed as real ones, and needs to be
   anchored to a good heuristic. Naive PIMC is far worse than the heuristic it
   rolls out with.
 * Corrected PIMC is about as good as the best heuristic, probably slightly
-  better. Phase 3 asks whether learning does better.
+  better (+1.7 ± 3.2). Phase 3 asks whether learning does better.
