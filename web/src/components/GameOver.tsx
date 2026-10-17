@@ -9,11 +9,12 @@ interface Props {
   view: GameView
   meta: Meta
   onNewGame: () => void
+  onClose: () => void
 }
 
 /** The end of a hand: every hand revealed, each win's faan breakdown, payments,
  * and the post-hand review. */
-export function GameOver({ view, meta, onNewGame }: Props) {
+export function GameOver({ view, meta, onNewGame, onClose }: Props) {
   const r = view.result!
   const [review, setReview] = useState<ReviewItem[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -26,7 +27,11 @@ export function GameOver({ view, meta, onNewGame }: Props) {
     }
   }
   return (
-    <div className="game-over" data-testid="game-over">
+    <div className="backdrop" onClick={onClose}>
+    <div className="game-over" data-testid="game-over" role="dialog" aria-label="結果" onClick={(e) => e.stopPropagation()}>
+      <button className="close" aria-label="關閉" title="關閉 (Esc)" onClick={onClose}>
+        ✕
+      </button>
       <h2>{r.wins.length === 0 ? '流局' : '食糊'}</h2>
       {r.wins.map((w) => (
         <div key={w.seat} className="win">
@@ -69,12 +74,14 @@ export function GameOver({ view, meta, onNewGame }: Props) {
         </tbody>
       </table>
       <div className="buttons">
-        <button onClick={onNewGame}>再來一局</button>
+        <button className="primary" onClick={onNewGame}>再來一局</button>
+        <button onClick={onClose}>關閉</button>
         <button onClick={loadReview} disabled={loading || review !== null}>
           {loading ? '檢討中…' : '檢討'}
         </button>
       </div>
       {review && <Review items={review} />}
+    </div>
     </div>
   )
 }

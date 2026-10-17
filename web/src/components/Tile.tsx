@@ -13,22 +13,24 @@ interface Props {
   highlight?: boolean
   /** 0–1: drawn as a coloured bar under the tile. */
   danger?: number
-  sideways?: boolean
+  /** Turn the tile on its side: 90 = top to the right, -90 = top to the left. */
+  rotate?: 0 | 90 | -90
   onClick?: () => void
   testId?: string
 }
 
 /** One tile, drawn as SVG so it scales cleanly. */
-export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, danger, sideways, onClick, testId }: Props) {
+export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, danger, rotate = 0, onClick, testId }: Props) {
   const [w, h] = SIZES[size]
   const face = tile !== undefined ? faceText(tile) : { top: '', bottom: '' }
   const colour = tile !== undefined ? tileColour(tile) : '#000'
   const label = faceDown || tile === undefined ? '牌背' : tileName(tile)
-  const style = sideways ? { transform: 'rotate(90deg)', margin: `0 ${(h - w) / 2}px` } : undefined
+  // A sideways tile is drawn in a swapped box, so it takes up its real space.
+  const turned = rotate !== 0
+  const group = rotate === 90 ? 'translate(48,0) rotate(90)' : rotate === -90 ? 'translate(0,36) rotate(-90)' : undefined
   return (
     <span
       className={`tile${selected ? ' selected' : ''}${dim ? ' dim' : ''}${onClick ? ' clickable' : ''}`}
-      style={style}
       onClick={onClick}
       title={label}
       aria-label={label}
@@ -36,7 +38,8 @@ export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, da
       data-testid={testId}
       data-tile={tile}
     >
-      <svg width={w} height={h} viewBox="0 0 36 48">
+      <svg width={turned ? h : w} height={turned ? w : h} viewBox={turned ? '0 0 48 36' : '0 0 36 48'}>
+        <g transform={group}>
         <rect
           x="1"
           y="1"
@@ -63,6 +66,7 @@ export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, da
             </text>
           </>
         )}
+        </g>
       </svg>
       {danger !== undefined && (
         <span className="danger-bar" style={{ width: `${Math.round(Math.min(1, danger * 4) * 100)}%`, background: dangerColour(danger) }} />

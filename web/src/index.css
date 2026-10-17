@@ -24,34 +24,47 @@ button.primary, button.on { background: var(--felt); color: white; border-color:
 
 header { display: flex; align-items: center; gap: 16px; padding: 8px 16px; }
 header h1 { font-size: 20px; margin: 0; }
-header button { margin-left: auto; }
+header .header-buttons { margin-left: auto; display: flex; gap: 8px; }
 
 .layout { display: grid; grid-template-columns: 1fr 330px; gap: 12px; padding: 0 12px; }
 .table {
   position: relative; background: radial-gradient(circle, var(--felt), var(--felt-dark));
-  border-radius: 14px; min-height: 560px; display: grid;
-  grid-template-areas: ". top ." "left center right" ". bottom .";
-  grid-template-columns: 1fr 1.4fr 1fr; grid-template-rows: auto 1fr auto; gap: 8px; padding: 10px;
+  border-radius: 14px; min-height: 640px; display: grid; gap: 10px; padding: 10px;
+  grid-template-columns: auto auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-areas:
+    "left top    top    top    right"
+    "left .      rtop   .      right"
+    "left rleft  center rright right"
+    "left .      rbot   .      right"
+    "left bot    bot    bot    right";
 }
-.seat { color: #f3efe4; padding: 6px; border-radius: 8px; }
-.seat.acting { box-shadow: 0 0 0 2px var(--accent); }
-.seat.pos-0 { grid-area: bottom; }
-.seat.pos-1 { grid-area: right; }
-.seat.pos-2 { grid-area: top; }
-.seat.pos-3 { grid-area: left; }
-.seat-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+/* Seats along the edges. Side seats stand vertically, like a real table. */
+.edge { color: #f3efe4; padding: 6px; border-radius: 8px; display: flex; gap: 8px; }
+.edge.acting { box-shadow: 0 0 0 2px var(--accent); }
+.edge.pos-0 { grid-area: bot; justify-content: center; align-items: center; }
+.edge.pos-2 { grid-area: top; justify-content: center; align-items: center; }
+.edge.pos-1 { grid-area: right; flex-direction: column; align-items: center; }
+.edge.pos-3 { grid-area: left; flex-direction: column; align-items: center; }
+.edge-tiles { display: flex; gap: 8px; align-items: center; }
+.edge.pos-1 .edge-tiles, .edge.pos-3 .edge-tiles { flex-direction: column; }
+.edge.pos-1 .tiles, .edge.pos-3 .tiles, .edge.pos-1 .meld, .edge.pos-3 .meld { flex-direction: column; }
+.seat-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
 .wind { font-weight: 700; font-size: 18px; }
 .badge { background: #f3efe4; color: var(--ink); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 .badge.warn { background: #f6c64f; }
-.delta { font-weight: 700; margin-left: auto; }
+.delta { font-weight: 700; }
 .up { color: #1d7a3e; }
 .down { color: #b3261e; }
-.seat .up { color: #8ff0b0; }
-.seat .down { color: #ffb4a6; }
-.seat-tiles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.backs, .revealed, .melds, .bonus, .meld { display: inline-flex; gap: 1px; }
-.melds { gap: 6px; }
-.river { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 6px; max-width: 330px; min-height: 36px; }
+.edge .up { color: #8ff0b0; }
+.edge .down { color: #ffb4a6; }
+.tiles, .meld { display: inline-flex; gap: 1px; }
+/* Discards lie out on the table, in front of each seat, facing the centre. */
+.river { display: flex; flex-wrap: wrap; gap: 2px; align-content: flex-start; }
+.river-0 { grid-area: rbot; max-width: 230px; justify-self: center; min-height: 76px; align-content: flex-end; flex-wrap: wrap-reverse; }
+.river-2 { grid-area: rtop; max-width: 230px; justify-self: center; min-height: 76px; }
+.river-1 { grid-area: rright; max-width: 88px; align-self: center; }
+.river-3 { grid-area: rleft; max-width: 88px; align-self: center; }
 .center { grid-area: center; align-self: center; justify-self: center; color: #f3efe4; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .claim { display: flex; align-items: center; gap: 8px; font-size: 18px; }
 
@@ -87,15 +100,18 @@ th:first-child, td:first-child { text-align: left; }
 .quiz .bad { color: #b3261e; }
 .help { margin-top: 10px; color: var(--muted); }
 
+.backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); }
 .game-over {
-  position: fixed; inset: 40px 12%; background: var(--paper); border-radius: 14px; padding: 20px 28px;
+  position: fixed; top: 40px; left: 50%; transform: translateX(-50%); width: min(1000px, 92vw); max-height: calc(100vh - 80px); background: var(--paper); border-radius: 14px; padding: 20px 28px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.35); overflow: auto;
 }
+.game-over .close { position: absolute; top: 12px; right: 12px; font-size: 18px; padding: 2px 10px; }
 .win { margin-bottom: 14px; }
 .win-head { font-size: 17px; margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
 .win-hand { display: flex; gap: 2px; flex-wrap: wrap; align-items: flex-end; }
 .win-hand .meld { margin-left: 10px; }
-.patterns { display: flex; gap: 14px; flex-wrap: wrap; padding-left: 18px; }
+.patterns { display: flex; gap: 6px 16px; flex-wrap: wrap; list-style: none; padding-left: 0; }
+.patterns li { background: #efe7d6; border-radius: 4px; padding: 2px 8px; }
 .deltas td { text-align: center; font-size: 16px; font-weight: 700; }
 .buttons { display: flex; gap: 10px; margin-top: 14px; }
 .review ol { padding-left: 22px; }
