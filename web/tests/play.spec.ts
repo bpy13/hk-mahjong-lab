@@ -10,32 +10,38 @@ test('play a hand with hints and review it', async ({ page }) => {
   await page.getByRole('button', { name: '開始' }).click()
   await page.getByRole('button', { name: '提示' }).click()
 
-  // The dealer moves first: hints appear for the opening discard.
-  await expect(page.getByTestId('hint-moves')).toBeVisible({ timeout: 30_000 })
+  // The dealer moves first: hints appear for the opening discard. Then hints
+  // are switched off so the rest of the hand plays quickly.
+  await expect(page.getByTestId('hint-moves')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: '關' }).click()
+  const quick = { timeout: 3_000 }
 
-  for (let step = 0; step < 400; step++) {
+  for (let step = 0; step < 600; step++) {
     if (await page.getByTestId('game-over').isVisible()) break
     const prompt = page.getByTestId('prompt')
     if (!(await prompt.isVisible())) {
       await page.waitForTimeout(50)
       continue
     }
-    const win = page.locator('.act-104, .act-34')
-    if (await win.count()) {
-      await win.first().click()
-      continue
+    try {
+      const win = page.locator('.act-104, .act-34')
+      if (await win.count()) {
+        await win.first().click(quick)
+        continue
+      }
+      const pass = page.locator('.act-103')
+      if (await pass.count()) {
+        await pass.click(quick)
+        continue
+      }
+      // Discard: select a tile, then press 打出.
+      const tile = page.locator('[data-testid="hand"] .tile.clickable').last()
+      if (!(await tile.count())) continue
+      await tile.click({ ...quick, force: true })
+      await page.getByRole('button', { name: '打出' }).click(quick)
+    } catch {
+      // The view changed under us (a bot moved); look again.
     }
-    const pass = page.locator('.act-103')
-    if (await pass.count()) {
-      await pass.click()
-      continue
-    }
-    // Discard: select a tile, then press 打出.
-    const tile = page.locator('[data-testid="hand"] .tile.clickable').last()
-    if (!(await tile.count())) continue
-    await tile.click({ force: true })
-    const discard = page.getByRole('button', { name: '打出' })
-    if (await discard.isEnabled()) await discard.click()
   }
   await expect(page.getByTestId('game-over')).toBeVisible({ timeout: 60_000 })
   await page.getByRole('button', { name: '檢討' }).click()

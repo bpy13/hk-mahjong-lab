@@ -209,9 +209,6 @@ export default function App() {
               ))}
             </span>
           ))}
-          {obs.bonus[view.human].map((t) => (
-            <Tile key={t} tile={t} size="md" />
-          ))}
         </div>
         <Hand
           hand={obs.hand}
