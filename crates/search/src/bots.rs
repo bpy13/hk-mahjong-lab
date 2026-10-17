@@ -254,7 +254,7 @@ impl Brain {
                     .iter()
                     .min_by(|a, b| danger.tile(**a).total_cmp(&danger.tile(**b)))
                 {
-                    if danger.tile(safer) + 0.02 < danger.tile(best) {
+                    if danger.tile(safer) + 0.003 < danger.tile(best) {
                         best = safer;
                     }
                 }
@@ -369,14 +369,22 @@ impl Default for Value {
     }
 }
 
-impl Default for Fast {
-    fn default() -> Self {
+impl Fast {
+    /// A rollout bot that folds with the given strength (0 = never), like
+    /// [`Value::new`].
+    pub fn new(defense: f64) -> Self {
         Fast(Brain {
             metric: Metric::FaanQuick,
             shortlist: 5,
-            defense: 0.0,
+            defense,
             claims: true,
         })
+    }
+}
+
+impl Default for Fast {
+    fn default() -> Self {
+        Fast::new(0.0)
     }
 }
 

@@ -128,8 +128,13 @@ def hints(sid: str, ms: int = 2000, samples: int = 800) -> dict[str, Any]:
         raise HTTPException(400, "not your decision")
     state = s.snapshot()
     a = analyze(state, samples=samples, candidates=6, time_ms=ms, seed=len(s.actions))
+    # The solver's pick first (the best average only if it beats the heuristic's
+    # move by more than two standard errors of the paired difference), then the
+    # rest by average.
+    a["moves"].sort(key=lambda m: m["action"] != a["choice"])
     for m in a["moves"]:
         m["label"] = action_chinese(m["action"])
+        m["recommended"] = m["action"] == a["choice"]
     out: dict[str, Any] = {
         "solver": a,
         "danger": danger(state, s.human),

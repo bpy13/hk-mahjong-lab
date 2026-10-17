@@ -11,8 +11,9 @@
 //!   PIMC must beat; rollouts use the `fast` bot or (`rollout=net`) the network
 //!   in every seat.
 
-use crate::bots::{Bot, Fast};
+use crate::bots::Bot;
 use crate::net::{top_actions, Mlp, NetPolicy};
+use crate::pimc::Rollout;
 use crate::pimc::{pimc, pimc_with, PimcConfig};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
@@ -171,7 +172,13 @@ impl Policy<State> for Agent {
                 let a = if *net_rollouts {
                     pimc_with(state, &config, candidates, baseline, net)
                 } else {
-                    pimc_with(state, &config, candidates, baseline, &Fast::default())
+                    pimc_with(
+                        state,
+                        &config,
+                        candidates,
+                        baseline,
+                        &Rollout::for_seat(state.current_player().expect("to act")),
+                    )
                 };
                 a.choose(config.z)
             }

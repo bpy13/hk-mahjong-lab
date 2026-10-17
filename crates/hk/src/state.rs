@@ -526,6 +526,13 @@ impl State {
         score_win(&c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.meets_minimum(&self.rules))
     }
 
+    /// Whether `seat` could legally win on `tile` if another player discarded it
+    /// now (complete, and meeting the minimum, §6). For analysis: it reads `seat`'s
+    /// concealed tiles, so callers must not use it to decide for another seat.
+    pub fn wins_on(&self, seat: usize, tile: Tile) -> bool {
+        self.claim_win_score(seat, tile).is_some()
+    }
+
     /// The score of a self-drawn win for the player to move, if legal now.
     pub fn self_drawn_score(&self) -> Option<Score> {
         if self.phase != Phase::Turn || !self.drew {

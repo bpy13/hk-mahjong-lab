@@ -108,7 +108,7 @@ class Session:
                 continue
             a = analyze(d.state, samples=samples, candidates=8, seed=i)
             moves = {m["action"]: m for m in a["moves"]}
-            best = a["moves"][0]
+            best = moves[a["choice"]]
             chosen = moves.get(d.action)
             out.append(
                 {
@@ -118,7 +118,8 @@ class Session:
                     "chosen": d.action,
                     "best": best,
                     "chosen_stats": chosen,
-                    "loss": best["mean"] - chosen["mean"] if chosen else None,
+                    # Paired difference: both moves were played on the same samples.
+                    "loss": best["diff"] - chosen["diff"] if chosen else None,
                 }
             )
         self.review = out
