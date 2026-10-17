@@ -1,0 +1,16 @@
+[package]
+name = "mahjong-search"
+description = "Bots, a deal-in danger model and Monte Carlo solvers for Hong Kong mahjong."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mahjong-tiles.workspace = true
+mahjong-games.workspace = true
+mahjong-hk.workspace = true
+mahjong-analysis.workspace = true
+rand.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+rayon.workspace = true

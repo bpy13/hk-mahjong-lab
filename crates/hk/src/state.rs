@@ -1065,6 +1065,9 @@ impl Game for State {
             pool.extend(s.hands[seat].tiles());
             s.hands[seat] = TileCounts::new();
         }
+        // Sorting first makes the result depend only on what the observer knows
+        // (the multiset of hidden tiles), not on how they were really arranged.
+        pool.sort();
         pool.shuffle(rng);
         // Bonus tiles cannot be in a hand: deal playing tiles to the hands first.
         let (mut playing, bonus): (Vec<Tile>, Vec<Tile>) =
