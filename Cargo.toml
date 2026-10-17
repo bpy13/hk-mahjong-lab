@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tiles", "crates/games", "crates/hk", "crates/pybind"]
+members = ["crates/tiles", "crates/games", "crates/hk", "crates/analysis", "crates/search", "crates/pybind"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,8 +10,11 @@ edition = "2021"
 mahjong-tiles = { path = "crates/tiles" }
 mahjong-games = { path = "crates/games" }
 mahjong-hk = { path = "crates/hk" }
+mahjong-analysis = { path = "crates/analysis" }
+mahjong-search = { path = "crates/search" }
 rand = { version = "0.8", features = ["small_rng"] }
 proptest = "1.5"
+rayon = "1.10"
 criterion = { version = "0.5", default-features = false }
 
 [profile.release]

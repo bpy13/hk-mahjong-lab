@@ -1,0 +1,12 @@
+[package]
+name = "mahjong-analysis"
+description = "Hand mathematics: shanten, faan-aware shanten under Hong Kong rules, tile acceptance."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mahjong-tiles.workspace = true
+mahjong-hk.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
