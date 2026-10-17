@@ -1,7 +1,8 @@
 //! Agents chosen by a spec string, and duplicate tournaments between them.
 //!
 //! Spec strings: a bot name (`random`, `efficiency`, `value`, `defensive`,
-//! `fast`), or `pimc` with options, e.g. `pimc:samples=64,candidates=4,ms=300`.
+//! `fast`), or `pimc` with options, e.g. `pimc:samples=64,candidates=4,ms=300,z=1.0`
+//! (see [`crate::pimc::Analysis::choose`] for `z`).
 
 use crate::bots::Bot;
 use crate::pimc::{pimc, PimcConfig};
@@ -34,6 +35,10 @@ impl Agent {
                 let (k, v) = kv
                     .split_once('=')
                     .ok_or_else(|| format!("bad option {kv:?}"))?;
+                if k == "z" {
+                    c.z = v.parse().map_err(|_| format!("bad number in {kv:?}"))?;
+                    continue;
+                }
                 let n: u64 = v.parse().map_err(|_| format!("bad number in {kv:?}"))?;
                 match k {
                     "samples" => c.samples = n as usize,
@@ -66,7 +71,7 @@ impl Policy<State> for Agent {
                     seed: rng.gen(),
                     ..c.clone()
                 };
-                pimc(state, &config).best()
+                pimc(state, &config).choose(config.z)
             }
         }
     }

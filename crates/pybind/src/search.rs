@@ -59,6 +59,7 @@ pub(crate) fn analyze<'py>(
         candidates,
         time_limit: time_ms.map(Duration::from_millis),
         seed,
+        ..PimcConfig::default()
     };
     let s = state.inner.clone();
     let a = py.detach(move || pimc(&s, &config));
@@ -66,6 +67,8 @@ pub(crate) fn analyze<'py>(
     d.set_item("seat", a.seat)?;
     d.set_item("samples", a.samples)?;
     d.set_item("elapsed_ms", a.elapsed.as_secs_f64() * 1000.0)?;
+    d.set_item("baseline", a.baseline.code())?;
+    d.set_item("choice", a.choose(PimcConfig::default().z).code())?;
     let moves = PyList::empty(py);
     for m in &a.moves {
         let md = PyDict::new(py);
@@ -77,6 +80,8 @@ pub(crate) fn analyze<'py>(
         md.set_item("win_rate", m.win_rate)?;
         md.set_item("deal_in_rate", m.deal_in_rate)?;
         md.set_item("draw_rate", m.draw_rate)?;
+        md.set_item("diff", m.diff)?;
+        md.set_item("diff_se", m.diff_se)?;
         moves.append(md)?;
     }
     d.set_item("moves", moves)?;
