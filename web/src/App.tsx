@@ -10,6 +10,7 @@ import { River, SeatEdge } from './components/Seat'
 import type { QuizFeedback, StudyMode } from './components/StudyPanel'
 import { StudyPanel } from './components/StudyPanel'
 import { Tile } from './components/Tile'
+import { Wall } from './components/Wall'
 import { PASS, WINDS, isDiscard, relativeSeat, tileName } from './tiles'
 
 const params = new URLSearchParams(window.location.search)
@@ -171,6 +172,9 @@ export default function App() {
         </span>
         <span className="header-buttons">
           {view.result && !showResult && <button onClick={() => setShowResult(true)}>結果</button>}
+          <a className="button" href="#tiles" target="_blank" rel="noreferrer">
+            牌樣
+          </a>
           <button onClick={() => setDialog(true)}>新局</button>
         </span>
       </header>
@@ -195,9 +199,7 @@ export default function App() {
             <River key={`r${s}`} obs={obs} seat={s} position={relativeSeat(s, view.human) as Position} />
           ))}
           <div className="center">
-            <div>
-              餘牌 <strong data-testid="wall">{obs.wall_remaining}</strong>
-            </div>
+            <Wall left={obs.wall_remaining} />
             {claim && (
               <div className="claim">
                 {WINDS[claim[1]]}家{obs.phase === 'rob' ? '槓' : '打出'}
