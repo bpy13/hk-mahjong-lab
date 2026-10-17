@@ -11,6 +11,7 @@ import type { QuizFeedback, StudyMode } from './components/StudyPanel'
 import { StudyPanel } from './components/StudyPanel'
 import { Tile } from './components/Tile'
 import { Wall } from './components/Wall'
+import { THEME_LABEL, useTheme, useTileScale } from './theme'
 import { PASS, WINDS, isDiscard, relativeSeat, tileName } from './tiles'
 
 const params = new URLSearchParams(window.location.search)
@@ -42,6 +43,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [showResult, setShowResult] = useState(true)
   const hintKey = useRef('')
+  const [theme, cycleTheme] = useTheme()
+  useTileScale()
 
   useEffect(() => {
     api.meta().then(setMeta).catch((e) => setError(String(e)))
@@ -165,22 +168,25 @@ export default function App() {
   const claim = obs.claim
   return (
     <div className="app">
-      <header>
-        <h1>香港麻雀</h1>
-        <span className="muted">
-          {WINDS[view.rules.prevailing_wind]}圈 · 起糊 {view.rules.min_faan} 番 · 你坐{WINDS[view.human]}
-        </span>
-        <span className="header-buttons">
-          {view.result && !showResult && <button onClick={() => setShowResult(true)}>結果</button>}
-          <a className="button" href="#tiles" target="_blank" rel="noreferrer">
-            牌樣
-          </a>
-          <button onClick={() => setDialog(true)}>新局</button>
-        </span>
-      </header>
       {error && <div className="error">{error}</div>}
       <main className="layout">
         <section className="table">
+          <header className="table-head">
+            <h1>香港麻雀</h1>
+            <span className="info">
+              {WINDS[view.rules.prevailing_wind]}圈 · 起糊 {view.rules.min_faan} 番 · 你坐{WINDS[view.human]}
+            </span>
+            <span className="header-buttons">
+              {view.result && !showResult && <button onClick={() => setShowResult(true)}>結果</button>}
+              <a className="button" href="#tiles" target="_blank" rel="noreferrer">
+                牌樣
+              </a>
+              <button onClick={cycleTheme} title="切換深淺色">
+                {THEME_LABEL[theme]}
+              </button>
+              <button onClick={() => setDialog(true)}>新局</button>
+            </span>
+          </header>
           {[0, 1, 2, 3].map((s) => {
             const pos = relativeSeat(s, view.human) as Position
             return (

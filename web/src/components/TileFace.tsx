@@ -220,8 +220,8 @@ function Bonus({ k }: { k: number }) {
   }
   return (
     <g>
-      {picture}
-      <text x="3.5" y="15" fontSize="15" fill={numberColour} fontWeight="700" fontFamily={SERIF}>
+      <g transform="translate(6.5 9) scale(0.75)">{picture}</g>
+      <text x="3" y="19" fontSize="20" fill={numberColour} fontWeight="700" fontFamily={SERIF}>
         {n}
       </text>
     </g>
