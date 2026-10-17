@@ -50,14 +50,25 @@ whenever it says "complete", the engine's scorer agrees the hand can be declared
 
 ## 3. Danger model (`crates/search/src/danger.rs`)
 
-A documented heuristic over public information. Each opponent gets a **threat**
-(the chance they are waiting) from their exposed melds, whether those melds
-already carry faan, and how far the wall has run. Each tile gets a weight for how
-likely a waiting opponent is to want it: zero if no copies are unseen, low for an
-honour with one copy left, lower for terminals than middle tiles, reduced for a
-tile the opponent discarded (Hong Kong has no furiten, so not zero), and strongly
-shaped by a visible flush. Bots use it to fold and to break ties; study mode shows
-it. Phase 3 trains a learned replacement.
+Fitted to simulated games, from public information only. For each opponent a
+**threat**, the chance they are already waiting on a tile that gives a *legal*
+win (complete and at least the minimum faan), is looked up by exposed melds,
+wall progress and whether the exposed melds carry faan or lie in one suit. For
+each tile, the chance a waiting opponent wins on it is looked up by tile class
+(honour, terminal, 2/8, middle), copies unseen, whether that opponent discarded
+it (Hong Kong has no furiten), and its relation to a visible flush. A tile's
+danger is 1 − Π(1 − threat × rate) over opponents, then mapped through a
+calibration curve fitted on tiles players actually discarded (they are not a
+random sample of the unseen tiles).
+
+The tables live in `danger_tables.rs`, written by
+`cargo run --release -p mahjong-search --example fit_danger 8000` (1.6 M
+opponent-turns from games between the rule-based bots). The `danger_check`
+example measures calibration on held-out games. The first version of this model
+used hand-set weights and overstated the danger about 8× (4.3% predicted against
+0.5% observed per discard). The fitted model predicts 0.9% against 0.8%, and every
+bucket matches within its error bar. Bots use it to fold and to break ties, and
+study mode shows it (the coloured bar, with the percentage on hover).
 
 ## 4. PIMC search (`crates/search/src/pimc.rs`)
 

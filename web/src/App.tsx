@@ -44,7 +44,8 @@ export default function App() {
   const [showResult, setShowResult] = useState(true)
   const hintKey = useRef('')
   const [theme, cycleTheme] = useTheme()
-  useTileScale()
+  const tableRef = useRef<HTMLElement>(null)
+  useTileScale(tableRef, view ? `${view.id}${dialog}` : dialog)
 
   useEffect(() => {
     api.meta().then(setMeta).catch((e) => setError(String(e)))
@@ -166,11 +167,22 @@ export default function App() {
   const canDiscard = humanToAct && view.legal.some((l) => isDiscard(l.action))
   const danger = showDanger && hints ? hints.danger.tiles : undefined
   const claim = obs.claim
+  const seatEdge = (s: number, pos: Position) => (
+    <SeatEdge
+      key={`e${s}`}
+      obs={obs}
+      seat={s}
+      position={pos}
+      name={names(s)}
+      revealed={view.hands?.[s]}
+      delta={view.result?.deltas[s]}
+    />
+  )
   return (
     <div className="app">
       {error && <div className="error">{error}</div>}
       <main className="layout">
-        <section className="table">
+        <section className="table" ref={tableRef}>
           <header className="table-head">
             <h1>香港麻雀</h1>
             <span className="info">
@@ -189,17 +201,7 @@ export default function App() {
           </header>
           {[0, 1, 2, 3].map((s) => {
             const pos = relativeSeat(s, view.human) as Position
-            return (
-              <SeatEdge
-                key={`e${s}`}
-                obs={obs}
-                seat={s}
-                position={pos}
-                name={names(s)}
-                revealed={view.hands?.[s]}
-                delta={view.result?.deltas[s]}
-              />
-            )
+            return pos === 0 ? null : seatEdge(s, pos)
           })}
           {[0, 1, 2, 3].map((s) => (
             <River key={`r${s}`} obs={obs} seat={s} position={relativeSeat(s, view.human) as Position} />
@@ -211,10 +213,10 @@ export default function App() {
               {claim ? (
                 <>
                   {WINDS[claim[1]]}家{obs.phase === 'rob' ? '槓' : '打出'}
-                  <Tile tile={claim[0]} size="md" highlight />
+                  <Tile tile={claim[0]} size="sm" highlight />
                 </>
               ) : (
-                <Tile size="md" faceDown />
+                <Tile size="sm" faceDown />
               )}
             </div>
             <div className="muted thinking">
@@ -222,31 +224,38 @@ export default function App() {
             </div>
           </div>
           <div className="mine">
-            <div className="my-melds">
-              {obs.melds[view.human].map((m, i) => (
-                <span key={i} className="meld">
-                  {m.tiles.map((t, j) => (
-                    <Tile key={j} tile={t} size="md" faceDown={m.concealed && (j === 0 || j === 3)} />
+            <div className="mine-row">
+              {seatEdge(view.human, 0)}
+              <div className="hand-row">
+                <Hand
+                  hand={obs.hand}
+                  lastDrawn={obs.last_drawn}
+                  canDiscard={canDiscard}
+                  selected={selected}
+                  onSelect={onSelect}
+                  danger={danger}
+                />
+                <div className="my-melds">
+                  {obs.melds[view.human].map((m, i) => (
+                    <span key={i} className="meld">
+                      {m.tiles.map((t, j) => (
+                        <Tile key={j} tile={t} size="md" faceDown={m.concealed && (j === 0 || j === 3)} />
+                      ))}
+                    </span>
                   ))}
-                </span>
-              ))}
+                </div>
+              </div>
             </div>
-            <Hand
-              hand={obs.hand}
-              lastDrawn={obs.last_drawn}
-              canDiscard={canDiscard}
-              selected={selected}
-              onSelect={onSelect}
-              danger={danger}
-            />
-            <div className="prompt" data-testid={humanToAct ? 'prompt' : undefined}>
-              {!humanToAct && '\u00a0'}
-              {humanToAct && obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
-              {humanToAct && obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
-              {humanToAct && obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
-            </div>
-            <div className="action-slot">
-              {humanToAct && <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />}
+            <div className="act-row">
+              <div className="prompt" data-testid={humanToAct ? 'prompt' : undefined}>
+                {!humanToAct && '\u00a0'}
+                {humanToAct && obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
+                {humanToAct && obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
+                {humanToAct && obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
+              </div>
+              <div className="action-slot">
+                {humanToAct && <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />}
+              </div>
             </div>
           </div>
         </section>
