@@ -985,6 +985,76 @@ impl State {
     }
 }
 
+impl State {
+    /// Everything hidden from `observer`, sorted (the other concealed hands and
+    /// the undrawn wall, which may contain bonus tiles), and each seat's number
+    /// of concealed tiles (0 for the observer). Sorting makes anything built from
+    /// it depend only on what the observer knows, not on the real arrangement.
+    pub fn hidden_pool(&self, observer: usize) -> (Vec<Tile>, [usize; 4]) {
+        let mut pool: Vec<Tile> = self.wall().to_vec();
+        let mut sizes = [0usize; 4];
+        for seat in (0..4).filter(|&p| p != observer) {
+            sizes[seat] = self.hands[seat].total();
+            pool.extend(self.hands[seat].tiles());
+        }
+        pool.sort();
+        (pool, sizes)
+    }
+
+    /// A copy in which the tiles hidden from `observer` are re-dealt: the other
+    /// seats get `hands` (the observer's entry is ignored) and the undrawn wall
+    /// becomes `wall`, in draw order. Other seats' pending claim declarations are
+    /// forgotten and asked again, as their options may have changed.
+    ///
+    /// # Panics
+    /// Panics unless the hands have the right sizes and, together with `wall`,
+    /// contain exactly the tiles of [`State::hidden_pool`].
+    pub fn redeal(&self, observer: usize, hands: &[TileCounts; 4], wall: Vec<Tile>) -> State {
+        let (pool, sizes) = self.hidden_pool(observer);
+        let mut given = wall.clone();
+        for seat in (0..4).filter(|&p| p != observer) {
+            assert_eq!(hands[seat].total(), sizes[seat], "seat {seat} hand size");
+            given.extend(hands[seat].tiles());
+        }
+        given.sort();
+        assert_eq!(given, pool, "redeal must use exactly the hidden tiles");
+        let mut s = self.clone();
+        for seat in (0..4).filter(|&p| p != observer) {
+            s.hands[seat] = hands[seat];
+        }
+        let start = s.front as usize;
+        s.wall[start..s.back as usize].copy_from_slice(&wall);
+        // The player to move's last draw is only known to them.
+        if s.current as usize != observer {
+            s.last_drawn = None;
+        }
+        if let Some(mut w) = s.window {
+            let from = w.from as usize;
+            let mut pending = 0u8;
+            for seat in (0..4).filter(|&p| p != from) {
+                if seat == observer && w.pending & (1 << seat) == 0 {
+                    continue; // the observer's own declaration is kept
+                }
+                w.declared[seat] = None;
+                s.window = Some(w);
+                if s.has_window_options(seat) {
+                    pending |= 1 << seat;
+                }
+            }
+            w.pending = pending;
+            s.window = Some(w);
+            if pending == 0 {
+                s.resolve_window();
+            } else if pending & (1 << observer) != 0 {
+                s.current = observer as u8;
+            } else {
+                s.current = Self::first_pending(pending, from) as u8;
+            }
+        }
+        s
+    }
+}
+
 impl Game for State {
     type Action = Action;
 
@@ -1052,66 +1122,24 @@ impl Game for State {
     }
 
     fn determinize<R: Rng + ?Sized>(&self, observer: Player, rng: &mut R) -> State {
-        let mut s = self.clone();
-        if s.phase == Phase::Over {
-            return s;
+        if self.phase == Phase::Over {
+            return self.clone();
         }
-        // Pool everything hidden from the observer: the other concealed hands and
-        // the undrawn wall (which may contain bonus tiles).
-        let mut pool: Vec<Tile> = s.wall().to_vec();
-        let mut sizes = [0usize; 4];
-        for seat in (0..4).filter(|&p| p != observer) {
-            sizes[seat] = s.hands[seat].total();
-            pool.extend(s.hands[seat].tiles());
-            s.hands[seat] = TileCounts::new();
-        }
-        // Sorting first makes the result depend only on what the observer knows
-        // (the multiset of hidden tiles), not on how they were really arranged.
-        pool.sort();
+        let (mut pool, sizes) = self.hidden_pool(observer);
         pool.shuffle(rng);
         // Bonus tiles cannot be in a hand: deal playing tiles to the hands first.
         let (mut playing, bonus): (Vec<Tile>, Vec<Tile>) =
             pool.into_iter().partition(|t| !t.is_bonus());
+        let mut hands = [TileCounts::new(); 4];
         for seat in (0..4).filter(|&p| p != observer) {
             for _ in 0..sizes[seat] {
-                s.hands[seat].add(playing.pop().expect("enough hidden tiles"));
+                hands[seat].add(playing.pop().expect("enough hidden tiles"));
             }
         }
-        let mut wall_rest = playing;
-        wall_rest.extend(bonus);
-        wall_rest.shuffle(rng);
-        let start = s.front as usize;
-        s.wall[start..s.back as usize].copy_from_slice(&wall_rest);
-        // The player to move's last draw is only known to them.
-        if s.current as usize != observer {
-            s.last_drawn = None;
-        }
-        // Other seats' pending declarations are hidden: forget them and ask again
-        // (their options may differ with the re-dealt hands).
-        if let Some(mut w) = s.window {
-            let from = w.from as usize;
-            let mut pending = 0u8;
-            for seat in (0..4).filter(|&p| p != from) {
-                if seat == observer && w.pending & (1 << seat) == 0 {
-                    continue; // the observer's own declaration is kept
-                }
-                w.declared[seat] = None;
-                s.window = Some(w);
-                if s.has_window_options(seat) {
-                    pending |= 1 << seat;
-                }
-            }
-            w.pending = pending;
-            s.window = Some(w);
-            if pending == 0 {
-                s.resolve_window();
-            } else if pending & (1 << observer) != 0 {
-                s.current = observer as u8;
-            } else {
-                s.current = Self::first_pending(pending, from) as u8;
-            }
-        }
-        s
+        let mut wall = playing;
+        wall.extend(bonus);
+        wall.shuffle(rng);
+        self.redeal(observer, &hands, wall)
     }
 }
 
