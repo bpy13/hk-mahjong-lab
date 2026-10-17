@@ -76,9 +76,11 @@ button.primary, button.on { background: var(--felt); color: white; border-color:
 .edge { color: var(--on-felt); padding: 6px; border-radius: 8px; display: flex; gap: 8px; }
 .edge.acting { box-shadow: 0 0 0 2px var(--accent); }
 .edge.pos-0 { grid-area: bot; justify-self: center; align-items: center; }
-.edge.pos-2 { grid-area: top; justify-content: center; align-items: center; }
-.edge.pos-1 { grid-area: right; flex-direction: column; align-items: center; min-height: 0; }
-.edge.pos-3 { grid-area: left; flex-direction: column; align-items: center; min-height: 0; }
+.edge.pos-2 { grid-area: top; justify-content: center; align-items: center; height: calc(52px * var(--s, 1)); }
+/* Side seats: fixed width (room for two columns of tiles), tiles from the top. */
+.edge.pos-1 { grid-area: right; flex-direction: column; align-items: center; min-height: 0; width: calc(92px * var(--s, 1)); }
+.edge.pos-3 { grid-area: left; flex-direction: column; align-items: center; min-height: 0; width: calc(92px * var(--s, 1)); }
+.edge.pos-1 .edge-tiles, .edge.pos-3 .edge-tiles { align-content: center; }
 .edge-tiles { display: flex; gap: 8px; align-items: center; }
 .edge.pos-1 .edge-tiles, .edge.pos-3 .edge-tiles { flex-direction: column; flex-wrap: wrap; min-height: 0; }
 .edge.pos-1 .tiles, .edge.pos-3 .tiles, .edge.pos-1 .meld, .edge.pos-3 .meld { flex-direction: column; }
@@ -94,14 +96,18 @@ button.primary, button.on { background: var(--felt); color: white; border-color:
 .tiles, .meld { display: inline-flex; gap: 1px; }
 /* Discards lie out on the table, in front of each seat, facing the centre. */
 .river { display: flex; flex-wrap: wrap; gap: 2px; align-content: flex-start; }
-.river-0 { grid-area: rbot; max-width: calc(230px * var(--s, 1)); justify-self: center; min-height: calc(76px * var(--s, 1)); align-content: flex-end; flex-wrap: wrap-reverse; }
-.river-2 { grid-area: rtop; max-width: calc(230px * var(--s, 1)); justify-self: center; min-height: calc(76px * var(--s, 1)); }
+/* Every river is a fixed box (four rows or columns of tiles), so the table never re-flows. */
+.river-0, .river-2 { width: calc(250px * var(--s, 1)); height: calc(150px * var(--s, 1)); justify-self: center; overflow: hidden; }
+.river-0 { grid-area: rbot; flex-wrap: wrap-reverse; align-content: flex-start; }
+.river-2 { grid-area: rtop; flex-wrap: wrap; align-content: flex-start; direction: rtl; }
 /* Side rivers: sideways tiles in columns of six; new columns toward the centre. */
-.river-1, .river-3 { display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); gap: 2px; align-self: center; align-content: start; }
+.river-1, .river-3 { display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); gap: 2px; align-self: center; align-content: center; justify-content: start; width: calc(150px * var(--s, 1)); height: calc(230px * var(--s, 1)); overflow: hidden; }
 .river-1 { grid-area: rright; direction: rtl; }
 .river-3 { grid-area: rleft; }
-.center { grid-area: center; align-self: center; justify-self: center; color: var(--on-felt); text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.center { grid-area: center; align-self: center; justify-self: center; color: var(--on-felt); text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: flex-start; }
 .claim { display: flex; align-items: center; gap: 8px; font-size: 18px; }
+.claim.empty { visibility: hidden; }
+.thinking { min-height: 1.3em; color: var(--on-felt); opacity: 0.75; }
 
 .tile { display: inline-flex; flex-direction: column; align-items: stretch; position: relative; line-height: 0; }
 .tile.clickable { cursor: pointer; }
@@ -112,10 +118,12 @@ button.primary, button.on { background: var(--felt); color: white; border-color:
 .danger-bar { height: 4px; border-radius: 2px; margin-top: 2px; }
 
 .mine { grid-area: mine; color: var(--on-felt); padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
-.my-melds { display: flex; gap: 10px; min-height: 10px; }
-.hand { display: flex; gap: 2px; align-items: flex-end; }
+.my-melds { display: flex; gap: 10px; height: calc(48px * var(--s, 1)); width: calc(690px * var(--s, 1)); justify-content: flex-start; }
+.hand { display: flex; gap: 2px; align-items: flex-start; width: calc(690px * var(--s, 1)); }
 .hand .drawn { margin-left: 14px; }
-.prompt { font-size: 16px; }
+.drawn-slot { display: inline-block; width: calc(46px * var(--s, 1)); }
+.prompt { font-size: 16px; min-height: 1.4em; }
+.action-slot { min-height: 38px; }
 .action-bar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .action-bar .act { font-size: 16px; min-width: 64px; }
 .action-bar .act-104, .action-bar .act-34 { background: #b3261e; color: white; border-color: #b3261e; }
@@ -159,7 +167,7 @@ th:first-child, td:first-child { text-align: left; }
 
 /* The wall: tiles left to draw, face down. */
 .wall { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.wall-tiles { display: grid; grid-template-columns: repeat(15, auto); gap: 1px; }
+.wall-tiles { display: grid; grid-template-columns: repeat(15, auto); gap: 1px; align-content: start; height: calc(7 * (17px * var(--s, 1) + 1px)); }
 .wall-count { font-size: 12px; opacity: 0.8; }
 a.button { font: inherit; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper); color: var(--ink); text-decoration: none; }
 

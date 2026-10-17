@@ -18,10 +18,12 @@ interface Props {
   rotate?: 0 | 90 | -90
   onClick?: () => void
   testId?: string
+  /** Keep the danger bar's space even when no danger is shown. */
+  reserveDanger?: boolean
 }
 
 /** One tile, drawn as SVG so it scales cleanly. */
-export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, danger, rotate = 0, onClick, testId }: Props) {
+export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, danger, rotate = 0, onClick, testId, reserveDanger }: Props) {
   const [w, h] = SIZES[size]
   const name = faceDown || tile === undefined ? '牌背' : tileName(tile)
   const label = danger !== undefined ? `${name}（危險度 ${(danger * 100).toFixed(1)}%）` : name
@@ -55,6 +57,7 @@ export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, da
         {!faceDown && tile !== undefined && <TileFace t={tile} />}
         </g>
       </svg>
+      {danger === undefined && reserveDanger && <span className="danger-bar" />}
       {danger !== undefined && (
         <span className="danger-bar" style={{ width: `${Math.round(Math.min(1, danger / 0.15) * 100)}%`, background: dangerColour(danger) }} />
       )}
