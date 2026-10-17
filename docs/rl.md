@@ -1,8 +1,9 @@
 # Reinforcement learning
 
 Phase 3 trains networks to play Hong Kong mahjong and compares them with the
-Phase 1 bots and solver. Results are in
-[study-results/phase3-rl.md](study-results/phase3-rl.md). Code:
+Phase 1 bots and solver. **Status:** the method and code are in place; the full
+training run has not been completed yet (an earlier run was discarded after a
+rule change). Code:
 `crates/search/src/features.rs` (observation encoding), `crates/search/src/net.rs`
 (running networks in Rust), `crates/pybind/src/rl.rs` (batched environments,
 teacher data) and `python/mahjong/rl/` (training).

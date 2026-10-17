@@ -111,7 +111,8 @@ fn random_hands_respect_the_invariants() {
         }
         for w in &r.wins {
             wins += 1;
-            assert!(w.score.faan >= rules.min_faan.min(rules.faan_cap));
+            assert!(w.score.meets_minimum(&rules));
+            assert!(w.score.faan >= w.score.qualifying);
             assert!(w.score.faan <= rules.faan_cap);
             if let Some(l) = w.liable {
                 liability += 1;

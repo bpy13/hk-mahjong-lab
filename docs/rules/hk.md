@@ -138,10 +138,13 @@ A complete hand has 14 tiles (each kong counted as 3) in one of these two forms:
 Other forms such as seven pairs do not exist under these rules.
 
 A complete hand may be declared a win only if it scores **at least 3 faan**
-*(default; variant `min_faan`)*. Flower faan count toward the minimum.
+*(default; variant `min_faan`)* **without counting bonus-tile faan** (#3 無花,
+#4 正花, #5 一台花), or is a limit hand. Bonus-tile faan are added afterwards, to
+the faan that are paid. For example, a hand worth 2 faan with two seat flowers
+cannot win, while a hand worth 3 faan with two seat flowers wins with 5.
 
-When a hand can be split into melds in more than one way, the split that scores the
-most faan is used.
+When a hand can be split into melds in more than one way, the split with the most
+faan toward the minimum is used (then the most faan paid).
 
 ## 7. Faan table
 
@@ -211,7 +214,7 @@ do require a complete hand).
 | Hand and situation | Faan |
 |---|---|
 | `123p 456p 789p RRR NN`, self-drawn, concealed, no flowers, South seat | 混一色 3 + 中 1 + 自摸 1 + 門前清 1 + 無花 1 = **7** |
-| `234m 567m 345p 678s 99s`, won on a discard, `234m` was a claimed chow, holds F2 as South seat | 平糊 1 + 正花 1 = **2**: cannot win |
+| `234m 567m 345p 678s 99s`, won on a discard, `234m` was a claimed chow, holds F2 as South seat | 平糊 1 + 正花 1 = **2**: cannot win (and could not even with more flowers: only 平糊 counts toward the minimum) |
 | `EEE 111m 999p GGG 11s`, East seat, East round, discard win, exposed `GGG`, no flowers | 對對糊 3 + 混么九 1 + 門風 1 + 圈風 1 + 發 1 + 無花 1 = **8** |
 | `GGG WhWhWh 111s 22s` with an exposed `RRR`, self-drawn, no flowers | 大三元 8 + 混一色 3 + 對對糊 3 + 自摸 1 + 無花 1 = 16 → capped at **10**. (Fully concealed, it would be 坎坎糊, a limit hand, anyway.) |
 

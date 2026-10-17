@@ -8,6 +8,11 @@ minimum, 10-faan limit, half-spicy, flowers on). "±" is a 95% confidence interv
 Unless stated otherwise, the candidate plays against three `value` bots (the
 reference field), so a score of 0 means "as good as `value`".
 
+> **Rule note.** These results were measured when bonus-tile faan (#3–#5) still
+> counted toward the 3-faan minimum. The rules now treat flowers as bonus only
+> (docs/rules/hk.md §6), so some numbers, especially those involving flowers
+> (§3), will shift slightly when the study is re-run.
+
 ## 1. The bot ladder
 
 1,600 hands per row (400 walls × 4 seatings).

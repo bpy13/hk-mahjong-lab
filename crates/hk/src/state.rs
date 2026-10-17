@@ -523,8 +523,7 @@ impl State {
             }
         }
         let ctx = self.win_context(seat, Some(tile), false);
-        score_win(&c, &self.melds[seat], &ctx, &self.rules)
-            .filter(|s| s.faan >= self.rules.min_faan)
+        score_win(&c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.meets_minimum(&self.rules))
     }
 
     /// The score of a self-drawn win for the player to move, if legal now.
@@ -538,7 +537,7 @@ impl State {
             return None;
         }
         let ctx = self.win_context(seat, self.last_drawn, true);
-        score_win(c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.faan >= self.rules.min_faan)
+        score_win(c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.meets_minimum(&self.rules))
     }
 
     /// The score `seat` would get by winning on the tile currently being claimed

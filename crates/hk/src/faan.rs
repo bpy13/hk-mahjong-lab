@@ -96,6 +96,15 @@ impl Pattern {
         self.number() >= 21
     }
 
+    /// A bonus-tile pattern (#3 無花, #4 正花, #5 一台花): added to the faan of a
+    /// winning hand but not counted toward the minimum (§6).
+    pub fn is_bonus_tile_pattern(self) -> bool {
+        matches!(
+            self,
+            Pattern::NoFlowers | Pattern::SeatFlower | Pattern::FullFlowerSet
+        )
+    }
+
     /// The Chinese name, e.g. `清一色`.
     pub fn chinese(self) -> &'static str {
         [
@@ -208,6 +217,9 @@ pub struct Score {
     pub total: u16,
     /// Faan after the cap: the number that is paid.
     pub faan: u8,
+    /// Faan without the bonus-tile patterns (#3–#5), capped: what must reach the
+    /// minimum to win (§6). Flowers only add to a hand that already qualifies.
+    pub qualifying: u8,
     /// Whether this is a limit hand.
     pub limit: bool,
 }
@@ -219,18 +231,31 @@ impl Score {
             patterns: patterns.into_iter().map(|p| (p, rules.faan_cap)).collect(),
             total: rules.faan_cap as u16,
             faan: rules.faan_cap,
+            qualifying: rules.faan_cap,
             limit: true,
         }
     }
 
     fn from_patterns(patterns: Vec<(Pattern, u8)>, rules: &RuleSet) -> Score {
         let total: u16 = patterns.iter().map(|&(_, f)| f as u16).sum();
+        let qualifying: u16 = patterns
+            .iter()
+            .filter(|(p, _)| !p.is_bonus_tile_pattern())
+            .map(|&(_, f)| f as u16)
+            .sum();
         Score {
             patterns,
             total,
             faan: total.min(rules.faan_cap as u16) as u8,
+            qualifying: qualifying.min(rules.faan_cap as u16) as u8,
             limit: false,
         }
+    }
+
+    /// Whether the hand may be declared a win: a limit hand, or at least the
+    /// minimum faan without counting bonus tiles (§6).
+    pub fn meets_minimum(&self, rules: &RuleSet) -> bool {
+        self.limit || self.qualifying >= rules.min_faan
     }
 
     /// Whether `pattern` is among the patterns that count.
@@ -238,8 +263,8 @@ impl Score {
         self.patterns.iter().any(|&(p, _)| p == pattern)
     }
 
-    fn key(&self) -> (u8, u16) {
-        (self.faan, self.total)
+    fn key(&self) -> (u8, u8, u16) {
+        (self.qualifying, self.faan, self.total)
     }
 }
 
