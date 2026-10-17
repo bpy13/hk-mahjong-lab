@@ -43,3 +43,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# PyTorch's distributions and autograd are not fully typed.
+module = "mahjong.rl.*"
+disallow_untyped_calls = false

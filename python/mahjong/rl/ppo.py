@@ -40,10 +40,10 @@ def sampler(net: Net, keep: float, rng: np.random.Generator) -> Chooser:
         dist = torch.distributions.Categorical(logits=logits)
         a = dist.sample()
         logp = dist.log_prob(a)
-        extra = [
+        extra: list[tuple[float, ...]] = [
             (float(lp), float(val), float(k)) for lp, val, k in zip(logp, v, kept, strict=True)
         ]
-        return a.numpy(), extra
+        return np.asarray(a.numpy()), extra
 
     return choose
 
@@ -70,7 +70,7 @@ def ppo(
     net = Net.load(init) if init else Net()
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     env = HkVecEnv(envs, seed + 7)
-    pending: dict[int, list] = defaultdict(list)
+    pending: dict[int, list[Any]] = defaultdict(list)
     history: list[dict[str, Any]] = []
     start = time.time()
     it = 0
