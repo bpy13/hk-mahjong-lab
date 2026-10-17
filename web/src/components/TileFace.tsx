@@ -10,7 +10,7 @@ const RED = '#b3261e'
 const INK = '#1b2a5c'
 const SERIF = "'Noto Serif TC', 'Songti TC', serif"
 
-type Spot = [x: number, y: number, colour: string]
+type Spot = [x: number, y: number, colour: string, angle?: number]
 
 /** Circle centres and colours for 1–9 dots; the radius is per count. */
 export const DOTS: { r: number; spots: Spot[] }[] = [
@@ -68,10 +68,11 @@ export const STICKS: { h: number; spots: Spot[] }[] = [
     ],
   },
   {
-    h: 16,
+    // An M over a W: outer sticks upright, inner ones leaning.
+    h: 15,
     spots: [
-      [8, 14, GREEN], [14, 14, GREEN], [22, 14, GREEN], [28, 14, GREEN],
-      [8, 34, BLUE], [14, 34, BLUE], [22, 34, BLUE], [28, 34, BLUE],
+      [7, 14, GREEN], [14.5, 14, GREEN, -20], [21.5, 14, GREEN, 20], [29, 14, GREEN],
+      [7, 34, GREEN], [14.5, 34, GREEN, 20], [21.5, 34, GREEN, -20], [29, 34, GREEN],
     ],
   },
   {
@@ -95,9 +96,9 @@ function Dot({ x, y, r, colour }: { x: number; y: number; r: number; colour: str
   )
 }
 
-function Stick({ x, y, h, colour }: { x: number; y: number; h: number; colour: string }) {
+function Stick({ x, y, h, colour, angle = 0 }: { x: number; y: number; h: number; colour: string; angle?: number }) {
   return (
-    <g>
+    <g transform={angle ? `rotate(${angle} ${x} ${y})` : undefined}>
       <rect x={x - 2} y={y - h / 2} width="4" height={h} rx="2" fill={colour} />
       <line x1={x - 2} x2={x + 2} y1={y} y2={y} stroke="#fbf7ec" strokeWidth="1" />
       <line x1={x} x2={x} y1={y - h / 2 + 2} y2={y + h / 2 - 2} stroke="#fbf7ec" strokeWidth="0.6" opacity="0.6" />
@@ -220,7 +221,7 @@ function Bonus({ k }: { k: number }) {
   return (
     <g>
       {picture}
-      <text x="5" y="11" fontSize="9" fill={numberColour} fontWeight="700" fontFamily={SERIF}>
+      <text x="3.5" y="15" fontSize="15" fill={numberColour} fontWeight="700" fontFamily={SERIF}>
         {n}
       </text>
     </g>
@@ -256,8 +257,8 @@ export function TileFace({ t }: { t: number }) {
     const { h, spots } = STICKS[t - 18]
     return (
       <g>
-        {spots.map(([x, y, c], i) => (
-          <Stick key={i} x={x} y={y} h={h} colour={c} />
+        {spots.map(([x, y, c, angle], i) => (
+          <Stick key={i} x={x} y={y} h={h} colour={c} angle={angle} />
         ))}
       </g>
     )

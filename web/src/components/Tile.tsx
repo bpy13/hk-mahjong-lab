@@ -1,9 +1,9 @@
 import { tileName } from '../tiles'
 import { TileFace } from './TileFace'
 
-export type TileSize = 'sm' | 'md' | 'lg'
+export type TileSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
-const SIZES: Record<TileSize, [number, number]> = { sm: [26, 35], md: [36, 48], lg: [46, 62] }
+const SIZES: Record<TileSize, [number, number]> = { xs: [13, 17], sm: [26, 35], md: [36, 48], lg: [46, 62], xl: [72, 96] }
 
 interface Props {
   tile?: number
