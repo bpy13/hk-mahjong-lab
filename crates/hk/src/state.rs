@@ -49,6 +49,54 @@ pub enum Action {
     Chow(Tile),
 }
 
+/// Number of distinct action codes ([`Action::code`]).
+pub const NUM_ACTION_CODES: usize = 134;
+
+impl Action {
+    /// A stable integer code, `0..134`, used by the Python bindings and as the
+    /// fixed action space for learning:
+    ///
+    /// | Codes | Action |
+    /// |---|---|
+    /// | 0–33 | `Discard(tile)` |
+    /// | 34 | `SelfDrawnWin` |
+    /// | 35–68 | `ConcealedKong(tile)` |
+    /// | 69–102 | `AddedKong(tile)` |
+    /// | 103, 104, 105, 106 | `Pass`, `Win`, `Pung`, `ClaimKong` |
+    /// | 107–133 | `Chow(lowest tile)` (suited tiles only) |
+    pub fn code(self) -> u16 {
+        let i = |t: Tile| t.index() as u16;
+        match self {
+            Action::Discard(t) => i(t),
+            Action::SelfDrawnWin => 34,
+            Action::ConcealedKong(t) => 35 + i(t),
+            Action::AddedKong(t) => 69 + i(t),
+            Action::Pass => 103,
+            Action::Win => 104,
+            Action::Pung => 105,
+            Action::ClaimKong => 106,
+            Action::Chow(t) => 107 + i(t),
+        }
+    }
+
+    /// The action with the given code, if valid.
+    pub fn from_code(code: u16) -> Option<Action> {
+        let tile = |i: u16| Tile::from_index(i as u8);
+        Some(match code {
+            0..=33 => Action::Discard(tile(code)),
+            34 => Action::SelfDrawnWin,
+            35..=68 => Action::ConcealedKong(tile(code - 35)),
+            69..=102 => Action::AddedKong(tile(code - 69)),
+            103 => Action::Pass,
+            104 => Action::Win,
+            105 => Action::Pung,
+            106 => Action::ClaimKong,
+            107..=133 => Action::Chow(tile(code - 107)),
+            _ => return None,
+        })
+    }
+}
+
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -357,6 +405,16 @@ impl State {
     /// Whether the current decision is in a claim window (after a discard).
     pub fn in_claim(&self) -> bool {
         self.phase == Phase::Claim
+    }
+
+    /// The decision phase: `"turn"`, `"claim"`, `"rob"` or `"over"`.
+    pub fn phase_name(&self) -> &'static str {
+        match self.phase {
+            Phase::Turn => "turn",
+            Phase::Claim => "claim",
+            Phase::Rob => "rob",
+            Phase::Over => "over",
+        }
     }
 
     /// Whether the current decision is whether to rob a kong.
@@ -1071,5 +1129,19 @@ impl fmt::Debug for State {
             )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_codes_round_trip() {
+        for code in 0..NUM_ACTION_CODES as u16 {
+            let a = Action::from_code(code).unwrap();
+            assert_eq!(a.code(), code);
+        }
+        assert_eq!(Action::from_code(NUM_ACTION_CODES as u16), None);
     }
 }
