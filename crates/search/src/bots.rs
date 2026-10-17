@@ -6,7 +6,8 @@
 //!   baseline that HK strategy has to beat.
 //! * [`Value`] plays for complete hands that meet the minimum (faan-aware
 //!   shanten, then acceptance, then the target's faan). It claims only when that
-//!   brings it closer. With `defense > 0` it also folds: when its hand is far from
+//!   brings it closer (or, as `closed`, never claims except to win). With
+//!   `defense > 0` it also folds: when its hand is far from
 //!   ready and an opponent looks dangerous, it discards the safest tile.
 //! * [`Fast`] is a cheaper `Value` for Monte Carlo rollouts: it shortlists
 //!   discards by plain shanten before applying the faan-aware measure.
@@ -161,6 +162,8 @@ struct Brain {
     shortlist: usize,
     /// 0 = never fold; higher = folds more readily.
     defense: f64,
+    /// Whether to claim discards for melds (wins are always claimed).
+    claims: bool,
 }
 
 impl Brain {
@@ -267,6 +270,9 @@ impl Brain {
         let Some((tile, from)) = state.claim_tile() else {
             return Action::Pass;
         };
+        if !self.claims {
+            return Action::Pass;
+        }
         let view = SeatView::of_current(state);
         let now = distance(&view, self.metric);
         let mut best = (now, Action::Pass);
@@ -330,6 +336,7 @@ impl Default for Efficiency {
             metric: Metric::Plain,
             shortlist: 0,
             defense: 0.0,
+            claims: true,
         })
     }
 }
@@ -341,6 +348,17 @@ impl Value {
             metric: Metric::Faan,
             shortlist: 0,
             defense,
+            claims: true,
+        })
+    }
+
+    /// A value bot that never claims a discard except to win (stays concealed).
+    pub fn closed() -> Self {
+        Value(Brain {
+            metric: Metric::Faan,
+            shortlist: 0,
+            defense: 0.0,
+            claims: false,
         })
     }
 }
@@ -357,6 +375,7 @@ impl Default for Fast {
             metric: Metric::FaanQuick,
             shortlist: 5,
             defense: 0.0,
+            claims: true,
         })
     }
 }
@@ -387,13 +406,15 @@ pub enum Bot {
 }
 
 impl Bot {
-    /// Builds a bot by name: `random`, `efficiency`, `value`, `defensive`, `fast`.
+    /// Builds a bot by name: `random`, `efficiency`, `value`, `defensive`,
+    /// `closed` (value, never claims melds), `fast`.
     pub fn by_name(name: &str) -> Option<Bot> {
         Some(match name {
             "random" => Bot::Random(RandomBot),
             "efficiency" => Bot::Efficiency(Efficiency::default()),
             "value" => Bot::Value(Value::default()),
             "defensive" => Bot::Value(Value::new(1.0)),
+            "closed" => Bot::Value(Value::closed()),
             "fast" => Bot::Fast(Fast::default()),
             _ => return None,
         })
