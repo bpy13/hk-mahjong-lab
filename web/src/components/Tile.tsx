@@ -1,4 +1,5 @@
-import { faceText, tileColour, tileName } from '../tiles'
+import { tileName } from '../tiles'
+import { TileFace } from './TileFace'
 
 export type TileSize = 'sm' | 'md' | 'lg'
 
@@ -22,8 +23,6 @@ interface Props {
 /** One tile, drawn as SVG so it scales cleanly. */
 export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, danger, rotate = 0, onClick, testId }: Props) {
   const [w, h] = SIZES[size]
-  const face = tile !== undefined ? faceText(tile) : { top: '', bottom: '' }
-  const colour = tile !== undefined ? tileColour(tile) : '#000'
   const label = faceDown || tile === undefined ? '牌背' : tileName(tile)
   // A sideways tile is drawn in a swapped box, so it takes up its real space.
   const turned = rotate !== 0
@@ -50,22 +49,7 @@ export function Tile({ tile, size = 'md', faceDown, selected, dim, highlight, da
           stroke={highlight ? '#e0a100' : '#7a7468'}
           strokeWidth={highlight ? 3 : 1.5}
         />
-        {!faceDown && tile === 31 && <rect x="8" y="9" width="20" height="30" rx="2" fill="none" stroke={colour} strokeWidth="2.5" />}
-        {!faceDown && tile !== 31 && face.bottom === '' && (
-          <text x="18" y="33" fontSize="22" textAnchor="middle" fill={colour} fontFamily="'Noto Serif TC', 'Songti TC', serif" fontWeight="700">
-            {face.top}
-          </text>
-        )}
-        {!faceDown && face.bottom !== '' && (
-          <>
-            <text x="18" y="22" fontSize="17" textAnchor="middle" fill={colour} fontFamily="'Noto Serif TC', 'Songti TC', serif" fontWeight="700">
-              {face.top}
-            </text>
-            <text x="18" y="41" fontSize="13" textAnchor="middle" fill={colour} fontFamily="'Noto Serif TC', 'Songti TC', serif">
-              {face.bottom}
-            </text>
-          </>
-        )}
+        {!faceDown && tile !== undefined && <TileFace t={tile} />}
         </g>
       </svg>
       {danger !== undefined && (
