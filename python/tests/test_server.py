@@ -1,7 +1,6 @@
 """The game API: a full hand against bots, hints, review."""
 
 from fastapi.testclient import TestClient
-
 from mahjong.server.app import app
 
 client = TestClient(app)
@@ -16,7 +15,9 @@ def play_to_end(gid: str, max_steps: int = 2000) -> dict:
             g = client.post(f"/api/games/{gid}/step").json()
         else:
             # The human always takes the first legal option (wins come first).
-            g = client.post(f"/api/games/{gid}/act", json={"action": g["legal"][0]["action"]}).json()
+            g = client.post(
+                f"/api/games/{gid}/act", json={"action": g["legal"][0]["action"]}
+            ).json()
     raise AssertionError("hand did not finish")
 
 
@@ -53,3 +54,24 @@ def test_errors() -> None:
 def test_meta() -> None:
     m = client.get("/api/meta").json()
     assert m["tiles"][31] == "白" and m["patterns"]["17"] == "清一色"
+
+
+def test_moving_while_hints_compute() -> None:
+    """A move submitted while the solver is still thinking must not fail
+    (requests run in a thread pool; regression for an 'Already borrowed' error)."""
+    import threading
+
+    g = client.post("/api/games", json={"level": "easy", "seat": 0, "seed": 5}).json()
+    errors: list[int] = []
+
+    def ask() -> None:
+        r = client.get(f"/api/games/{g['id']}/hints", params={"ms": 800, "samples": 4000})
+        if r.status_code not in (200, 400):
+            errors.append(r.status_code)
+
+    t = threading.Thread(target=ask)
+    t.start()
+    move = client.post(f"/api/games/{g['id']}/act", json={"action": g["legal"][-1]["action"]})
+    t.join()
+    assert move.status_code == 200
+    assert not errors

@@ -185,14 +185,28 @@ pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
 /// # Panics
 /// Panics if the hand is over.
 pub fn pimc(state: &State, config: &PimcConfig) -> Analysis {
+    let (candidates, baseline) = shortlist(state, config.candidates.max(1));
+    pimc_with(state, config, candidates, baseline, &Fast::default())
+}
+
+/// PIMC with given candidates, baseline (one of the candidates) and rollout
+/// policy; [`pimc`] uses the heuristic shortlist and the [`Fast`] bot.
+///
+/// # Panics
+/// Panics if the hand is over or `baseline` is not among `candidates`.
+pub fn pimc_with<P: Policy<State>>(
+    state: &State,
+    config: &PimcConfig,
+    candidates: Vec<Action>,
+    baseline: Action,
+    rollout: &P,
+) -> Analysis {
     let start = Instant::now();
     let seat = state.current_player().expect("hand in progress");
-    let (candidates, baseline) = shortlist(state, config.candidates.max(1));
     let base = candidates
         .iter()
         .position(|&a| a == baseline)
         .expect("baseline is a candidate");
-    let rollout = Fast::default();
     let mut samples: Vec<Vec<Sample>> = Vec::new();
     let batch = rayon::current_num_threads().max(1) * 4;
     while samples.len() < config.samples {
@@ -210,7 +224,7 @@ pub fn pimc(state: &State, config: &PimcConfig) -> Analysis {
                     .map(|&a| {
                         let mut s = world.clone();
                         s.apply(a);
-                        play_out(&mut s, &rollout, &mut rng);
+                        play_out(&mut s, rollout, &mut rng);
                         Sample::of(&s, seat)
                     })
                     .collect()

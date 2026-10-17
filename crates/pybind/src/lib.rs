@@ -11,6 +11,7 @@
 //! The friendlier Python API is in `python/mahjong/hk.py`.
 
 mod convert;
+mod rl;
 mod search;
 
 use convert::{event_dict, result_dict, rules_from, score_dict, tile_from};
@@ -311,6 +312,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(search::discard_table, m)?)?;
     m.add_function(wrap_pyfunction!(search::solo, m)?)?;
     m.add_function(wrap_pyfunction!(search::tournament, m)?)?;
+    m.add_function(wrap_pyfunction!(rl::feature_sizes, m)?)?;
+    m.add_function(wrap_pyfunction!(rl::encode_state, m)?)?;
+    m.add_function(wrap_pyfunction!(rl::teacher_data, m)?)?;
+    m.add_class::<rl::VecEnv>()?;
     m.add_class::<PyState>()?;
     Ok(())
 }

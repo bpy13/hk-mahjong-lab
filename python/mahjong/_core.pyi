@@ -88,3 +88,24 @@ def solo(
 
 def tournament(agents: list[str], deals: int, seed: int = 0, **rules: object) -> dict[str, Any]:
     """Duplicate tournament between four agent specs."""
+
+def feature_sizes() -> tuple[int, int, int]:
+    """``(STATE_LEN, ORACLE_LEN, NUM_ACTION_CODES)``."""
+
+def encode_state(state: HkState) -> tuple[list[float], list[float], list[int]]:
+    """Features, oracle features and legal-action mask for the player to act."""
+
+def teacher_data(
+    hands: int, teacher: str = ..., seed: int = ..., **rules: object
+) -> tuple[bytes, bytes, bytes, list[int], list[float], list[int]]:
+    """Teacher self-play decisions: features, oracle, masks, actions, returns, hand index."""
+
+class HkVecEnv:
+    """Many hands stepped in lockstep for learning."""
+
+    def __init__(
+        self, n: int, seed: int = 0, opponents: str | None = None, **rules: object
+    ) -> None: ...
+    def observe(self) -> tuple[bytes, bytes, bytes, list[int], list[int]]: ...
+    def step(self, actions: list[int]) -> None: ...
+    def finished(self) -> list[tuple[int, list[int], int]]: ...

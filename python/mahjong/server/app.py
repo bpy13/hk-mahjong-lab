@@ -126,17 +126,18 @@ def hints(sid: str, ms: int = 2000, samples: int = 800) -> dict[str, Any]:
     s = _session(sid)
     if not s.human_to_act():
         raise HTTPException(400, "not your decision")
-    a = analyze(s.state, samples=samples, candidates=6, time_ms=ms, seed=len(s.actions))
+    state = s.snapshot()
+    a = analyze(state, samples=samples, candidates=6, time_ms=ms, seed=len(s.actions))
     for m in a["moves"]:
         m["label"] = action_chinese(m["action"])
     out: dict[str, Any] = {
         "solver": a,
-        "danger": danger(s.state, s.human),
-        "progress": hand_progress(s.state, s.human),
+        "danger": danger(state, s.human),
+        "progress": hand_progress(state, s.human),
     }
-    if s.state.phase() == "turn":
-        offense = {r["tile"]: r for r in solo(s.state, samples=150, seed=len(s.actions))}
-        rows = discard_table(s.state)
+    if state.phase() == "turn":
+        offense = {r["tile"]: r for r in solo(state, samples=150, seed=len(s.actions))}
+        rows = discard_table(state)
         for r in rows:
             r["solo"] = offense.get(r["tile"])
         out["discards"] = rows
