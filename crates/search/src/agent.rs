@@ -99,16 +99,22 @@ impl AgentResult {
     }
 }
 
+/// Totals of a duplicate tournament.
+#[derive(Clone, Debug, Default)]
+pub struct TournamentResult {
+    /// One result per agent, in input order.
+    pub agents: Vec<AgentResult>,
+    /// Points won by each seat (all agents together); shows seat effects such as
+    /// the dealer's extra tile.
+    pub seat_points: [f64; 4],
+    /// Hands that ended in an exhaustive draw.
+    pub draws: u32,
+}
+
 /// Plays `deals` walls, each four times with the agents rotated through the
 /// seats, so every agent plays every seat on every wall (duplicate format).
-/// Returns one result per agent, in input order, plus the draw count.
-pub fn duplicate(
-    agents: &[Agent; 4],
-    deals: usize,
-    rules: RuleSet,
-    seed: u64,
-) -> (Vec<AgentResult>, u32) {
-    let per_deal: Vec<(Vec<AgentResult>, u32)> = (0..deals)
+pub fn duplicate(agents: &[Agent; 4], deals: usize, rules: RuleSet, seed: u64) -> TournamentResult {
+    let per_deal: Vec<(Vec<AgentResult>, [f64; 4], u32)> = (0..deals)
         .into_par_iter()
         .map(|d| {
             let mut rng =
@@ -116,6 +122,7 @@ pub fn duplicate(
             let mut wall = State::all_tiles(&rules);
             wall.shuffle(&mut rng);
             let mut out = vec![AgentResult::default(); 4];
+            let mut seats = [0.0f64; 4];
             let mut draws = 0;
             for rot in 0..4 {
                 let mut s = State::from_wall(rules, wall.clone());
@@ -131,6 +138,7 @@ pub fn duplicate(
                 for seat in 0..4 {
                     let res = &mut out[seat_agent(seat)];
                     let x = r.deltas[seat] as f64;
+                    seats[seat] += x;
                     res.hands += 1;
                     res.points += x;
                     res.points_sq += x * x;
@@ -146,13 +154,17 @@ pub fn duplicate(
                     }
                 }
             }
-            (out, draws)
+            (out, seats, draws)
         })
         .collect();
     let mut total = vec![AgentResult::default(); 4];
+    let mut seat_points = [0.0f64; 4];
     let mut draws = 0;
-    for (r, d) in per_deal {
+    for (r, seats, d) in per_deal {
         draws += d;
+        for (t, x) in seat_points.iter_mut().zip(seats) {
+            *t += x;
+        }
         for (t, x) in total.iter_mut().zip(r) {
             t.hands += x.hands;
             t.points += x.points;
@@ -163,5 +175,9 @@ pub fn duplicate(
             t.win_faan += x.win_faan;
         }
     }
-    (total, draws)
+    TournamentResult {
+        agents: total,
+        seat_points,
+        draws,
+    }
 }

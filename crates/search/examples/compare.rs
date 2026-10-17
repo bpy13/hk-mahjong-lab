@@ -8,8 +8,9 @@ fn main() {
     let deals: usize = args.get(4).and_then(|d| d.parse().ok()).unwrap_or(50);
     let agents: [Agent; 4] = std::array::from_fn(|i| Agent::parse(specs[i]).unwrap());
     let start = std::time::Instant::now();
-    let (res, draws) = duplicate(&agents, deals, RuleSet::default(), 1);
-    for (spec, r) in specs.iter().zip(&res) {
+    let t = duplicate(&agents, deals, RuleSet::default(), 1);
+    let draws = t.draws;
+    for (spec, r) in specs.iter().zip(&t.agents) {
         println!(
             "{spec:<28} {:+7.2} ±{:5.2}/hand  win {:4.1}%  deal-in {:4.1}%  avg faan {:.1}",
             r.mean(),

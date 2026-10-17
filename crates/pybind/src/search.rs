@@ -25,14 +25,20 @@ fn target_dict<'py>(py: Python<'py>, t: &Target) -> PyResult<Bound<'py, PyDict>>
         Structure::AllChows => "all_chows",
     };
     d.set_item("structure", structure)?;
-    d.set_item("pungs", t.pungs.iter().map(|x| x.index() as u32).collect::<Vec<_>>())?;
+    d.set_item(
+        "pungs",
+        t.pungs.iter().map(|x| x.index() as u32).collect::<Vec<_>>(),
+    )?;
     d.set_item("faan", t.faan)?;
     d.set_item("limit", t.limit)?;
     Ok(d)
 }
 
 fn require_live(state: &PyState) -> PyResult<usize> {
-    state.inner.current_player().ok_or_else(|| value_error("the hand is over"))
+    state
+        .inner
+        .current_player()
+        .ok_or_else(|| value_error("the hand is over"))
 }
 
 /// Runs the PIMC solver for the player to act. Returns the candidates, best
@@ -48,7 +54,12 @@ pub(crate) fn analyze<'py>(
     seed: u64,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_live(state)?;
-    let config = PimcConfig { samples, candidates, time_limit: time_ms.map(Duration::from_millis), seed };
+    let config = PimcConfig {
+        samples,
+        candidates,
+        time_limit: time_ms.map(Duration::from_millis),
+        seed,
+    };
     let s = state.inner.clone();
     let a = py.detach(move || pimc(&s, &config));
     let d = PyDict::new(py);
@@ -76,7 +87,12 @@ pub(crate) fn analyze<'py>(
 /// chooses for the player to act.
 #[pyfunction]
 #[pyo3(signature = (state, spec, seed=None))]
-pub(crate) fn agent_action(py: Python<'_>, state: &PyState, spec: &str, seed: Option<u64>) -> PyResult<u16> {
+pub(crate) fn agent_action(
+    py: Python<'_>,
+    state: &PyState,
+    spec: &str,
+    seed: Option<u64>,
+) -> PyResult<u16> {
     require_live(state)?;
     let agent = Agent::parse(spec).map_err(value_error)?;
     let s = state.inner.clone();
@@ -89,25 +105,46 @@ pub(crate) fn agent_action(py: Python<'_>, state: &PyState, spec: &str, seed: Op
 /// The heuristic danger model for `seat`: per-tile deal-in estimates (34) and
 /// each seat's estimated chance of waiting.
 #[pyfunction]
-pub(crate) fn danger<'py>(py: Python<'py>, state: &PyState, seat: usize) -> PyResult<Bound<'py, PyDict>> {
+pub(crate) fn danger<'py>(
+    py: Python<'py>,
+    state: &PyState,
+    seat: usize,
+) -> PyResult<Bound<'py, PyDict>> {
     crate::check_seat(seat)?;
     let d = Danger::estimate(&state.inner, seat);
     let out = PyDict::new(py);
-    out.set_item("tiles", mahjong_tiles::Tile::all_kinds().map(|t| d.tile(t)).collect::<Vec<_>>())?;
-    out.set_item("threat", (0..4).map(|p| if p == seat { 0.0 } else { d.threat(p) }).collect::<Vec<_>>())?;
+    out.set_item(
+        "tiles",
+        mahjong_tiles::Tile::all_kinds()
+            .map(|t| d.tile(t))
+            .collect::<Vec<_>>(),
+    )?;
+    out.set_item(
+        "threat",
+        (0..4)
+            .map(|p| if p == seat { 0.0 } else { d.threat(p) })
+            .collect::<Vec<_>>(),
+    )?;
     Ok(out)
 }
 
 /// `seat`'s hand: plain shanten, faan-aware shanten and its target plan.
 #[pyfunction]
-pub(crate) fn hand_progress<'py>(py: Python<'py>, state: &PyState, seat: usize) -> PyResult<Bound<'py, PyDict>> {
+pub(crate) fn hand_progress<'py>(
+    py: Python<'py>,
+    state: &PyState,
+    seat: usize,
+) -> PyResult<Bound<'py, PyDict>> {
     crate::check_seat(seat)?;
     let view = SeatView::of(&state.inner, seat);
     let fs = faan_shanten(&view.hand_view(), &view.rules);
     let d = PyDict::new(py);
     d.set_item("shanten", shanten(&view.concealed, view.melds.len()))?;
     d.set_item("faan_shanten", fs.shanten)?;
-    d.set_item("target", fs.target.as_ref().map(|t| target_dict(py, t)).transpose()?)?;
+    d.set_item(
+        "target",
+        fs.target.as_ref().map(|t| target_dict(py, t)).transpose()?,
+    )?;
     Ok(d)
 }
 
@@ -129,7 +166,10 @@ pub(crate) fn discard_table<'py>(py: Python<'py>, state: &PyState) -> PyResult<B
         d.set_item("ukeire", r.ukeire)?;
         d.set_item("faan_shanten", r.faan_shanten)?;
         d.set_item("faan_ukeire", r.faan_ukeire)?;
-        d.set_item("target", r.target.as_ref().map(|t| target_dict(py, t)).transpose()?)?;
+        d.set_item(
+            "target",
+            r.target.as_ref().map(|t| target_dict(py, t)).transpose()?,
+        )?;
         out.append(d)?;
     }
     Ok(out)
@@ -180,12 +220,15 @@ pub(crate) fn tournament<'py>(
         return Err(value_error("need exactly four agent specs"));
     }
     let rules = rules_from(rules)?;
-    let parsed = agents.iter().map(|s| Agent::parse(s).map_err(value_error)).collect::<PyResult<Vec<_>>>()?;
+    let parsed = agents
+        .iter()
+        .map(|s| Agent::parse(s).map_err(value_error))
+        .collect::<PyResult<Vec<_>>>()?;
     let arr: [Agent; 4] = parsed.try_into().map_err(|_| value_error("four agents"))?;
-    let (res, draws) = py.detach(move || duplicate(&arr, deals, rules, seed));
+    let t = py.detach(move || duplicate(&arr, deals, rules, seed));
     let out = PyDict::new(py);
     let list = PyList::empty(py);
-    for (spec, r) in agents.iter().zip(res) {
+    for (spec, r) in agents.iter().zip(t.agents) {
         let d = PyDict::new(py);
         d.set_item("agent", spec)?;
         d.set_item("hands", r.hands)?;
@@ -198,7 +241,8 @@ pub(crate) fn tournament<'py>(
         list.append(d)?;
     }
     out.set_item("agents", list)?;
-    out.set_item("draws", draws)?;
+    out.set_item("draws", t.draws)?;
+    out.set_item("seat_points", t.seat_points.to_vec())?;
     out.set_item("hands", 4 * deals)?;
     Ok(out)
 }

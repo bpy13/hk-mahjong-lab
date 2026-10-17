@@ -14,7 +14,7 @@ pub mod pimc;
 pub mod solo;
 pub mod view;
 
-pub use agent::{duplicate, Agent, AgentResult};
+pub use agent::{duplicate, Agent, AgentResult, TournamentResult};
 pub use bots::{Bot, Efficiency, Fast, RandomBot, Value};
 pub use danger::Danger;
 pub use pimc::{pimc, shortlist, ActionStats, Analysis, PimcConfig};
