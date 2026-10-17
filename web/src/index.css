@@ -31,18 +31,19 @@ header .header-buttons { margin-left: auto; display: flex; gap: 8px; }
   position: relative; background: radial-gradient(circle, var(--felt), var(--felt-dark));
   border-radius: 14px; min-height: 640px; display: grid; gap: 10px; padding: 10px;
   grid-template-columns: auto auto 1fr auto auto;
-  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto auto;
   grid-template-areas:
     "left top    top    top    right"
     "left .      rtop   .      right"
     "left rleft  center rright right"
     "left .      rbot   .      right"
-    "left bot    bot    bot    right";
+    "left bot    bot    bot    right"
+    "left mine   mine   mine   right";
 }
 /* Seats along the edges. Side seats stand vertically, like a real table. */
 .edge { color: #f3efe4; padding: 6px; border-radius: 8px; display: flex; gap: 8px; }
 .edge.acting { box-shadow: 0 0 0 2px var(--accent); }
-.edge.pos-0 { grid-area: bot; justify-content: center; align-items: center; }
+.edge.pos-0 { grid-area: bot; justify-self: center; align-items: center; }
 .edge.pos-2 { grid-area: top; justify-content: center; align-items: center; }
 .edge.pos-1 { grid-area: right; flex-direction: column; align-items: center; }
 .edge.pos-3 { grid-area: left; flex-direction: column; align-items: center; }
@@ -78,7 +79,7 @@ header .header-buttons { margin-left: auto; display: flex; gap: 8px; }
 .tile svg { transition: transform 0.1s; }
 .danger-bar { height: 4px; border-radius: 2px; margin-top: 2px; }
 
-.mine { padding: 10px 16px 20px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.mine { grid-area: mine; color: #f3efe4; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .my-melds { display: flex; gap: 10px; min-height: 10px; }
 .hand { display: flex; gap: 2px; align-items: flex-end; }
 .hand .drawn { margin-left: 14px; }

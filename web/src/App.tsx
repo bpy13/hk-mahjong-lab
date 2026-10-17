@@ -208,6 +208,35 @@ export default function App() {
               <div className="muted">{WINDS[obs.current_player]}家思考中…</div>
             )}
           </div>
+          <div className="mine">
+            <div className="my-melds">
+              {obs.melds[view.human].map((m, i) => (
+                <span key={i} className="meld">
+                  {m.tiles.map((t, j) => (
+                    <Tile key={j} tile={t} size="md" faceDown={m.concealed && (j === 0 || j === 3)} />
+                  ))}
+                </span>
+              ))}
+            </div>
+            <Hand
+              hand={obs.hand}
+              lastDrawn={obs.last_drawn}
+              canDiscard={canDiscard}
+              selected={selected}
+              onSelect={onSelect}
+              danger={danger}
+            />
+            {humanToAct && (
+              <>
+                <div className="prompt" data-testid="prompt">
+                  {obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
+                  {obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
+                  {obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
+                </div>
+                <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />
+              </>
+            )}
+          </div>
         </section>
         <StudyPanel
           mode={mode}
@@ -220,35 +249,6 @@ export default function App() {
           onPick={(a) => (isDiscard(a) ? setSelected(a) : act(a))}
         />
       </main>
-      <footer className="mine">
-        <div className="my-melds">
-          {obs.melds[view.human].map((m, i) => (
-            <span key={i} className="meld">
-              {m.tiles.map((t, j) => (
-                <Tile key={j} tile={t} size="md" faceDown={m.concealed && (j === 0 || j === 3)} />
-              ))}
-            </span>
-          ))}
-        </div>
-        <Hand
-          hand={obs.hand}
-          lastDrawn={obs.last_drawn}
-          canDiscard={canDiscard}
-          selected={selected}
-          onSelect={onSelect}
-          danger={danger}
-        />
-        {humanToAct && (
-          <>
-            <div className="prompt" data-testid="prompt">
-              {obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
-              {obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
-              {obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
-            </div>
-            <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />
-          </>
-        )}
-      </footer>
       {view.result && showResult && (
         <GameOver view={view} meta={meta} onNewGame={() => setDialog(true)} onClose={() => setShowResult(false)} />
       )}
