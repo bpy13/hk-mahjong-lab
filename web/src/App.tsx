@@ -5,7 +5,8 @@ import { ActionBar } from './components/ActionBar'
 import { GameOver } from './components/GameOver'
 import { Hand } from './components/Hand'
 import { NewGameDialog } from './components/NewGameDialog'
-import { Seat } from './components/Seat'
+import type { Position } from './components/Seat'
+import { River, SeatEdge } from './components/Seat'
 import type { QuizFeedback, StudyMode } from './components/StudyPanel'
 import { StudyPanel } from './components/StudyPanel'
 import { Tile } from './components/Tile'
@@ -38,6 +39,7 @@ export default function App() {
   const [quiz, setQuiz] = useState<QuizFeedback | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showResult, setShowResult] = useState(true)
   const hintKey = useRef('')
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export default function App() {
     setHints(null)
     setQuiz(null)
     setSelected(null)
+    setShowResult(true)
     try {
       setView(await api.newGame(level, seat, rules))
     } catch (e) {
@@ -142,6 +145,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [view, humanToAct, selected, act])
 
+  // Esc closes the result window.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowResult(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   if (!meta) return <div className="loading">{error ?? '載入中…'}</div>
   if (dialog || !view) return <NewGameDialog meta={meta} onStart={start} onCancel={view ? () => setDialog(false) : undefined} />
 
@@ -157,22 +169,30 @@ export default function App() {
         <span className="muted">
           {WINDS[view.rules.prevailing_wind]}圈 · 起糊 {view.rules.min_faan} 番 · 你坐{WINDS[view.human]}
         </span>
-        <button onClick={() => setDialog(true)}>新局</button>
+        <span className="header-buttons">
+          {view.result && !showResult && <button onClick={() => setShowResult(true)}>結果</button>}
+          <button onClick={() => setDialog(true)}>新局</button>
+        </span>
       </header>
       {error && <div className="error">{error}</div>}
       <main className="layout">
         <section className="table">
+          {[0, 1, 2, 3].map((s) => {
+            const pos = relativeSeat(s, view.human) as Position
+            return (
+              <SeatEdge
+                key={`e${s}`}
+                obs={obs}
+                seat={s}
+                position={pos}
+                name={names(s)}
+                revealed={view.hands?.[s]}
+                delta={view.result?.deltas[s]}
+              />
+            )
+          })}
           {[0, 1, 2, 3].map((s) => (
-            <Seat
-              key={s}
-              obs={obs}
-              seat={s}
-              human={view.human}
-              position={relativeSeat(s, view.human)}
-              name={names(s)}
-              revealed={view.hands?.[s]}
-              delta={view.result?.deltas[s]}
-            />
+            <River key={`r${s}`} obs={obs} seat={s} position={relativeSeat(s, view.human) as Position} />
           ))}
           <div className="center">
             <div>
@@ -229,7 +249,9 @@ export default function App() {
           </>
         )}
       </footer>
-      {view.result && <GameOver view={view} meta={meta} onNewGame={() => setDialog(true)} />}
+      {view.result && showResult && (
+        <GameOver view={view} meta={meta} onNewGame={() => setDialog(true)} onClose={() => setShowResult(false)} />
+      )}
     </div>
   )
 }

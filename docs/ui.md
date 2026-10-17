@@ -22,7 +22,10 @@ The UI is in Traditional Chinese (繁體中文).
 
 ## Playing
 
-* You sit at the bottom; the next player (下家) is on your right.
+* You sit at the bottom; the next player (下家) is on your right. As at a real
+  table, each player's concealed tiles and melds run along their edge (the side
+  players' vertically), and their discards lie out on the felt in front of them,
+  growing toward the centre. The latest discard is outlined; claimed ones fade.
 * On your turn, click a tile to raise it and click it again (or press **Enter**) to
   discard it (打出). The tile you just drew sits apart on the right.
 * When you can claim a discard, buttons appear: 食糊 (win), 碰, 槓, 上 (chow, one
@@ -66,6 +69,12 @@ model's estimate that discarding it lets an opponent win (green safe, amber, red
   [solver.md](solver.md).
 * The bots themselves act on the paired difference from the `value` heuristic, so
   the solver's first row is not always what the 高級 bot would play.
+
+### End of the hand
+
+A window shows every winner's hand, the faan breakdown and the payments. Close
+it with ✕, 關閉, Esc or a click outside to look at the final table (all hands are
+revealed); **結果** in the header reopens it.
 
 ### Post-hand review (檢討)
 
