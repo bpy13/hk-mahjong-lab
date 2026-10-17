@@ -53,7 +53,7 @@ fn main() {
             };
             if p == 0 && s.phase_name() == "turn" && legal.len() > 1 {
                 turns += 1;
-                if turns % pimc_every == 0 {
+                if turns.is_multiple_of(pimc_every) {
                     let an = pimc(
                         &s,
                         &PimcConfig {
