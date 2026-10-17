@@ -213,7 +213,7 @@ do require a complete hand).
 | `123p 456p 789p RRR NN`, self-drawn, concealed, no flowers, South seat | 混一色 3 + 中 1 + 自摸 1 + 門前清 1 + 無花 1 = **7** |
 | `234m 567m 345p 678s 99s`, won on a discard, `234m` was a claimed chow, holds F2 as South seat | 平糊 1 + 正花 1 = **2**: cannot win |
 | `EEE 111m 999p GGG 11s`, East seat, East round, discard win, exposed `GGG`, no flowers | 對對糊 3 + 混么九 1 + 門風 1 + 圈風 1 + 發 1 + 無花 1 = **8** |
-| `RRR GGG WhWhWh 111s 22s`, half flush, self-drawn | 大三元 8 + 混一色 3 + 對對糊 3 + 自摸 1 = 15 → capped at **10** |
+| `GGG WhWhWh 111s 22s` with an exposed `RRR`, self-drawn, no flowers | 大三元 8 + 混一色 3 + 對對糊 3 + 自摸 1 + 無花 1 = 16 → capped at **10**. (Fully concealed, it would be 坎坎糊, a limit hand, anyway.) |
 
 ## 8. Payment
 
