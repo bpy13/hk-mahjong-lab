@@ -62,6 +62,7 @@ pub(crate) fn score_dict<'py>(py: Python<'py>, s: &Score) -> PyResult<Bound<'py,
     let d = PyDict::new(py);
     d.set_item("faan", s.faan)?;
     d.set_item("total", s.total)?;
+    d.set_item("qualifying", s.qualifying)?;
     d.set_item("limit", s.limit)?;
     let patterns: Vec<(u8, u8)> = s.patterns.iter().map(|&(p, f)| (p.number(), f)).collect();
     d.set_item("patterns", patterns)?;

@@ -5,6 +5,9 @@ import { WINDS, tileName } from '../tiles'
 import { MeldView } from './Seat'
 import { Tile } from './Tile'
 
+/** Faan-table rows for bonus tiles: added on top, not toward the minimum. */
+const BONUS_PATTERNS = [3, 4, 5]
+
 interface Props {
   view: GameView
   meta: Meta
@@ -40,6 +43,9 @@ export function GameOver({ view, meta, onNewGame, onClose }: Props) {
             {w.self_drawn ? '自摸' : `食${WINDS[w.from!]}家${w.robbed ? '（搶槓）' : ''}`}
             {w.win_tile !== null && w.win_tile < 34 && <> {tileName(w.win_tile)}</>}
             <strong> {w.score.faan} 番{w.score.limit ? '（爆棚）' : ''}</strong>
+            {!w.score.limit && w.score.faan > w.score.qualifying && (
+              <span className="muted">（其中花 {w.score.faan - w.score.qualifying} 番）</span>
+            )}
             {w.liable !== null && <span className="badge warn">{WINDS[w.liable]}家包</span>}
           </div>
           <div className="win-hand">
@@ -53,8 +59,9 @@ export function GameOver({ view, meta, onNewGame, onClose }: Props) {
           </div>
           <ul className="patterns">
             {w.score.patterns.map(([n, f]) => (
-              <li key={n}>
+              <li key={n} className={BONUS_PATTERNS.includes(n) ? 'bonus-pattern' : ''}>
                 {meta.patterns[String(n)]} {w.score.limit ? '' : `${f} 番`}
+                {BONUS_PATTERNS.includes(n) && !w.score.limit && <span className="small">（花，另加）</span>}
               </li>
             ))}
           </ul>

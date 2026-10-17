@@ -84,7 +84,7 @@ fn one_future(
             ..WinContext::default()
         };
         if let Some(s) = score_win(&hand, &view.melds, &ctx, &view.rules) {
-            if s.faan >= view.rules.min_faan {
+            if s.meets_minimum(&view.rules) {
                 return Some((s.faan, k));
             }
         }

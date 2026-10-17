@@ -6,8 +6,9 @@
 //! ([`Structure`]), and which scoring pungs it must contain (dragons, the seat
 //! wind, the prevailing wind). Each target has a *guaranteed* faan: what the
 //! plan scores before anything lucky happens (self-draw, last tile, …), including
-//! flowers already held and 門前清 if the hand is still concealed. Only targets
-//! whose guaranteed faan reaches the minimum count. The hand's faan-aware shanten
+//! 門前清 if the hand is still concealed and flowers already held. Only targets
+//! whose guaranteed faan *without flowers* reaches the minimum count, since bonus
+//! tiles do not count toward it (§6). The hand's faan-aware shanten
 //! is the smallest shanten among them.
 //!
 //! This is a lower bound on value and an estimate of distance: it does not try
@@ -109,10 +110,12 @@ fn guaranteed_faan(
     if matches!(plan, SuitPlan::Honours | SuitPlan::Orphans) {
         return Some((rules.faan_cap, true));
     }
-    let mut f: u32 = flower_patterns(view.bonus, view.seat, rules)
+    // Bonus tiles add faan but do not count toward the minimum (§6).
+    let flowers: u32 = flower_patterns(view.bonus, view.seat, rules)
         .iter()
         .map(|&(_, x)| x as u32)
         .sum();
+    let mut f: u32 = 0;
     if view.melds.iter().all(|m| m.concealed) {
         f += 1;
     }
@@ -131,8 +134,7 @@ fn guaranteed_faan(
     for &t in pungs.iter().filter(|t| t.is_wind()) {
         f += (t == Tile::wind(view.seat)) as u32 + (t == Tile::wind(rules.prevailing_wind)) as u32;
     }
-    let f = f.min(rules.faan_cap as u32) as u8;
-    (f >= rules.min_faan).then_some((f, false))
+    (f >= rules.min_faan as u32).then(|| ((f + flowers).min(rules.faan_cap as u32) as u8, false))
 }
 
 /// Shanten toward one plan, or `None` if the plan is impossible.

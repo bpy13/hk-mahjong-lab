@@ -179,6 +179,28 @@ def flower_faan(bonus: frozenset[int], seat: int, rules: Rules) -> list[tuple[in
     return out
 
 
+def qualifies(s: tuple[int, int, bool, list[tuple[int, int]]] | None, rules: Rules) -> bool:
+    """§6: a limit hand, or the minimum reached without bonus-tile faan (#3-#5)."""
+    if s is None:
+        return False
+    faan, _, limit, patterns = s
+    return (
+        limit
+        or min(rules.faan_cap, sum(f for n, f in patterns if n not in (3, 4, 5))) >= rules.min_faan
+    )
+
+
+def _rank(s: tuple[int, int, bool, list[tuple[int, int]]], rules: Rules) -> tuple[int, int, int]:
+    """Which reading of a hand counts: most faan toward the minimum, then most paid."""
+    faan, total, limit, patterns = s
+    q = (
+        rules.faan_cap
+        if limit
+        else min(rules.faan_cap, sum(f for n, f in patterns if n not in (3, 4, 5)))
+    )
+    return (q, faan, total)
+
+
 def score(
     concealed: list[int], melds: list[Meld], ctx: Ctx, rules: Rules
 ) -> tuple[int, int, bool, list[tuple[int, int]]] | None:
@@ -192,7 +214,7 @@ def score(
     best = None
     for pair, groups in standard_splits(concealed):
         result = score_split(concealed, melds, pair, groups, ctx, rules, specials)
-        if best is None or result[:2] > best[:2]:
+        if best is None or _rank(result, rules) > _rank(best, rules):
             best = result
     return best
 
@@ -418,7 +440,7 @@ class RefGame:
         if robbing_concealed and (self.melds[seat] or not thirteen_orphans(c)):
             return None
         s = score(c, self.melds[seat], self._ctx(seat, tile, False), self.rules)
-        return s if s and s[0] >= self.rules.min_faan else None
+        return s if qualifies(s, self.rules) else None
 
     def _self_win(self):
         if self.phase != "turn" or not self.drew:
@@ -428,7 +450,7 @@ class RefGame:
         if not complete(c, len(self.melds[seat])):
             return None
         s = score(c, self.melds[seat], self._ctx(seat, self.last_drawn, True), self.rules)
-        return s if s and s[0] >= self.rules.min_faan else None
+        return s if qualifies(s, self.rules) else None
 
     def _finish(self, wins) -> None:
         deltas = [0, 0, 0, 0]

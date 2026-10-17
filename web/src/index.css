@@ -63,8 +63,10 @@ header .header-buttons { margin-left: auto; display: flex; gap: 8px; }
 .river { display: flex; flex-wrap: wrap; gap: 2px; align-content: flex-start; }
 .river-0 { grid-area: rbot; max-width: 230px; justify-self: center; min-height: 76px; align-content: flex-end; flex-wrap: wrap-reverse; }
 .river-2 { grid-area: rtop; max-width: 230px; justify-self: center; min-height: 76px; }
-.river-1 { grid-area: rright; max-width: 88px; align-self: center; }
-.river-3 { grid-area: rleft; max-width: 88px; align-self: center; }
+/* Side rivers: sideways tiles in columns of six; new columns toward the centre. */
+.river-1, .river-3 { display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); gap: 2px; align-self: center; align-content: start; }
+.river-1 { grid-area: rright; direction: rtl; }
+.river-3 { grid-area: rleft; }
 .center { grid-area: center; align-self: center; justify-self: center; color: #f3efe4; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .claim { display: flex; align-items: center; gap: 8px; font-size: 18px; }
 
@@ -112,6 +114,7 @@ th:first-child, td:first-child { text-align: left; }
 .win-hand .meld { margin-left: 10px; }
 .patterns { display: flex; gap: 6px 16px; flex-wrap: wrap; list-style: none; padding-left: 0; }
 .patterns li { background: #efe7d6; border-radius: 4px; padding: 2px 8px; }
+.patterns li.bonus-pattern { background: #f1e3f3; }
 .deltas td { text-align: center; font-size: 16px; font-weight: 700; }
 .buttons { display: flex; gap: 10px; margin-top: 14px; }
 .review ol { padding-left: 22px; }

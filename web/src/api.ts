@@ -29,6 +29,8 @@ export interface Observation {
 export interface Score {
   faan: number
   total: number
+  /** Faan without bonus tiles: what must reach the minimum. */
+  qualifying: number
   limit: boolean
   patterns: [number, number][]
 }

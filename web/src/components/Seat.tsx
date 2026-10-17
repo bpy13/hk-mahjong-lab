@@ -78,17 +78,20 @@ export function SeatEdge({ obs, seat, position, name, revealed, delta }: EdgePro
   )
 }
 
-/** One seat's discards, laid out in the open between the seat and the centre.
- * The most recent discard is outlined; claimed ones are faded. */
+/** One seat's discards, laid out in the open between the seat and the centre,
+ * turned to face that seat like its other tiles. The most recent discard is
+ * outlined; claimed ones are faded. */
 export function River({ obs, seat, position }: { obs: Observation; seat: number; position: Position }) {
   const river = obs.river.filter(([s]) => s === seat)
   const last = obs.river.length > 0 ? obs.river[obs.river.length - 1] : null
+  const rotate = rotation(position)
   return (
     <div className={`river river-${position}`} data-testid={`river-${seat}`}>
       {river.map(([, t, claimed], i) => (
         <Tile
           key={i}
           tile={t}
+          rotate={rotate}
           size="sm"
           dim={claimed}
           highlight={last !== null && i === river.length - 1 && last[0] === seat && !claimed}

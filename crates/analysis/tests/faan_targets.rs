@@ -71,7 +71,7 @@ fn minus_one_means_a_legal_win() {
             };
             let s = score_win(&hand, &[], &ctx, &rules).expect("complete");
             assert!(
-                s.faan >= rules.min_faan,
+                s.meets_minimum(&rules),
                 "{hand}: target {:?}, scores {:?}",
                 fs.target,
                 s

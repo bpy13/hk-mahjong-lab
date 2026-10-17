@@ -57,6 +57,27 @@ fn row_1_2_self_drawn_and_concealed() {
 }
 
 #[test]
+fn flowers_do_not_count_toward_the_minimum_6() {
+    let r = RuleSet::default();
+    // 平糊 + 門前清 = 2, plus two seat flowers (F2, S2) for South.
+    let ctx = WinContext {
+        bonus: 0b0010_0010,
+        ..ron(1, "2m")
+    };
+    let s = score_with("234m 567m 345p 678s 99s", &[], ctx, &r);
+    assert_eq!((s.faan, s.qualifying), (4, 2));
+    assert!(!s.meets_minimum(&r));
+    // 混一色 3 + 門前清 1 qualifies; the flowers then add to what is paid.
+    let ctx = WinContext {
+        bonus: 0b0010_0010,
+        ..ron(1, "1p")
+    };
+    let s = score_with("123p 456p 789p NNN 55p", &[], ctx, &r);
+    assert!(s.meets_minimum(&r));
+    assert_eq!(s.faan, s.qualifying + 2);
+}
+
+#[test]
 fn rows_3_to_5_flowers() {
     let rules = RuleSet::default();
     let hand = "234m 567m 345p 678s 99s";
