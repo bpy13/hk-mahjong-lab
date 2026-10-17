@@ -35,9 +35,12 @@ function MoveTable({ moves, onPick }: { moves: MoveStats[]; onPick: (a: number) 
         </tr>
       </thead>
       <tbody>
-        {moves.slice(0, 3).map((m, i) => (
-          <tr key={m.action} className={i === 0 ? 'best' : ''} onClick={() => onPick(m.action)} title="按此選擇">
-            <td>{m.label}</td>
+        {moves.slice(0, 3).map((m) => (
+          <tr key={m.action} className={m.recommended ? 'best' : ''} onClick={() => onPick(m.action)} title="按此選擇">
+            <td>
+              {m.recommended && '★ '}
+              {m.label}
+            </td>
             <td>
               {pts(m.mean)} <span className="ci">±{m.ci95.toFixed(1)}</span>
             </td>
@@ -83,7 +86,7 @@ export function StudyPanel({ mode, setMode, hints, loading, showDanger, setShowD
           ) : (
             <p className="bad">
               你選「{quizFeedback.chosen}」；電腦首選「{quizFeedback.best.label}」
-              {quizFeedback.chosenStats && <>，期望分相差 {(quizFeedback.best.mean - quizFeedback.chosenStats.mean).toFixed(1)}</>}。
+              {quizFeedback.chosenStats && <>，期望分相差 {(quizFeedback.best.diff - quizFeedback.chosenStats.diff).toFixed(1)}</>}。
             </p>
           )}
         </div>
@@ -92,7 +95,7 @@ export function StudyPanel({ mode, setMode, hints, loading, showDanger, setShowD
       <details className="help">
         <summary>點樣睇</summary>
         <ul>
-          <li>期望分：以電腦模擬對手打到完局的平均得分。</li>
+          <li>期望分：以電腦模擬對手打到完局的平均得分。★ 為電腦推薦：只有當另一著比穩陣著法（啟發式選擇）明顯較好（超過兩個標準誤）先會推薦。</li>
           <li>勝率：自己食糊的機會；出銃率：打出的牌被人食糊的機會。</li>
           <li>向聽：離聽牌尚欠幾隻牌；番數向聽：離「夠三番」的聽牌尚欠幾隻。</li>
           <li>危險度：而家打出呢隻牌即刻被人食糊的機會，按公開資訊估計（綠 &lt; 1%，黃 &lt; 4%，紅更高；滑鼠停喺牌上睇數字）。</li>

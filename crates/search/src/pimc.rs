@@ -9,8 +9,12 @@
 //!    re-dealt consistently with what the player has seen, with opponents' hands
 //!    as developed as real ones at this stage ([`crate::world`]).
 //! 3. In each sample, play every candidate to the end of the hand with the
-//!    [`Fast`] bot playing all four seats. All candidates share the same sample
-//!    (common random numbers).
+//!    [`Rollout`] policy: the [`Fast`] bot for the player's own later moves, and
+//!    a defending `Fast` (it folds against threats, like the `defensive` bot)
+//!    for the opponents. All candidates share the same sample (common random
+//!    numbers). Opponents that never defend made the player's win rate look far
+//!    higher than in real games (37–40% predicted against 22–29% observed; the
+//!    `danger_check` example measures this).
 //! 4. Report, per candidate: mean points with a 95% confidence interval, win,
 //!    deal-in and draw rates, and the **paired difference** from the baseline:
 //!    its mean over samples and standard error. Because both moves see the same
@@ -27,7 +31,7 @@
 //! future be played as if everyone knew it ("strategy fusion"). Its numbers are
 //! estimates under the rollout bot's style of play, not equilibrium values.
 
-use crate::bots::{best_discard, Fast, Metric, Value};
+use crate::bots::{best_discard, Bot, Fast, Metric, Value};
 use crate::view::SeatView;
 use crate::world::sample_world;
 use mahjong_games::{play_out, Game, Policy};
@@ -145,6 +149,40 @@ impl Sample {
     }
 }
 
+/// The rollout policy: [`Fast`] for `seat`, a defending [`Fast`] for the others.
+#[derive(Clone, Debug)]
+pub struct Rollout {
+    seat: usize,
+    own: Bot,
+    opponents: Bot,
+}
+
+impl Rollout {
+    /// Rollouts from `seat`'s point of view.
+    pub fn for_seat(seat: usize) -> Rollout {
+        Rollout {
+            seat,
+            own: Bot::Fast(Fast::default()),
+            opponents: Bot::Fast(Fast::new(1.0)),
+        }
+    }
+}
+
+impl Policy<State> for Rollout {
+    fn choose<R: rand::Rng + ?Sized>(
+        &self,
+        state: &State,
+        legal: &[Action],
+        rng: &mut R,
+    ) -> Action {
+        if state.current_player() == Some(self.seat) {
+            self.own.choose(state, legal, rng)
+        } else {
+            self.opponents.choose(state, legal, rng)
+        }
+    }
+}
+
 /// The candidates PIMC evaluates in `state` (see the module docs), and the
 /// baseline action among them.
 pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
@@ -186,11 +224,18 @@ pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
 /// Panics if the hand is over.
 pub fn pimc(state: &State, config: &PimcConfig) -> Analysis {
     let (candidates, baseline) = shortlist(state, config.candidates.max(1));
-    pimc_with(state, config, candidates, baseline, &Fast::default())
+    let seat = state.current_player().expect("hand in progress");
+    pimc_with(
+        state,
+        config,
+        candidates,
+        baseline,
+        &Rollout::for_seat(seat),
+    )
 }
 
 /// PIMC with given candidates, baseline (one of the candidates) and rollout
-/// policy; [`pimc`] uses the heuristic shortlist and the [`Fast`] bot.
+/// policy; [`pimc`] uses the heuristic shortlist and [`Rollout`].
 ///
 /// # Panics
 /// Panics if the hand is over or `baseline` is not among `candidates`.

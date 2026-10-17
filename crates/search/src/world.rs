@@ -20,6 +20,22 @@
 //! (lowest shanten) of `K` random hands drawn from the hidden tiles, with
 //! `K = 4 + used² / 40` (`used` = tiles drawn from the wall so far), which tracks
 //! the real means above. It still uses only the observer's information.
+//!
+//! **Honours.** Players throw lone honours early, so an honour nobody has
+//! discarded is more often held than a uniform deal suggests. Measured with the
+//! `honours` example, the share of the observer's unseen honour copies that sit in
+//! opponents' hands is
+//!
+//! | Tiles drawn | Real | Best of K | Best of K, honours × 1.6 |
+//! |---|---|---|---|
+//! | 0–22 | 33% | 25% | 37% |
+//! | 23–45 | 39% | 25% | 38% |
+//! | 46–68 | 50% | 34% | 48% |
+//! | 69–91 | 71% | 60% | 72% |
+//!
+//! so candidate hands draw honours [`HONOUR_WEIGHT`] times as likely as suited
+//! tiles. Without this the solver expected to pung dragons that opponents were in
+//! fact holding, and advised breaking ready hands to chase them.
 
 use mahjong_analysis::shanten;
 use mahjong_games::Game;
@@ -27,6 +43,10 @@ use mahjong_hk::State;
 use mahjong_tiles::{Tile, TileCounts};
 use rand::seq::SliceRandom;
 use rand::Rng;
+
+/// How much more likely an honour is to be in an opponent's hand than a suited
+/// tile, when drawing candidate hands (see the module docs).
+pub const HONOUR_WEIGHT: f64 = 1.6;
 
 /// Tiles in the wall after the deal (before flower replacement).
 fn initial_wall(state: &State) -> usize {
@@ -43,8 +63,38 @@ pub fn candidates_per_opponent(state: &State) -> usize {
     (4.0 + used * used / 40.0).min(200.0) as usize
 }
 
+/// Draws `n` tiles from `pool` without replacement, honours `honour_weight`
+/// times as likely as suited tiles (Efraimidis–Spirakis keys).
+fn weighted_draw<R: Rng + ?Sized>(
+    pool: &[Tile],
+    n: usize,
+    honour_weight: f64,
+    rng: &mut R,
+) -> Vec<Tile> {
+    let mut keyed: Vec<(f64, Tile)> = pool
+        .iter()
+        .map(|&t| {
+            let w = if t.is_honour() { honour_weight } else { 1.0 };
+            (rng.gen::<f64>().powf(1.0 / w), t)
+        })
+        .collect();
+    let k = n.min(keyed.len().saturating_sub(1));
+    keyed.select_nth_unstable_by(k, |a, b| b.0.total_cmp(&a.0));
+    keyed.into_iter().take(n).map(|(_, t)| t).collect()
+}
+
 /// A structured determinization for `observer` (see the module docs).
 pub fn sample_world<R: Rng + ?Sized>(state: &State, observer: usize, rng: &mut R) -> State {
+    sample_world_with(state, observer, HONOUR_WEIGHT, rng)
+}
+
+/// [`sample_world`] with a given weight for honour tiles in opponents' hands.
+pub fn sample_world_with<R: Rng + ?Sized>(
+    state: &State,
+    observer: usize,
+    honour_weight: f64,
+    rng: &mut R,
+) -> State {
     if state.is_terminal() {
         return state.clone();
     }
@@ -58,10 +108,14 @@ pub fn sample_world<R: Rng + ?Sized>(state: &State, observer: usize, rng: &mut R
         let melds = state.melds(seat).len();
         let mut best: Option<(i8, Vec<Tile>)> = None;
         for _ in 0..k {
-            let (hand, _) = playing.partial_shuffle(rng, n);
-            let s = shanten(&TileCounts::from_tiles(hand), melds);
+            let hand = if honour_weight == 1.0 {
+                playing.partial_shuffle(rng, n).0.to_vec()
+            } else {
+                weighted_draw(&playing, n, honour_weight, rng)
+            };
+            let s = shanten(&TileCounts::from_tiles(&hand), melds);
             if best.as_ref().is_none_or(|(b, _)| s < *b) {
-                best = Some((s, hand.to_vec()));
+                best = Some((s, hand));
             }
         }
         let (_, chosen) = best.expect("k >= 1");

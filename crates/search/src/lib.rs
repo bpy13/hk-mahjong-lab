@@ -2,7 +2,7 @@
 //!
 //! * [`agent`]: agents by spec string, and duplicate tournaments.
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
-//! * [`danger`]: a heuristic deal-in danger model.
+//! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
 //! * [`features`]: the observation encoding for learning.
 //! * [`net`]: running trained networks.
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
@@ -13,6 +13,7 @@
 pub mod agent;
 pub mod bots;
 pub mod danger;
+pub mod danger_tables;
 pub mod features;
 pub mod net;
 pub mod pimc;
@@ -24,7 +25,7 @@ pub use agent::{duplicate, Agent, AgentResult, TournamentResult};
 pub use bots::{Bot, Efficiency, Fast, RandomBot, Value};
 pub use danger::Danger;
 pub use net::{Mlp, NetPolicy};
-pub use pimc::{pimc, pimc_with, shortlist, ActionStats, Analysis, PimcConfig};
+pub use pimc::{pimc, pimc_with, shortlist, ActionStats, Analysis, PimcConfig, Rollout};
 pub use solo::{solo, SoloStats};
 pub use view::SeatView;
 pub use world::sample_world;

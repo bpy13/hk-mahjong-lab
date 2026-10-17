@@ -85,6 +85,11 @@ export interface MoveStats {
   win_rate: number
   deal_in_rate: number
   draw_rate: number
+  /** Mean of (this move − the heuristic's move) over the same samples, and its standard error. */
+  diff: number
+  diff_se: number
+  /** The solver's pick (listed first). */
+  recommended?: boolean
 }
 
 export interface Target {
