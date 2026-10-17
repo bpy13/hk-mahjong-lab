@@ -6,7 +6,7 @@
 //!
 //! | Block | Size | Contents |
 //! |---|---|---|
-//! | tile planes | 23 × 34 | own hand (≥1, ≥2, ≥3, 4 copies); melds per seat (count / 4); discards per seat (count / 4); each seat's last three discards (1, ⅔, ⅓); unseen copies / 4; the tile being claimed; the tile just drawn; scoring tiles (dragons, own and prevailing wind); heuristic danger; plain and faan-aware shanten after discarding each tile (scaled, 1 = not in hand) |
+//! | tile planes | 26 × 34 | own hand (≥1, ≥2, ≥3, 4 copies); melds per seat (count / 4); discards per seat (count / 4); each seat's last three discards (1, ⅔, ⅓); unseen copies / 4; the tile being claimed; the tile just drawn; scoring tiles (dragons, own and prevailing wind); heuristic danger; and, for each tile that could be discarded: plain and faan-aware shanten after it (scaled, 1 = not in hand), plain acceptance after it (/ 60), faan-aware acceptance after it (/ 60, only for the discards at the best faan-aware shanten, as the `value` bot counts it), and the faan its target guarantees (/ 10) |
 //! | scalars | 49 | phase; who discarded the claimed tile; wall left; own and prevailing wind; bonus counts per seat; own bonus tiles; exposed melds and hand sizes per seat; liability; each opponent's threat; own shanten, faan-aware shanten, target faan, concealed; minimum faan and flowers on/off |
 //!
 //! [`encode_oracle`] adds what is hidden ([`ORACLE_LEN`] floats: each opponent's
@@ -18,13 +18,13 @@
 
 use crate::danger::Danger;
 use crate::view::SeatView;
-use mahjong_analysis::{faan_shanten, shanten, HandView, UNREACHABLE};
+use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
 use mahjong_hk::{Event, State};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
 
 /// Number of 34-wide tile planes.
-pub const PLANES: usize = 23;
+pub const PLANES: usize = 26;
 /// Number of scalar features.
 pub const SCALARS: usize = 49;
 /// Length of [`encode`]'s output.
@@ -115,10 +115,11 @@ pub fn encode(state: &State, out: &mut [f32]) {
             p[t.index() as usize] = danger.tile(t) as f32;
         }
     }
-    // Shanten after each discard (turn decisions only).
+    // Shanten, acceptance and target faan after each discard (turn decisions).
     let n_melds = view.melds.len();
     let scale = |s: i8| ((s as f32 + 1.0) / 9.0).clamp(0.0, 1.0);
     let in_turn = state.phase_name() == "turn";
+    let mut faan_after = [i8::MAX; NUM_KINDS];
     for t in Tile::all_kinds() {
         let i = t.index() as usize;
         if !in_turn || view.concealed[t] == 0 {
@@ -129,15 +130,22 @@ pub fn encode(state: &State, out: &mut [f32]) {
         let mut h = view.concealed;
         h.remove(t);
         plane(out, 21)[i] = scale(shanten(&h, n_melds));
-        let fs = faan_shanten(
-            &HandView {
-                concealed: &h,
-                ..view.hand_view()
-            },
-            rules,
-        )
-        .shanten;
-        plane(out, 22)[i] = if fs >= UNREACHABLE { 1.0 } else { scale(fs) };
+        let acc = acceptance(&h, &view.unseen, |x| shanten(x, n_melds));
+        plane(out, 23)[i] = (acc as f32 / 60.0).min(1.0);
+        let fs = faan_shanten(&HandView { concealed: &h, ..view.hand_view() }, rules);
+        plane(out, 22)[i] = if fs.shanten >= UNREACHABLE { 1.0 } else { scale(fs.shanten) };
+        plane(out, 25)[i] = fs.target.map_or(0.0, |x| x.faan as f32 / 10.0);
+        faan_after[i] = fs.shanten;
+    }
+    let best = faan_after.iter().copied().min().unwrap_or(i8::MAX);
+    if in_turn && best < UNREACHABLE {
+        for t in Tile::all_kinds().filter(|t| faan_after[t.index() as usize] == best) {
+            let mut h = view.concealed;
+            h.remove(t);
+            let hv = HandView { concealed: &h, ..view.hand_view() };
+            let acc = acceptance(&h, &view.unseen, |x| faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten);
+            plane(out, 24)[t.index() as usize] = (acc as f32 / 60.0).min(1.0);
+        }
     }
 
     // Scalars.
