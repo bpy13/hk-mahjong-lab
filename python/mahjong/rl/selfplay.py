@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
+from typing import Any
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -50,7 +51,7 @@ def force_wins(actions: np.ndarray, masks: np.ndarray) -> np.ndarray:
 
 
 def collect(
-    env: HkVecEnv, choose: Chooser, hands: int, pending: dict[int, list] | None = None
+    env: HkVecEnv, choose: Chooser, hands: int, pending: dict[int, list[Any]] | None = None
 ) -> Batch:
     """Steps ``env`` until ``hands`` hands have finished; returns their decisions.
 
@@ -59,8 +60,8 @@ def collect(
     pending = pending if pending is not None else defaultdict(list)
     out = Batch()
     while out.hands < hands:
-        f, o, m, ids, seats = env.observe()
-        f, o, m = to_arrays(f, o, m)
+        fb, ob, mb, ids, seats = env.observe()
+        f, o, m = to_arrays(fb, ob, mb)
         actions, extra = choose(f, o, m)
         actions = force_wins(actions, m)
         for k, i in enumerate(ids):

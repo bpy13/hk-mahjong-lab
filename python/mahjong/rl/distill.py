@@ -40,8 +40,8 @@ def distill(
     start = time.time()
     history = []
     for c in range(hands // chunk):
-        f, o, m, acts, rets, _ = teacher_data(chunk, teacher, seed * 1_000_000 + c)
-        f, o, m = to_arrays(f, o, m)
+        fb, ob, mb, acts, rets, _ = teacher_data(chunk, teacher, seed * 1_000_000 + c)
+        f, o, m = to_arrays(fb, ob, mb)
         a = torch.tensor(acts, dtype=torch.long)
         g = torch.tensor(rets, dtype=torch.float32) / POINT_SCALE
         mask = torch.from_numpy(m.copy())

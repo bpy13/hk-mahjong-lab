@@ -24,17 +24,17 @@ WEB = Path(__file__).resolve().parents[3] / "web" / "dist"
 
 class RulesIn(BaseModel):
     flowers: bool = True
-    min_faan: int = Field(3, ge=0, le=10)
-    faan_cap: int = Field(10, ge=1, le=13)
+    min_faan: int = Field(default=3, ge=0, le=10)
+    faan_cap: int = Field(default=10, ge=1, le=13)
     payout: str = "half_spicy"
     multiple_winners: str = "all"
     twelve_tile_liability: bool = True
-    prevailing_wind: int = Field(0, ge=0, le=3)
+    prevailing_wind: int = Field(default=0, ge=0, le=3)
 
 
 class NewGame(BaseModel):
     level: str = "medium"
-    seat: int | None = Field(None, ge=0, le=3)
+    seat: int | None = Field(default=None, ge=0, le=3)
     seed: int | None = None
     rules: RulesIn = RulesIn()
 

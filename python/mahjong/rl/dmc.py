@@ -44,7 +44,7 @@ def dmc(
     net = Net.load(init) if init else Net()
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     env = HkVecEnv(envs, seed)
-    pending: dict[int, list] = defaultdict(list)
+    pending: dict[int, list[Any]] = defaultdict(list)
     window: list[dict[str, np.ndarray]] = []
     history: list[dict[str, Any]] = []
     start = time.time()
