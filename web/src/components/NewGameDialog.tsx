@@ -11,7 +11,7 @@ interface Props {
 
 /** Opponents, seat and every rule variant from docs/rules/hk.md. */
 export function NewGameDialog({ meta, onStart, onCancel }: Props) {
-  const [level, setLevel] = useState('medium')
+  const [level, setLevel] = useState('hard')
   const [seat, setSeat] = useState<number | null>(null)
   const [rules, setRules] = useState<Rules>(DEFAULT_RULES)
   const set = <K extends keyof Rules>(k: K, v: Rules[K]) => setRules({ ...rules, [k]: v })
