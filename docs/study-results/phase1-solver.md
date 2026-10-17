@@ -72,4 +72,85 @@ less from the hand itself (3.8 faan on average against 4.2).
 
 ## 4. The solver
 
-*Filled in from `results.json` "solver" and "solver_naive".*
+PIMC against three `value` bots. The first version failed badly, and finding out
+why was the most instructive result of this phase.
+
+### 4.1 Naive PIMC
+
+The textbook version re-deals hidden tiles uniformly at random, then plays the
+candidate with the highest mean. 320 hands per row (200 for 128 samples):
+
+| Samples per decision | Points / hand | Win | Deal-in |
+|---|---|---|---|
+| 16 | −6.1 ± 2.5 | 5.3% | 23.4% |
+| 32 | −4.6 ± 2.8 | 7.5% | 24.4% |
+| 64 | −2.4 ± 3.1 | 10.6% | 22.2% |
+| 128 | −0.4 ± 4.9 | 9.0% | 25.0% |
+
+It wins less than half as often as the bots it is guided by, and deals in more.
+Two causes:
+
+1. **Uniform sampling makes opponents look harmless.** In its own rollouts the
+   solver won 50–70% of hands, while real play gave 5–10%. Measured
+   (`examples/calibrate.rs`), opponents' mean shanten is:
+
+   | Tiles drawn from the wall | Real opponents | Uniform re-deal |
+   |---|---|---|
+   | 0–20 | 2.70 | 3.55 |
+   | 21–41 | 1.54 | 3.24 |
+   | 42–62 | 1.09 | 2.97 |
+   | 63–83 | 0.77 | 2.54 |
+
+   A real player discards what they don't need, so by mid-hand their hand is far
+   more developed than a random one. A searcher that samples uniformly believes no
+   one is close to winning, so it ignores defense.
+2. **Noise.** The real difference between good discards is often below a point,
+   while a single estimate's noise is ±4 points. Taking the argmax picks at random
+   among the shortlist, and even declined a few legal wins by chance.
+
+### 4.2 Fixes
+
+* **Structured determinization** ([`world.rs`](../../crates/search/src/world.rs)):
+  each opponent's hand is the best (lowest shanten) of K random hands from the
+  hidden tiles, with K = 4 + used²/40, where *used* is the number of tiles drawn
+  so far. This reproduces the real means above at every stage, and it still uses
+  only the observer's information.
+* **Anchoring**: every candidate is compared with the `value` bot's choice *on
+  the same samples*. The paired difference is several times less noisy. The
+  solver deviates only when a candidate is better by more than two standard
+  errors, and it always declares a legal win.
+
+240 hands per row:
+
+| Samples per decision | Points / hand | Win | Deal-in | Avg faan |
+|---|---|---|---|---|
+| 32 | +2.9 ± 5.2 | 25.0% | 18.3% | 4.1 |
+| 64 | +1.8 ± 4.5 | 25.8% | 18.8% | 4.2 |
+| 128 | +3.6 ± 5.5 | 25.0% | 18.3% | 4.5 |
+
+Win and deal-in rates are now those of the `value` field (24.2% and 17.9%), and
+wins are bigger (4.1–4.5 faan against 3.9). Pooled over the three rows the
+solver scores **+2.8 ± 2.9 points per hand**. That is a likely gain, but not yet
+significant at 95%. More samples barely help, which points at the remaining
+limits:
+* the rollout bot (`fast`, itself 2.3 points worse than `value`) plays out every
+  future;
+* sampled opponents are shaped by shanten alone, not by what they discarded.
+
+### 4.3 What it costs
+
+At 32 samples × 4 candidates a decision takes about 0.2 s on 8 threads; 128
+samples about 0.8 s. The UI's 高級 bot uses 96 samples with a 0.5 s cap.
+
+## 5. Summary
+
+* The 3-faan minimum is what makes Hong Kong strategy different: playing for speed
+  alone costs 4.5 points per hand at 3 faan and nothing at 0–1.
+* Claiming melds is worth about 3 points per hand under this table, more than the
+  concealed bonus it gives up.
+* Simple folding gives up more than it saves.
+* PIMC needs opponent hands sampled as developed as real ones, and needs to be
+  anchored to a good heuristic. Naive PIMC is far worse than the heuristic it
+  rolls out with.
+* Corrected PIMC is about as good as the best heuristic, probably slightly
+  better. Phase 3 asks whether learning does better.

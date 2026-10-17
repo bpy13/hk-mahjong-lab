@@ -60,7 +60,9 @@ are `int`, results are dicts). `python/mahjong/_core.pyi` documents and types it
 | Invariants | Random hands under random rule variants: tiles conserved, zero-sum, termination, last-discard rule, determinization keeps the observer's view (`properties.rs`) |
 | Whole engine | Differential test against an independent pure-Python implementation (`python/tests/reference/`): same legal actions at every step of 3,000 random and 1,500 clumped-wall hands; same score on 20,000 constructed hands covering every hand-based pattern |
 | Shanten | Agrees with the engine's win check on 60,000 random hands |
-| Solver and bots | Identical decisions for positions that differ only in hidden tiles |
+| Solver, bots, features | Identical decisions (and identical network inputs) for positions that differ only in hidden tiles |
+| Server | A move submitted while hints are computing succeeds (regression test) |
+| UI | Unit tests (Vitest) and a browser test that plays a full hand with hints and review (Playwright) |
 
 ## Performance (Apple M1)
 
@@ -71,4 +73,7 @@ are `int`, results are dicts). `python/mahjong/_core.pyi` documents and types it
 | Faan-aware shanten | ~6 µs |
 | `fast` bot, a whole hand for all four seats | ~1.7 ms |
 | `value` bot, a whole hand | ~40 ms |
-| PIMC, 200 samples × 6 candidates, 8 threads | ~0.6 s |
+| PIMC, 32 samples × 4 candidates, 8 threads | ~0.2 s |
+| Feature encoding (one decision) | ~80 µs |
+| Network forward pass (831 → 512 → 512 → 256 → 134, Rust) | ~160 µs |
+| A hand played by the network in all four seats | ~18 ms |

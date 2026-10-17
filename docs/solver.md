@@ -63,23 +63,34 @@ it. Phase 3 trains a learned replacement.
 
 1. **Candidates**: every special action (win, kongs, claims, pass) plus the best
    few discards by the faan-aware measure.
-2. **Determinizations**: the other hands and the wall are re-dealt at random,
-   consistent with everything the player has seen (their hand, all melds, all
-   discards, all bonus tiles, the hand sizes). Hidden claim declarations of other
-   seats are forgotten and asked again.
+2. **Determinizations**: the other hands and the wall are re-dealt consistently
+   with everything the player has seen (their hand, all melds, all discards, all
+   bonus tiles, the hand sizes). Each opponent's hand is the best (lowest
+   shanten) of K random hands from the hidden tiles, with K growing over the hand
+   (K = 4 + used²/40), calibrated so sampled hands are as developed as real
+   opponents' hands ([`world.rs`](../crates/search/src/world.rs); uniform
+   re-dealing made the solver ignore danger, see the Phase 1 results). Hidden
+   claim declarations of other seats are forgotten and asked again.
 3. **Rollouts**: in each determinization every candidate is played to the end of
    the hand by the `fast` bot in all four seats. All candidates share the
    determinization (common random numbers), so their *differences* are measured
    with much less noise than their absolute values.
 4. **Output**: per candidate, mean points with a 95% confidence interval, win
-   rate, deal-in rate and draw rate. Batches run in parallel (rayon).
+   rate, deal-in rate and draw rate, and the **paired difference** from the
+   `value` bot's choice (the baseline) with its standard error. Batches run in
+   parallel (rayon).
+5. **Choice** (for the bots): always declare a legal win; otherwise play the best
+   candidate only if it beats the baseline by more than two standard errors of the
+   paired difference, else the baseline. With few samples the search defers to the
+   heuristic instead of acting on noise.
 
 **No peeking.** Determinization sorts the pool of hidden tiles before shuffling, so
 two positions that differ only in hidden tiles produce *identical* solver output
 for the same seed; a test checks this, and that every bot's decision is unchanged.
 
-**How far to trust it.** PIMC assumes the hidden tiles are uniformly random (it
-infers nothing from how opponents have played) and evaluates each sampled future
+**How far to trust it.** PIMC infers little from how opponents have played
+(only how developed hands typically are at this stage, not which tiles they
+discarded) and evaluates each sampled future
 as if everyone could see it ("strategy fusion"). Its numbers are estimates *under
 the rollout bot's style of play*. The confidence intervals cover sampling noise
 only, not these model errors. Measured strength is in
