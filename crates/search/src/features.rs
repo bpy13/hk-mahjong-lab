@@ -132,8 +132,18 @@ pub fn encode(state: &State, out: &mut [f32]) {
         plane(out, 21)[i] = scale(shanten(&h, n_melds));
         let acc = acceptance(&h, &view.unseen, |x| shanten(x, n_melds));
         plane(out, 23)[i] = (acc as f32 / 60.0).min(1.0);
-        let fs = faan_shanten(&HandView { concealed: &h, ..view.hand_view() }, rules);
-        plane(out, 22)[i] = if fs.shanten >= UNREACHABLE { 1.0 } else { scale(fs.shanten) };
+        let fs = faan_shanten(
+            &HandView {
+                concealed: &h,
+                ..view.hand_view()
+            },
+            rules,
+        );
+        plane(out, 22)[i] = if fs.shanten >= UNREACHABLE {
+            1.0
+        } else {
+            scale(fs.shanten)
+        };
         plane(out, 25)[i] = fs.target.map_or(0.0, |x| x.faan as f32 / 10.0);
         faan_after[i] = fs.shanten;
     }
@@ -142,8 +152,13 @@ pub fn encode(state: &State, out: &mut [f32]) {
         for t in Tile::all_kinds().filter(|t| faan_after[t.index() as usize] == best) {
             let mut h = view.concealed;
             h.remove(t);
-            let hv = HandView { concealed: &h, ..view.hand_view() };
-            let acc = acceptance(&h, &view.unseen, |x| faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten);
+            let hv = HandView {
+                concealed: &h,
+                ..view.hand_view()
+            };
+            let acc = acceptance(&h, &view.unseen, |x| {
+                faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten
+            });
             plane(out, 24)[t.index() as usize] = (acc as f32 / 60.0).min(1.0);
         }
     }
