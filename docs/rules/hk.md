@@ -104,7 +104,9 @@ Each of the other three players may declare at most one claim on the discard:
 ### 5.1 Concealed kong 暗槓
 
 On their turn, a player holding all four copies of a kind may lay them down as a
-concealed kong, then draw a replacement tile from the back of the wall.
+concealed kong, then draw a replacement tile from the back of the wall. The kong's
+tile is shown when it is declared. Only a player waiting on that tile for
+**thirteen orphans** (#25) may rob a concealed kong (§5.2).
 
 ### 5.2 Added kong 加槓
 
@@ -112,7 +114,7 @@ On their turn, a player with an exposed pung who holds the fourth copy may add i
 the pung, then draw a replacement. Before the replacement is drawn, the other players
 may **rob the kong** 搶槓: claim the added tile for a win as if it had been
 discarded (§4.1, win only). If anyone robs it, the kong is cancelled and the hand
-ends. Concealed kongs cannot be robbed. **[confirm]**
+ends. A concealed kong can be robbed only for thirteen orphans (§5.1).
 
 ### 5.3 Bonus tiles during play
 
@@ -124,7 +126,7 @@ claim them.
 
 A player who completes their hand with a kong's replacement tile wins by self-draw
 (§7, patterns 7 and 8). If the replacement is a bonus tile, the tile drawn to replace
-it still counts as the kong's replacement. **[confirm]**
+it still counts as the kong's replacement.
 
 ## 6. Winning hands
 
@@ -155,14 +157,14 @@ Where a row says *replaces* another, only the larger of the two is counted.
 | # | Pattern | Faan | Condition |
 |---|---|---|---|
 | 1 | 自摸 Self-drawn | 1 | The winning tile was drawn from the wall (a replacement draw counts) |
-| 2 | 門前清 Concealed hand | 1 | No exposed melds. Concealed kongs are allowed. Applies to self-drawn and discard wins alike **[confirm]** |
+| 2 | 門前清 Concealed hand | 1 | No exposed melds. Concealed kongs are allowed. Applies to self-drawn and discard wins alike, so a concealed self-drawn hand scores 2 with #1 |
 | 3 | 無花 No flowers | 1 | The winner has no bonus tiles. Only when flowers are in play |
 | 4 | 正花 Seat flower | 1 each | Holding the flower and/or the season whose number matches the seat (East=1, South=2, West=3, North=4) |
 | 5 | 一台花 Full set | 2 | Holding all four flowers, or all four seasons. Replaces the seat-flower faan from that set; both sets give 4 |
 | 6 | 海底撈月 Last tile | 1 | Self-drawn win on the last tile of the wall. 自摸 also counts |
-| 7 | 槓上開花 Kong replacement | 2 | Win on a kong's replacement tile. 自摸 also counts **[confirm]** |
-| 8 | 槓上槓 Double kong | 8 | Win on the replacement tile of a second kong declared in the same turn. Replaces #7 |
-| 9 | 搶槓 Robbing the kong | 1 | Win on the tile someone else adds to a pung (§5.2) |
+| 7 | 槓上開花 Kong replacement | 1 | Win on a kong's replacement tile. 自摸 also counts, so the two give 2 together |
+| 8 | 槓上槓 Double kong | 8 | Win on the replacement tile of a second kong declared in the same turn. 8 in total: replaces #7 and #1 |
+| 9 | 搶槓 Robbing the kong | 1 | Win on the tile someone else adds to a pung (§5.2), or on a concealed kong's tile with thirteen orphans (§5.1) |
 
 ### 7.2 Meld patterns
 
@@ -177,7 +179,7 @@ Where a row says *replaces* another, only the larger of the two is counted.
 | # | Pattern | Faan | Example | Notes |
 |---|---|---|---|---|
 | 13 | 雞糊 Chicken hand | 0 | `123m 555p 789s 234s 99p` | No pattern applies |
-| 14 | 平糊 All chows | 1 | `234m 567m 345p 678s 99s` | Four chows and any pair **[confirm]** |
+| 14 | 平糊 All chows | 1 | `234m 567m 345p 678s 99s` | Four chows and any pair. Bonus tiles are never part of the hand, so flowers do not affect it |
 | 15 | 對對糊 All pungs | 3 | `222m 555p 888s EEE 99p` | Four pungs or kongs |
 | 16 | 混一色 Half flush | 3 | `123p 456p 789p RRR NN` | One suit plus honours, with at least one honour |
 | 17 | 清一色 Full flush | 7 | `111s 234s 567s 789s 55s` | One suit, no honours. Replaces #16 |
@@ -236,7 +238,7 @@ half of the previous doubling. (Variant `payout = full_spicy` 全辣 keeps doubl
 | 七搶一 (#32) | The player who drew the 8th bonus tile pays 1 share |
 | Exhaustive draw (§9) | Nobody pays |
 
-Kongs carry no separate payment. **[confirm]** Every hand is zero-sum.
+Kongs carry no separate payment. Every hand is zero-sum.
 
 ### 8.3 Liability: the 12-tile rule 十二張落地
 
@@ -251,27 +253,16 @@ Kongs carry no separate payment. **[confirm]** Every hand is zero-sum.
 ## 9. Exhaustive draw 流局
 
 When a draw is due and the wall is empty, the hand ends with no winner and no
-payment. No tiles are held back from the wall. **[confirm]**
+payment. No tiles are held back from the wall.
 
 ## 10. Matches (later)
 
 A match is four rounds (East, South, West, North prevailing wind). The dealer keeps
 the deal after winning the hand or after an exhaustive draw; otherwise the deal
-passes to the next seat. **[confirm]** Phase 1 studies single hands; matches are added
+passes to the next seat. Phase 1 studies single hands; matches are added
 when the study needs them.
 
 ## 11. Points to confirm
 
-1. §4.1.7: the last discard can only be claimed for a win.
-2. §5.2: only added kongs can be robbed. (Some tables also let thirteen orphans rob a
-   concealed kong.)
-3. §5.4: if a kong's replacement tile is a bonus tile, the tile drawn after it still
-   counts as the kong's replacement for pattern #7.
-4. #2: 門前清 counts on self-drawn wins too, alongside 自摸 (2 faan for a concealed
-   self-drawn hand).
-5. #7: 槓上開花 also scores 自摸 (3 faan together).
-6. #14: 平糊 allows any pair, and flowers don't disqualify it. (Some tables require a
-   non-scoring pair, or no flowers, or a winning tile that has two-sided waits.)
-7. §8.2: kongs carry no separate payment.
-8. §9: play continues until the wall is empty; no tiles are held back.
-9. §10: the dealer keeps the deal after a win or a draw.
+1. §4.1.7: the last discard of the hand (made after the last wall tile has been
+   drawn) can be claimed only for a win, not for a pung, kong or chow.
