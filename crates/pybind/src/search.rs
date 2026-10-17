@@ -1,0 +1,204 @@
+//! Bindings for the bots, the danger model, the solver and tournaments.
+
+use crate::convert::rules_from;
+use crate::{rng_from, value_error, PyState};
+use mahjong_analysis::{discards, faan_shanten, shanten, Structure, SuitPlan, Target};
+use mahjong_games::{Game, Policy};
+use mahjong_search::{duplicate, pimc, solo as solo_sim, Agent, Danger, PimcConfig, SeatView};
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
+use std::time::Duration;
+
+fn target_dict<'py>(py: Python<'py>, t: &Target) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    let plan = match t.plan {
+        SuitPlan::Mixed => "mixed".to_string(),
+        SuitPlan::HalfFlush(s) => format!("half_flush_{}", s.to_char()),
+        SuitPlan::FullFlush(s) => format!("full_flush_{}", s.to_char()),
+        SuitPlan::Honours => "honours".to_string(),
+        SuitPlan::Orphans => "orphans".to_string(),
+    };
+    d.set_item("plan", plan)?;
+    let structure = match t.structure {
+        Structure::Any => "any",
+        Structure::AllPungs => "all_pungs",
+        Structure::AllChows => "all_chows",
+    };
+    d.set_item("structure", structure)?;
+    d.set_item("pungs", t.pungs.iter().map(|x| x.index() as u32).collect::<Vec<_>>())?;
+    d.set_item("faan", t.faan)?;
+    d.set_item("limit", t.limit)?;
+    Ok(d)
+}
+
+fn require_live(state: &PyState) -> PyResult<usize> {
+    state.inner.current_player().ok_or_else(|| value_error("the hand is over"))
+}
+
+/// Runs the PIMC solver for the player to act. Returns the candidates, best
+/// first, with mean points, 95% interval, win, deal-in and draw rates.
+#[pyfunction]
+#[pyo3(signature = (state, samples=400, candidates=6, time_ms=None, seed=0))]
+pub(crate) fn analyze<'py>(
+    py: Python<'py>,
+    state: &PyState,
+    samples: usize,
+    candidates: usize,
+    time_ms: Option<u64>,
+    seed: u64,
+) -> PyResult<Bound<'py, PyDict>> {
+    require_live(state)?;
+    let config = PimcConfig { samples, candidates, time_limit: time_ms.map(Duration::from_millis), seed };
+    let s = state.inner.clone();
+    let a = py.detach(move || pimc(&s, &config));
+    let d = PyDict::new(py);
+    d.set_item("seat", a.seat)?;
+    d.set_item("samples", a.samples)?;
+    d.set_item("elapsed_ms", a.elapsed.as_secs_f64() * 1000.0)?;
+    let moves = PyList::empty(py);
+    for m in &a.moves {
+        let md = PyDict::new(py);
+        md.set_item("action", m.action.code())?;
+        md.set_item("text", m.action.to_string())?;
+        md.set_item("n", m.n)?;
+        md.set_item("mean", m.mean)?;
+        md.set_item("ci95", m.ci95)?;
+        md.set_item("win_rate", m.win_rate)?;
+        md.set_item("deal_in_rate", m.deal_in_rate)?;
+        md.set_item("draw_rate", m.draw_rate)?;
+        moves.append(md)?;
+    }
+    d.set_item("moves", moves)?;
+    Ok(d)
+}
+
+/// The action an agent (spec string, e.g. `"value"` or `"pimc:samples=64"`)
+/// chooses for the player to act.
+#[pyfunction]
+#[pyo3(signature = (state, spec, seed=None))]
+pub(crate) fn agent_action(py: Python<'_>, state: &PyState, spec: &str, seed: Option<u64>) -> PyResult<u16> {
+    require_live(state)?;
+    let agent = Agent::parse(spec).map_err(value_error)?;
+    let s = state.inner.clone();
+    Ok(py.detach(move || {
+        let legal = s.legal_actions_vec();
+        agent.choose(&s, &legal, &mut rng_from(seed)).code()
+    }))
+}
+
+/// The heuristic danger model for `seat`: per-tile deal-in estimates (34) and
+/// each seat's estimated chance of waiting.
+#[pyfunction]
+pub(crate) fn danger<'py>(py: Python<'py>, state: &PyState, seat: usize) -> PyResult<Bound<'py, PyDict>> {
+    crate::check_seat(seat)?;
+    let d = Danger::estimate(&state.inner, seat);
+    let out = PyDict::new(py);
+    out.set_item("tiles", mahjong_tiles::Tile::all_kinds().map(|t| d.tile(t)).collect::<Vec<_>>())?;
+    out.set_item("threat", (0..4).map(|p| if p == seat { 0.0 } else { d.threat(p) }).collect::<Vec<_>>())?;
+    Ok(out)
+}
+
+/// `seat`'s hand: plain shanten, faan-aware shanten and its target plan.
+#[pyfunction]
+pub(crate) fn hand_progress<'py>(py: Python<'py>, state: &PyState, seat: usize) -> PyResult<Bound<'py, PyDict>> {
+    crate::check_seat(seat)?;
+    let view = SeatView::of(&state.inner, seat);
+    let fs = faan_shanten(&view.hand_view(), &view.rules);
+    let d = PyDict::new(py);
+    d.set_item("shanten", shanten(&view.concealed, view.melds.len()))?;
+    d.set_item("faan_shanten", fs.shanten)?;
+    d.set_item("target", fs.target.as_ref().map(|t| target_dict(py, t)).transpose()?)?;
+    Ok(d)
+}
+
+/// For the player to act on their turn: every discard with shanten, acceptance,
+/// faan-aware shanten, faan-aware acceptance and target plan.
+#[pyfunction]
+pub(crate) fn discard_table<'py>(py: Python<'py>, state: &PyState) -> PyResult<Bound<'py, PyList>> {
+    let seat = require_live(state)?;
+    if state.inner.phase_name() != "turn" {
+        return Err(value_error("discard_table needs a turn decision"));
+    }
+    let view = SeatView::of(&state.inner, seat);
+    let rows = discards(&view.hand_view(), &view.rules);
+    let out = PyList::empty(py);
+    for r in rows {
+        let d = PyDict::new(py);
+        d.set_item("tile", r.tile.index() as u32)?;
+        d.set_item("shanten", r.shanten)?;
+        d.set_item("ukeire", r.ukeire)?;
+        d.set_item("faan_shanten", r.faan_shanten)?;
+        d.set_item("faan_ukeire", r.faan_ukeire)?;
+        d.set_item("target", r.target.as_ref().map(|t| target_dict(py, t)).transpose()?)?;
+        out.append(d)?;
+    }
+    Ok(out)
+}
+
+/// Offense-only estimates for each discard of the player to act (no opponents):
+/// P(reaching a legal self-drawn win within `draws` draws), mean faan, mean draws.
+#[pyfunction]
+#[pyo3(signature = (state, draws=None, samples=200, seed=0))]
+pub(crate) fn solo<'py>(
+    py: Python<'py>,
+    state: &PyState,
+    draws: Option<usize>,
+    samples: usize,
+    seed: u64,
+) -> PyResult<Bound<'py, PyList>> {
+    let seat = require_live(state)?;
+    if state.inner.phase_name() != "turn" {
+        return Err(value_error("solo needs a turn decision"));
+    }
+    let view = SeatView::of(&state.inner, seat);
+    let draws = draws.unwrap_or(state.inner.wall_remaining() / 4);
+    let rows = py.detach(move || solo_sim(&view, draws, samples, seed));
+    let out = PyList::empty(py);
+    for r in rows {
+        let d = PyDict::new(py);
+        d.set_item("tile", r.tile.index() as u32)?;
+        d.set_item("win_rate", r.win_rate)?;
+        d.set_item("mean_faan", r.mean_faan)?;
+        d.set_item("mean_draws", r.mean_draws)?;
+        out.append(d)?;
+    }
+    Ok(out)
+}
+
+/// A duplicate tournament: each wall is played four times with the four agents
+/// rotated through the seats. Returns per-agent totals (input order) and draws.
+#[pyfunction]
+#[pyo3(signature = (agents, deals, seed=0, **rules))]
+pub(crate) fn tournament<'py>(
+    py: Python<'py>,
+    agents: Vec<String>,
+    deals: usize,
+    seed: u64,
+    rules: Option<&Bound<'py, PyDict>>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if agents.len() != 4 {
+        return Err(value_error("need exactly four agent specs"));
+    }
+    let rules = rules_from(rules)?;
+    let parsed = agents.iter().map(|s| Agent::parse(s).map_err(value_error)).collect::<PyResult<Vec<_>>>()?;
+    let arr: [Agent; 4] = parsed.try_into().map_err(|_| value_error("four agents"))?;
+    let (res, draws) = py.detach(move || duplicate(&arr, deals, rules, seed));
+    let out = PyDict::new(py);
+    let list = PyList::empty(py);
+    for (spec, r) in agents.iter().zip(res) {
+        let d = PyDict::new(py);
+        d.set_item("agent", spec)?;
+        d.set_item("hands", r.hands)?;
+        d.set_item("mean", r.mean())?;
+        d.set_item("ci95", r.ci95())?;
+        d.set_item("wins", r.wins)?;
+        d.set_item("self_drawn", r.self_drawn)?;
+        d.set_item("deal_ins", r.deal_ins)?;
+        d.set_item("win_faan", r.win_faan)?;
+        list.append(d)?;
+    }
+    out.set_item("agents", list)?;
+    out.set_item("draws", draws)?;
+    out.set_item("hands", 4 * deals)?;
+    Ok(out)
+}

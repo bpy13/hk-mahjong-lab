@@ -410,8 +410,10 @@ dependencies = [
 name = "mahjong-pybind"
 version = "0.1.0"
 dependencies = [
+ "mahjong-analysis",
  "mahjong-games",
  "mahjong-hk",
+ "mahjong-search",
  "mahjong-tiles",
  "pyo3",
  "rand 0.8.8",
