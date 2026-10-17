@@ -11,6 +11,7 @@
 //! The friendlier Python API is in `python/mahjong/hk.py`.
 
 mod convert;
+mod search;
 
 use convert::{event_dict, result_dict, rules_from, score_dict, tile_from};
 use mahjong_games::Game;
@@ -303,6 +304,13 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(action_text, m)?)?;
     m.add_function(wrap_pyfunction!(score_hand, m)?)?;
     m.add_function(wrap_pyfunction!(convert::pattern_names, m)?)?;
+    m.add_function(wrap_pyfunction!(search::analyze, m)?)?;
+    m.add_function(wrap_pyfunction!(search::agent_action, m)?)?;
+    m.add_function(wrap_pyfunction!(search::danger, m)?)?;
+    m.add_function(wrap_pyfunction!(search::hand_progress, m)?)?;
+    m.add_function(wrap_pyfunction!(search::discard_table, m)?)?;
+    m.add_function(wrap_pyfunction!(search::solo, m)?)?;
+    m.add_function(wrap_pyfunction!(search::tournament, m)?)?;
     m.add_class::<PyState>()?;
     Ok(())
 }
