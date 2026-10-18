@@ -1,9 +1,8 @@
 # Reinforcement learning
 
 Phase 3 trains networks to play Hong Kong mahjong and compares them with the
-Phase 1 bots and solver. **Status:** the method and code are in place; the full
-training run has not been completed yet (an earlier run was discarded after a
-rule change). Code:
+Phase 1 bots and solver. **Status:** the full study ran on 2026-10-18;
+results are in [study-results/phase3-rl.md](study-results/phase3-rl.md). Code:
 `crates/search/src/features.rs` (observation encoding), `crates/search/src/net.rs`
 (running networks in Rust), `crates/pybind/src/rl.rs` (batched environments,
 teacher data) and `python/mahjong/rl/` (training).
@@ -20,23 +19,24 @@ everything after that is self-play.
 ## 2. What the network sees
 
 Features are computed in Rust from the acting seat's point of view (seats are
-relative: me, next, across, previous), 831 floats:
+relative: me, next, across, previous), 933 floats:
 
-* 23 tile planes of 34: own hand (one plane per copy count); melds, discards and
+* 26 tile planes of 34: own hand (one plane per copy count); melds, discards and
   the last three discards of each seat; unseen copies; the tile being claimed;
   the tile just drawn; scoring tiles (dragons and the two value winds); the
-  heuristic danger of each tile; plain and faan-aware shanten after discarding
-  each tile;
+  heuristic danger of each tile; and, for each tile that could be discarded,
+  plain and faan-aware shanten after it, plain and faan-aware acceptance after
+  it, and the faan its target guarantees;
 * 49 scalars: decision phase, who discarded the claimed tile, wall left, winds,
   bonus tiles, exposed melds and hand sizes, liability, each opponent's threat,
   own shanten, faan-aware shanten, target faan, whether still concealed, and the
   minimum faan.
 
-The hand-made planes (danger, shanten after each discard) give the network the
+The hand-made planes (danger, shanten and acceptance after each discard) give the network the
 results of the Phase 1 analysis for free; it can learn to trust or ignore them.
 
 **Oracle features** (136 floats: each opponent's concealed tiles and the next 16
-wall tiles) are appended for training only, and are zero at play time.
+wall tiles, as counts per kind) are appended for training only, and are zero at play time.
 
 A test checks that two positions that differ only in hidden tiles produce
 identical features, so the network cannot see what it should not.
@@ -44,7 +44,7 @@ identical features, so the network cannot see what it should not.
 ## 3. Network
 
 ```
-features (831) + oracle (136) → 512 → 512 → 256 ─┬─ q   (134)  points per action (DMC)
+features (933) + oracle (136) → 512 → 512 → 256 ─┬─ q   (134)  points per action (DMC)
                                                  ├─ pi  (134)  policy logits (imitation, PPO)
                                                  └─ v   (1)    points (PPO baseline)
 ```
@@ -88,7 +88,7 @@ bot or by the network itself in every seat.
 
 ```sh
 python experiments/phase3_rl.py --quick     # a few minutes, checks everything runs
-python experiments/phase3_rl.py             # the full study (about 4.5 hours on an M1)
+python experiments/phase3_rl.py             # the full study (about 5.3 hours on an M1)
 ```
 
 Stages resume: a stage whose model already exists in `models/` is skipped.
