@@ -263,7 +263,9 @@ paired by wall, with a bootstrap 95 % interval.
   - Notes: results depend on `seed` and `deals` only; the per-pattern shares are what AC8's
     ±30 % check reads.
 
-- [ ] **Task 4: Self-play logs with hidden hands** `[parallel-ok]`
+- [x] **Task 4: Self-play logs with hidden hands** `[parallel-ok]`
+  (done: train 2,092,494 rows, hold-out 435,334 rows; one row per decision from the actor's
+  view, not four; `test_logs.py` 2 passed)
   - Files: create `crates/search/src/log.rs` (row layout and writer), `crates/search/examples/
     selfplay_log.rs`, `python/mahjong/belief/__init__.py`, `python/mahjong/belief/logs.py`
     (numpy reader), `python/tests/test_logs.py`; modify `.gitignore` (`runs/logs/`).
@@ -390,6 +392,9 @@ paired by wall, with a bootstrap 95 % interval.
     code.
 
 - [ ] **Task 9: Target value table** `[parallel-ok]`
+  (table from the 20,000-hand fit committed, 7e18101. Not ticked: 31 of 37 held-out buckets
+  within their 95 % interval; the misses all under-predict by 0.4–2 points (limit hands 2.1).
+  Open item: refit with a bias check, or accept for the EV bot.)
   - Files: create `crates/search/examples/fit_targets.rs` (fits from self-play, writes
     `crates/search/src/target_tables.rs`), `crates/search/src/target_value.rs` (lookup:
     `P(legal win before the hand ends | target kind, faan-shanten 0–4, tiles-left bucket 0–5,
