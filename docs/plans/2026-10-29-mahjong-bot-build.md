@@ -64,6 +64,13 @@ over 12 hours are announced before they start (proposal §7).
   20 s compile; every suite `ok` (hk 14 tests + scenarios, analysis, search, app-api 14 + 1
   ignored timing test, pybind, tiles); the slowest suites take 20–30 s each.
 - `pytest`, `ruff`, `mypy`, `make test-web`: not runnable until Task 0 (nothing installed).
+- **After Task 0 (measured 2026-10-29, other projects' jobs loading the CPU; `make` is not
+  installed, so each recipe's lines ran by hand):** `make test` ≈ **11 min** (`cargo test
+  --workspace` 277 s, `pytest` 368 s with 18 passed, `vitest` 3 s with 7 passed); `make lint`
+  ≈ **2 min** (fmt 1 s, clippy 1 s cached, ruff check 4 s, ruff format 1 s, mypy 105 s cold,
+  `tsc -b` 4 s, oxlint 3 s), all exit 0. Two of three `cargo test --workspace` runs failed
+  two app-api wall-clock budget tests under that load; they pass alone
+  (`docs/known-issues.md`). torch 2.14.1+cu130, `cuda.is_available()` True.
 - GPU: RTX 4060 Ti, 1.6 GB used, 0 % busy at planning time (big2 training not yet started).
 
 ## Shared resources (named so parallel helpers stay safe)
@@ -185,7 +192,7 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 0 – Environment, `from_position`, harness, logs (opus)
 
-- [ ] **Task 0: Make the env work on this PC**
+- [x] **Task 0: Make the env work on this PC**
   - Files: modify `CLAUDE.md` (Environment section: rustup cargo, `PYO3_PYTHON`, Windows
     notes), `Makefile` (a `dev-windows` target or a note), `docs/known-issues.md` (create:
     the GNU-cargo trap, App Control retries).

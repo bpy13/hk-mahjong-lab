@@ -12,11 +12,41 @@ conda activate mahjong
 make dev                              # build the Rust extension + install Python package (editable)
 ```
 
+### Windows (this PC)
+
+The env's own `cargo` (conda-forge, GNU toolchain) cannot link on Windows (`dlltool.exe` not
+found). Use rustup's MSVC toolchain instead, and tell PyO3 which Python to build against.
+`environment.yml` keeps its `rust` line for macOS; this is the Windows override.
+`make` is not installed here: run each Makefile recipe's lines by hand (`make dev-windows` lists
+them). In PowerShell, from the repo root:
+
+```powershell
+conda activate mahjong
+$env:PATH = "C:\Users\brian\.cargo\bin;" + $env:PATH        # rustup's cargo before the env's
+$env:PYO3_PYTHON = "C:\Users\brian\miniconda3\envs\mahjong\python.exe"
+pip install -e ".[dev]"                                      # builds mahjong._core (~1 min)
+pip install torch --index-url https://download.pytorch.org/whl/cu130   # driver 610.88
+Push-Location web; npm install; Pop-Location                 # `npm install --prefix web` fails here
+```
+
+Check: `python -c "import mahjong._core"` and
+`python -c "import torch; print(torch.cuda.is_available())"` (prints `True`).
+
+Measured on 2026-10-29 while other projects' jobs loaded the CPU (Task 0 of
+`docs/plans/2026-10-29-mahjong-bot-build.md`):
+
+| Recipe | Steps | Time |
+|---|---|---|
+| `make test` | `cargo test --workspace` 277 s, `pytest` 368 s (18 tests), `vitest` 3 s | ~11 min |
+| `make lint` | fmt 1 s, clippy 1 s (cached), ruff 4 s, mypy 105 s (cold), tsc 4 s, oxlint 3 s | ~2 min |
+
+On an idle PC `cargo test --workspace` took 112 s. Traps: `docs/known-issues.md`.
+
 ## Commands
 
 | Task | Command |
 |---|---|
-| All tests | `make test` (Rust + Python) |
+| All tests | `make test` (Rust + Python + web) |
 | Rust tests only | `cargo test` |
 | Python tests only | `pytest` |
 | Lint / format | `make lint`, `make fmt` |
