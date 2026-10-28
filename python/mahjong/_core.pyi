@@ -109,8 +109,19 @@ def solo(
 ) -> list[dict[str, Any]]:
     """Offense-only win estimates per discard."""
 
-def tournament(agents: list[str], deals: int, seed: int = 0, **rules: object) -> dict[str, Any]:
-    """Duplicate tournament between four agent specs."""
+def tournament(
+    agents: list[str],
+    deals: int,
+    seed: int = 0,
+    seatings: int = 4,
+    bootstrap: int = 2000,
+    **rules: object,
+) -> dict[str, Any]:
+    """Duplicate tournament between four agent specs, in 4 or 24 seatings per wall.
+
+    Returns the ``hk-tournament/1`` report: per-agent points with independent and
+    wall-paired bootstrap intervals, rates, pattern shares, pairwise differences.
+    """
 
 def feature_sizes() -> tuple[int, int, int]:
     """``(STATE_LEN, ORACLE_LEN, NUM_ACTION_CODES)``."""

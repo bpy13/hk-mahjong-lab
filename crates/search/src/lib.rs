@@ -1,6 +1,7 @@
 //! Players and solvers for Hong Kong mahjong.
 //!
-//! * [`agent`]: agents by spec string, and duplicate tournaments.
+//! * [`agent`]: agents by spec string.
+//! * [`tournament`]: duplicate tournaments (4 rotations or all 24 seatings).
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
 //! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
 //! * [`features`]: the observation encoding for learning.
@@ -20,14 +21,19 @@ pub mod log;
 pub mod net;
 pub mod pimc;
 pub mod solo;
+pub mod tournament;
 pub mod view;
 pub mod world;
 
-pub use agent::{duplicate, Agent, AgentResult, TournamentResult};
+pub use agent::Agent;
 pub use bots::{Bot, Efficiency, Fast, RandomBot, Value};
 pub use danger::Danger;
 pub use net::{Mlp, NetPolicy};
 pub use pimc::{pimc, pimc_with, shortlist, ActionStats, Analysis, PimcConfig, Rollout};
 pub use solo::{solo, SoloStats};
+pub use tournament::{
+    duplicate, tournament, AgentResult, Seatings, Summary, Tournament, TournamentConfig,
+    TournamentResult,
+};
 pub use view::SeatView;
 pub use world::sample_world;

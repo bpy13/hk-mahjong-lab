@@ -95,7 +95,14 @@ def tournament_cmd(
     ],
     deals: int = 100,
     seed: int = 0,
-    output: Annotated[Path | None, typer.Option("--json", help="Write results as JSON.")] = None,
+    seatings: Annotated[
+        int, typer.Option(help="Seatings per wall: 4 (rotations) or 24 (all permutations).")
+    ] = 4,
+    bootstrap: Annotated[int, typer.Option(help="Bootstrap resamples of the walls.")] = 2000,
+    output: Annotated[
+        Path | None,
+        typer.Option("--out", "--json", help="Write the hk-tournament/1 report as JSON."),
+    ] = None,
     no_flowers: NoFlowers = False,
     min_faan: MinFaan = 3,
     faan_cap: FaanCap = 10,
@@ -103,30 +110,55 @@ def tournament_cmd(
     multiple_winners: Multi = "all",
     no_liability: NoLiability = False,
 ) -> None:
-    """Duplicate tournament: every wall played four times, agents rotated."""
+    """Duplicate tournament: every wall played in 4 rotations or all 24 seatings.
+
+    Prints points per hand with the independent-hands interval and the wall-paired
+    bootstrap interval, the rates, and the paired difference of every pair.
+    """
     if len(agents) != 4:
         raise typer.BadParameter("give exactly four agents")
+    if seatings not in (4, 24):
+        raise typer.BadParameter("--seatings must be 4 or 24")
     rules = make_rules(no_flowers, min_faan, faan_cap, payout, multiple_winners, no_liability)
-    res = tournament(agents, deals, seed, **rules.kwargs())
-    table = Table(title=f"{deals} walls × 4 seatings, draws {res['draws'] / res['hands']:.1%}")
-    for col in ("agent", "points/hand", "±95%", "win", "self-drawn", "deal-in", "avg faan"):
+    res = tournament(agents, deals, seed, seatings, bootstrap, **rules.kwargs())
+    table = Table(title=f"{deals} walls × {seatings} seatings, draws {res['draw_rate']:.1%}")
+    for col in (
+        "agent",
+        "points/hand",
+        "±95%",
+        "wall bootstrap 95%",
+        "win",
+        "self-drawn",
+        "deal-in",
+        "avg faan",
+    ):
         table.add_column(col, justify="right")
     for a in res["agents"]:
-        n = a["hands"]
         table.add_row(
             a["agent"],
             f"{a['mean']:+.2f}",
             f"{a['ci95']:.2f}",
-            f"{a['wins'] / n:.1%}",
-            f"{a['self_drawn'] / n:.1%}",
-            f"{a['deal_ins'] / n:.1%}",
-            f"{a['win_faan'] / max(a['wins'], 1):.2f}",
+            f"[{a['boot_lo']:+.2f}, {a['boot_hi']:+.2f}]",
+            f"{a['win_rate']:.1%}",
+            f"{a['self_drawn_rate']:.1%}",
+            f"{a['deal_in_rate']:.1%}",
+            f"{a['mean_faan']:.2f}",
         )
     console.print(table)
-    if output:
-        output.write_text(
-            json.dumps({"rules": rules.kwargs(), "deals": deals, "seed": seed, **res}, indent=2)
+    pairs = Table(title="paired differences (same walls, same seats)")
+    for col in ("a − b", "points/hand", "±95%", "wall bootstrap 95%"):
+        pairs.add_column(col, justify="right")
+    for p in res["pairs"]:
+        pairs.add_row(
+            f"{p['agent_a']} − {p['agent_b']}",
+            f"{p['mean']:+.2f}",
+            f"{p['ci95']:.2f}",
+            f"[{p['boot_lo']:+.2f}, {p['boot_hi']:+.2f}]",
         )
+    console.print(pairs)
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps({"rules": rules.kwargs(), **res}, indent=2), "utf-8")
 
 
 def show_position(state: HkState, seat: int) -> None:
