@@ -432,6 +432,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mahjong-app-api"
+version = "0.1.0"
+dependencies = [
+ "mahjong-analysis",
+ "mahjong-games",
+ "mahjong-hk",
+ "mahjong-search",
+ "mahjong-tiles",
+ "rand 0.8.8",
+ "rayon",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "web-time",
+]
+
+[[package]]
 name = "mahjong-games"
 version = "0.1.0"
 dependencies = [

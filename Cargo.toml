@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tiles", "crates/games", "crates/hk", "crates/analysis", "crates/search", "crates/pybind"]
+members = ["crates/tiles", "crates/games", "crates/hk", "crates/analysis", "crates/search", "crates/pybind", "crates/app-api"]
 
 [workspace.package]
 version = "0.1.0"

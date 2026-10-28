@@ -1,0 +1,3 @@
+# wasm-pack output
+/pkg/
+/pkg-*/
