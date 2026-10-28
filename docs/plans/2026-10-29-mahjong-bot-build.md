@@ -207,7 +207,7 @@ paired by wall, with a bootstrap 95 % interval.
   - Notes: do not change `environment.yml`'s `rust` line (macOS uses it); document the
     Windows override instead. Machine time: 10–20 min.
 
-- [ ] **Task 1: Faan-key snapshot test and a one-thread search test** `[parallel-ok]`
+- [x] **Task 1: Faan-key snapshot test and a one-thread search test** `[parallel-ok]`
   - Files: create `crates/hk/tests/pattern_names.rs`, `crates/search/tests/one_thread.rs`.
   - Done when: `cargo test -p mahjong-hk --test pattern_names` compares every
     `Pattern::english` string with a literal list in the test (AC10); `cargo test -p
