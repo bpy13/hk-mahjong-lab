@@ -40,7 +40,9 @@ use mahjong_tiles::Tile;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use rayon::prelude::*;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// `std::time::Instant` panics in the browser; `web_time` is `Instant` on native.
+use web_time::Instant;
 
 /// PIMC settings.
 #[derive(Clone, Debug)]

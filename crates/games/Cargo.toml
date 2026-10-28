@@ -6,3 +6,7 @@ edition.workspace = true
 
 [dependencies]
 rand.workspace = true
+
+# rand 0.8 -> getrandom 0.2 needs the js feature to compile for the browser (wasm32 only).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

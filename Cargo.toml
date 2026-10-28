@@ -16,6 +16,8 @@ rand = { version = "0.8", features = ["small_rng"] }
 proptest = "1.5"
 rayon = "1.10"
 criterion = { version = "0.5", default-features = false }
+# Instant that also works in the browser (performance.now()); std::time::Instant panics in wasm32.
+web-time = "1"
 
 [profile.release]
 lto = "thin"

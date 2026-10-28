@@ -11,6 +11,7 @@ mahjong-hk.workspace = true
 mahjong-analysis.workspace = true
 rand.workspace = true
 rayon.workspace = true
+web-time.workspace = true
 
 [dev-dependencies]
 rayon.workspace = true
