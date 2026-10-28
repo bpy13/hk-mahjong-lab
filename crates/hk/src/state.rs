@@ -15,6 +15,7 @@
 use crate::faan::{score_win, Score, WinContext};
 use crate::hand::{is_complete, is_thirteen_orphans};
 use crate::meld::{Meld, MeldKind};
+use crate::position::{PositionError, PositionPhase, PositionSpec};
 use crate::rules::{MultipleWinners, RuleSet};
 use mahjong_games::{Game, Outcome, Player};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
@@ -350,6 +351,83 @@ impl State {
         s
     }
 
+    /// Builds a mid-hand state from a position, without a wall (see
+    /// [`crate::position`]). The undrawn wall holds the tiles not accounted for,
+    /// in index order; the log holds one `Discard` event per river entry (and a
+    /// `Claim` after each claimed one), so danger estimates and features see the
+    /// discard history. In a claim or rob window every seat with an option is
+    /// asked again, starting with `to_move`.
+    ///
+    /// It is the dealer's first turn (#29) exactly when the dealer is on turn
+    /// with an empty river and no melds on the table; then a self-drawn win is
+    /// possible without `last_drawn`, as after the deal.
+    ///
+    /// Returns an error, never panics, when the spec is not a reachable
+    /// position: a fifth copy of a tile, a hand of the wrong size, claimed
+    /// discards that do not pair up with the exposed melds, a `wall_remaining`
+    /// that does not balance, a claim tile that is not the last discard, or a
+    /// player to move with no decision.
+    pub fn from_position(rules: RuleSet, p: &PositionSpec) -> Result<State, PositionError> {
+        let checked = crate::position::check(&rules, p)?;
+        let mut melds = [MeldList::EMPTY; 4];
+        for (list, given) in melds.iter_mut().zip(p.melds.iter()) {
+            for &m in given {
+                list.push(m);
+            }
+        }
+        let on_turn = p.phase == PositionPhase::Turn;
+        let dealer_first_turn = on_turn
+            && p.to_move == DEALER
+            && p.river.is_empty()
+            && p.melds.iter().all(|m| m.is_empty());
+        let drew = on_turn && (p.last_drawn.is_some() || dealer_first_turn);
+        let n = checked.wall.len() as u8;
+        let mut s = State {
+            rules,
+            wall: checked.wall,
+            front: 0,
+            back: n,
+            hands: p.hands,
+            melds,
+            bonus: checked.bonus,
+            events: checked.events,
+            phase: Phase::Turn,
+            current: p.to_move as u8,
+            turn: p.to_move as u8,
+            drew,
+            last_drawn: if on_turn { p.last_drawn } else { None },
+            drew_last_tile: drew && n == 0,
+            kong_chain: p.kong_chain,
+            dealer_first_turn,
+            discards: p.river.len() as u16,
+            window: None,
+            liable: p.liable.map(|l| l.map(|x| x as u8)),
+            result: None,
+        };
+        let window = match p.phase {
+            PositionPhase::Turn => None,
+            PositionPhase::Claim { tile, from } => Some((Phase::Claim, tile, from, false)),
+            PositionPhase::Rob { tile, from } => {
+                let concealed = s.melds[from]
+                    .iter()
+                    .any(|m| m.kind == MeldKind::Kong && m.tile == tile && m.concealed);
+                Some((Phase::Rob, tile, from, concealed))
+            }
+        };
+        if let Some((phase, tile, from, concealed)) = window {
+            s.turn = from as u8;
+            if !s.open_window(phase, tile, from, concealed) {
+                return Err(PositionError::NoDecision);
+            }
+            let pending = s.window.map_or(0, |w| w.pending);
+            if pending & (1 << p.to_move) == 0 {
+                return Err(PositionError::NoDecision);
+            }
+            s.current = p.to_move as u8;
+        }
+        Ok(s)
+    }
+
     // ----- Accessors (what is public is stated on each). -----
 
     /// The rules in force.
@@ -430,6 +508,11 @@ impl State {
         } else {
             None
         }
+    }
+
+    /// Kongs declared in the current turn so far (#7, #8). Public.
+    pub fn kong_chain(&self) -> u8 {
+        self.kong_chain
     }
 
     /// Who is liable for whom (§8.3). Public.

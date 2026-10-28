@@ -45,6 +45,29 @@ class HkState:
     def __init__(self, seed: int | None = None, **rules: object) -> None: ...
     @staticmethod
     def from_wall(wall: list[int], **rules: object) -> HkState: ...
+    @staticmethod
+    def from_position(
+        hands: list[list[int]],
+        melds: list[list[tuple[str, int, bool, int | None]]],
+        river: list[tuple[int, int, bool]],
+        wall_remaining: int,
+        to_move: int,
+        phase: str = "turn",
+        claim_tile: int | None = None,
+        claim_from: int | None = None,
+        last_drawn: int | None = None,
+        bonus: list[list[int]] | None = None,
+        liable: list[int | None] | None = None,
+        kong_chain: int = 0,
+        **rules: object,
+    ) -> HkState:
+        """Build a mid-hand state without a wall (``State::from_position``).
+
+        ``melds`` are ``(kind, tile, concealed, from)`` per seat; ``river`` is
+        ``(seat, tile, claimed)`` in discard order; ``phase`` is ``"turn"``,
+        ``"claim"`` or ``"rob"`` (the last two name ``claim_tile`` and
+        ``claim_from``). Raises ``ValueError`` on a malformed position.
+        """
     def current_player(self) -> int | None: ...
     def phase(self) -> str: ...
     def is_terminal(self) -> bool: ...
