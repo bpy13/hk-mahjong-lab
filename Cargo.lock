@@ -462,6 +462,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "mahjong-games",
+ "mahjong-search",
  "mahjong-tiles",
  "proptest",
  "rand 0.8.8",

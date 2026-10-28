@@ -45,6 +45,21 @@ scoring; `faan` implements the table row by row; `state` is the hand as a state
 machine with an event log. Actions have stable integer codes (0–133) used by
 Python and as the RL action space.
 
+A state starts either from a full wall (`State::from_wall`, a new deal) or from a
+mid-hand position (`State::from_position(rules, &PositionSpec)`, in `position.rs`):
+hands, melds, bonus tiles, the river with claimed flags, the wall count, the seat
+to move, the phase (`Turn`, `Claim { tile, from }`, `Rob { tile, from }`), the last
+drawn tile, the kong chain and liability. It fills the undrawn wall with the
+leftover tiles in index order (invisible to observers, since samplers sort the
+hidden pool), writes one `Discard` event per river entry (and a `Claim` after each
+claimed one) so danger and features see the discard history, and asks every seat
+with an option again in a claim or rob window. A malformed position (a fifth copy,
+a wrong hand size, claims that do not pair with exposed melds, an unbalanced wall,
+a claim tile that is not the last discard) returns a `PositionError`, never a
+panic. `State::to_position` gives the reverse. `tests/from_position.rs` checks 200
+positions from seeded hands: legal actions, scores, danger, features and the PIMC
+shortlist match the original. Python: `HkState.from_position(...)`.
+
 **`crates/analysis`** and **`crates/search`**: see [solver.md](solver.md).
 
 **`crates/pybind`**: everything above as plain Python values (tiles and actions

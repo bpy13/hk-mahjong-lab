@@ -215,7 +215,7 @@ paired by wall, with a bootstrap 95 % interval.
     .num_threads(1)` pool and checks the result equals the default pool's for the same seed.
   - Notes: the one-thread test is the guard every later search change must keep green.
 
-- [ ] **Task 2: `State::from_position`** `[parallel-ok]`
+- [x] **Task 2: `State::from_position`** `[parallel-ok]`
   - Files: modify `crates/hk/src/state.rs`; create `crates/hk/tests/from_position.rs`; modify
     `crates/pybind/src/lib.rs` (`HkState.from_position(...)`), `python/mahjong/_core.pyi`,
     `python/tests/test_from_position.py`; modify `docs/architecture.md` (one paragraph).

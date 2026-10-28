@@ -10,6 +10,9 @@ mahjong-games.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
+# tests/from_position.rs checks danger, features and the shortlist on rebuilt
+# states (a dev-dependency cycle, which Cargo allows for integration tests).
+mahjong-search.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 

@@ -16,8 +16,8 @@ mod search;
 
 use convert::{event_dict, result_dict, rules_from, score_dict, tile_from};
 use mahjong_games::Game;
-use mahjong_hk::{Action, State, NUM_ACTION_CODES};
-use mahjong_tiles::{format_tiles as fmt_tiles, parse_tiles as parse, Tile};
+use mahjong_hk::{Action, Meld, MeldKind, PositionPhase, PositionSpec, State, NUM_ACTION_CODES};
+use mahjong_tiles::{format_tiles as fmt_tiles, parse_tiles as parse, Tile, TileCounts};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -100,6 +100,55 @@ impl PyState {
         Ok(PyState {
             inner: State::from_wall(rules, wall),
         })
+    }
+
+    /// Builds a mid-hand state from a position, without a wall
+    /// (`State::from_position`). `hands` are four tile lists; `melds` four
+    /// lists of `(kind, tile, concealed, from)` with kind `"chow"` (lowest
+    /// tile), `"pung"` or `"kong"` and `from` the seat claimed from (`None` for
+    /// a concealed kong); `river` lists `(seat, tile, claimed)` in discard
+    /// order. `phase` is `"turn"`, `"claim"` or `"rob"`; a claim or rob names
+    /// `claim_tile` and `claim_from`. `to_move` is the seat whose decision it
+    /// is. The undrawn wall holds the tiles not accounted for, in index order:
+    /// determinize before playing on. Raises `ValueError` on a malformed
+    /// position.
+    #[staticmethod]
+    #[pyo3(signature = (hands, melds, river, wall_remaining, to_move, phase="turn",
+        claim_tile=None, claim_from=None, last_drawn=None, bonus=None, liable=None,
+        kong_chain=0, **rules))]
+    #[allow(clippy::too_many_arguments)]
+    fn from_position(
+        hands: Vec<Vec<u32>>,
+        melds: Vec<Vec<MeldArg>>,
+        river: Vec<(usize, u32, bool)>,
+        wall_remaining: usize,
+        to_move: usize,
+        phase: &str,
+        claim_tile: Option<u32>,
+        claim_from: Option<usize>,
+        last_drawn: Option<u32>,
+        bonus: Option<Vec<Vec<u32>>>,
+        liable: Option<Vec<Option<usize>>>,
+        kong_chain: u8,
+        rules: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Self> {
+        let rules = rules_from(rules)?;
+        let spec = position_spec(
+            hands,
+            melds,
+            river,
+            wall_remaining,
+            to_move,
+            phase,
+            (claim_tile, claim_from),
+            last_drawn,
+            bonus.unwrap_or_else(|| vec![Vec::new(); 4]),
+            liable.unwrap_or_else(|| vec![None; 4]),
+            kong_chain,
+        )?;
+        State::from_position(rules, &spec)
+            .map(|inner| PyState { inner })
+            .map_err(value_error)
     }
 
     /// The seat to act, or `None` when the hand is over.
@@ -214,6 +263,108 @@ impl PyState {
     fn __repr__(&self) -> String {
         format!("{:?}", self.inner)
     }
+}
+
+/// A meld from Python: `(kind, tile, concealed, from)`.
+type MeldArg = (String, u32, bool, Option<usize>);
+
+/// Four entries, one per seat, or a `ValueError` naming the argument.
+fn per_seat<T>(name: &str, v: Vec<T>) -> PyResult<[T; 4]> {
+    v.try_into()
+        .map_err(|_| value_error(format!("{name} needs one entry per seat (4)")))
+}
+
+/// Converts `HkState.from_position`'s plain arguments into a `PositionSpec`;
+/// the engine checks the rest.
+#[allow(clippy::too_many_arguments)]
+fn position_spec(
+    hands: Vec<Vec<u32>>,
+    melds: Vec<Vec<MeldArg>>,
+    river: Vec<(usize, u32, bool)>,
+    wall_remaining: usize,
+    to_move: usize,
+    phase: &str,
+    (claim_tile, claim_from): (Option<u32>, Option<usize>),
+    last_drawn: Option<u32>,
+    bonus: Vec<Vec<u32>>,
+    liable: Vec<Option<usize>>,
+    kong_chain: u8,
+) -> PyResult<PositionSpec> {
+    let mut counts = Vec::with_capacity(4);
+    for hand in hands {
+        if hand.len() > 14 {
+            return Err(value_error("a hand holds at most 14 tiles"));
+        }
+        let tiles = hand
+            .into_iter()
+            .map(tile_from)
+            .collect::<PyResult<Vec<_>>>()?;
+        if tiles.iter().any(|t| t.is_bonus()) {
+            return Err(value_error("bonus tiles are not part of a hand"));
+        }
+        counts.push(TileCounts::from_tiles(&tiles));
+    }
+    let mut meld_lists = Vec::with_capacity(4);
+    for (seat, list) in melds.into_iter().enumerate() {
+        let mut out = Vec::new();
+        for (kind, tile, concealed, from) in list {
+            let tile = tile_from(tile)?;
+            let kind = match kind.as_str() {
+                "chow" => MeldKind::Chow,
+                "pung" => MeldKind::Pung,
+                "kong" => MeldKind::Kong,
+                _ => return Err(value_error(format!("seat {seat}: bad meld kind {kind:?}"))),
+            };
+            let from = from.map(|f| u8::try_from(f).unwrap_or(u8::MAX));
+            out.push(Meld {
+                kind,
+                tile,
+                concealed,
+                claimed_from: from,
+            });
+        }
+        meld_lists.push(out);
+    }
+    let bonus = bonus
+        .into_iter()
+        .map(|v| v.into_iter().map(tile_from).collect::<PyResult<Vec<_>>>())
+        .collect::<PyResult<Vec<_>>>()?;
+    let river = river
+        .into_iter()
+        .map(|(seat, t, claimed)| Ok((seat, tile_from(t)?, claimed)))
+        .collect::<PyResult<Vec<_>>>()?;
+    let window = || -> PyResult<(Tile, usize)> {
+        match (claim_tile, claim_from) {
+            (Some(t), Some(f)) => Ok((tile_from(t)?, f)),
+            _ => Err(value_error(format!(
+                "phase {phase:?} needs claim_tile and claim_from"
+            ))),
+        }
+    };
+    let phase = match phase {
+        "turn" => PositionPhase::Turn,
+        "claim" => {
+            let (tile, from) = window()?;
+            PositionPhase::Claim { tile, from }
+        }
+        "rob" => {
+            let (tile, from) = window()?;
+            PositionPhase::Rob { tile, from }
+        }
+        _ => return Err(value_error(format!("unknown phase {phase:?}"))),
+    };
+    Ok(PositionSpec {
+        hands: per_seat("hands", counts)?,
+        melds: per_seat("melds", meld_lists)?,
+        bonus: per_seat("bonus", bonus)?,
+        river,
+        wall_remaining,
+        to_move,
+        phase,
+        last_drawn: last_drawn.map(tile_from).transpose()?,
+        kong_chain,
+        liable: per_seat("liable", liable)?,
+    })
 }
 
 pub(crate) fn check_seat(seat: usize) -> PyResult<()> {

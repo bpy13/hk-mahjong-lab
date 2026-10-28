@@ -6,14 +6,17 @@
 //! * [`hand`]: the win check and the ways to split a hand into melds.
 //! * [`faan`]: the faan table and [`score_win`].
 //! * [`state`]: the hand as a state machine implementing [`mahjong_games::Game`].
+//! * [`position`]: a mid-hand position without a wall ([`State::from_position`]).
 
 pub mod faan;
 pub mod hand;
 pub mod meld;
+pub mod position;
 pub mod rules;
 pub mod state;
 
 pub use faan::{score_win, Pattern, Score, WinContext};
 pub use meld::{Meld, MeldKind};
+pub use position::{PositionError, PositionPhase, PositionSpec};
 pub use rules::{MultipleWinners, Payout, RuleSet};
 pub use state::{Action, Event, HandResult, State, WinRecord, DEALER, NUM_ACTION_CODES};
