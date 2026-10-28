@@ -2,6 +2,19 @@
 
 use mahjong_app_api::Api;
 use serde_json::{json, Value};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+/// Tests that check `budget_used_ms` hold this lock exclusively, so they never share the CPU
+/// with other tests of this file; under contention a search overruns its wall-clock budget.
+static CPU: RwLock<()> = RwLock::new(());
+
+fn shared() -> (RwLockReadGuard<'static, ()>, Api) {
+    (CPU.read().unwrap_or_else(|e| e.into_inner()), Api::new())
+}
+
+fn exclusive() -> (RwLockWriteGuard<'static, ()>, Api) {
+    (CPU.write().unwrap_or_else(|e| e.into_inner()), Api::new())
+}
 
 const GRADES: [&str; 5] = ["best", "good", "inaccuracy", "mistake", "blunder"];
 
@@ -69,7 +82,7 @@ fn hand_over(events: &[Value]) -> &Value {
 
 #[test]
 fn meta_lists_variants_levels_and_keys() {
-    let api = Api::new();
+    let (_cpu, api) = shared();
     let m = ok(&api.meta());
     assert_eq!(m["game"], "mahjong");
     assert_eq!(m["seats"], json!([4, 4]));
@@ -94,7 +107,7 @@ fn meta_lists_variants_levels_and_keys() {
 
 #[test]
 fn four_random_bots_finish_hands() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let mut wins = 0;
     let mut draws = 0;
     for seed in 1..=6 {
@@ -140,7 +153,7 @@ fn four_random_bots_finish_hands() {
 
 #[test]
 fn hard_bots_win_a_hand() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     for seed in 20..40 {
         let id = new_game(&mut api, seed);
         let (_, events) = play_out(&mut api, &id, "hard");
@@ -180,7 +193,7 @@ fn hard_bots_win_a_hand() {
 
 #[test]
 fn four_easy_bots_finish_a_hand() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let id = new_game(&mut api, 2);
     let (_, events) = play_out(&mut api, &id, "easy");
     hand_over(&events);
@@ -190,7 +203,7 @@ fn four_easy_bots_finish_a_hand() {
 
 #[test]
 fn rule_based_bots_and_expert_answer_within_budget() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = exclusive();
     let id = new_game(&mut api, 3);
     for level in ["easy", "medium", "hard"] {
         let a = ok(&api.bot_action(&id, level, 100));
@@ -214,7 +227,7 @@ fn rule_based_bots_and_expert_answer_within_budget() {
 
 #[test]
 fn opening_view_hides_other_hands_and_lists_legal_moves() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let id = new_game(&mut api, 4);
     let view = ok(&api.view(&id, 0));
     // The dealer drew the 14th tile; the others hold 13.
@@ -260,7 +273,7 @@ fn opening_view_hides_other_hands_and_lists_legal_moves() {
 
 #[test]
 fn illegal_actions_are_rejected_with_a_code() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let id = new_game(&mut api, 5);
     let view = ok(&api.view(&id, 0));
     let hand: Vec<&str> = view["hand"]
@@ -328,7 +341,7 @@ fn reach_claim(api: &mut Api, id: &mut String, wanted: &str) -> usize {
 
 #[test]
 fn claims_pung_chow_kong_pass_and_win() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let mut id = String::new();
     for (wanted, kind) in [
         ("action.pung", "meld.pung"),
@@ -444,7 +457,7 @@ fn claims_pung_chow_kong_pass_and_win() {
 
 #[test]
 fn snapshot_and_restore_give_identical_views() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let id = new_game(&mut api, 7);
     for _ in 0..30 {
         let a = ok(&api.bot_action(&id, "easy", 50));
@@ -485,7 +498,7 @@ fn snapshot_and_restore_give_identical_views() {
 
 #[test]
 fn restore_rejects_bad_positions() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     assert_eq!(error_code(&api.restore(r#"{"seed": 1}"#)), "error.bad_json");
     let bad_game = json!({ "game": "big2", "seed": 1, "wall": [] });
     assert_eq!(
@@ -516,7 +529,7 @@ fn restore_rejects_bad_positions() {
 
 #[test]
 fn hint_gives_moves_with_numbers_reasons_and_study_extras() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = exclusive();
     let id = new_game(&mut api, 9);
     assert_eq!(error_code(&api.hint(&id, 1, 100)), "error.not_your_turn");
     let h = ok(&api.hint(&id, 0, 600));
@@ -595,7 +608,7 @@ fn hint_gives_moves_with_numbers_reasons_and_study_extras() {
 
 #[test]
 fn review_has_one_item_per_decision_of_the_seat() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = exclusive();
     let id = new_game(&mut api, 10);
     play_out(&mut api, &id, "easy");
     let seat = 1;
@@ -640,7 +653,7 @@ fn review_has_one_item_per_decision_of_the_seat() {
 
 #[test]
 fn grade_scores_an_action_against_the_best() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let id = new_game(&mut api, 12);
     let snap = ok(&api.snapshot(&id)).to_string();
     let legal = ok(&api.legal_actions(&id));
@@ -666,7 +679,7 @@ fn grade_scores_an_action_against_the_best() {
 
 #[test]
 fn variants_round_trip_through_config_and_snapshot() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = shared();
     let cfg = json!({
         "seats": 4, "seed": 13,
         "variants": { "flowers": "off", "min_faan": "1", "payout": "full_spicy", "multiple_winners": "head_bump",
@@ -725,7 +738,7 @@ fn variants_round_trip_through_config_and_snapshot() {
 #[test]
 #[ignore]
 fn timing_of_hint_bot_and_review() {
-    let mut api = Api::new();
+    let (_cpu, mut api) = exclusive();
     let id = new_game(&mut api, 100);
     for budget in [300u32, 1000, 3000] {
         let h = ok(&api.hint(&id, 0, budget));
