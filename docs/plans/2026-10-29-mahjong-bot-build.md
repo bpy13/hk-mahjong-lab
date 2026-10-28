@@ -242,7 +242,7 @@ paired by wall, with a bootstrap 95 % interval.
     expose this in `crates/app-api` (Task 24 tells them the signature). Hidden claim
     declarations of other seats are not part of a position (they are asked again).
 
-- [ ] **Task 3: The 24-seating harness** `[parallel-ok]`
+- [x] **Task 3: The 24-seating harness** `[parallel-ok]`
   - Files: create `crates/search/src/tournament.rs` (move `duplicate` there from
     `agent.rs`, keep the old function as a wrapper); modify `crates/search/src/lib.rs`,
     `crates/pybind/src/search.rs` (`tournament(..., seatings=4|24)`),
