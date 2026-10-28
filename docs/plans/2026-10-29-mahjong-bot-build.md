@@ -357,7 +357,7 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 2 – Brian's EV bot (fable for the formula, opus for the rest)
 
-- [ ] **Task 8: The EV formula, written down** (fable)
+- [x] **Task 8: The EV formula, written down** (fable)
   - Files: create `docs/ev-bot.md`.
   - Content: the exact value of a candidate action `a` for seat `me` over the rest of the
     hand, with every term named and sourced:
