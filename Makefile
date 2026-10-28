@@ -1,9 +1,18 @@
 # Run inside the `mahjong` conda env: `conda activate mahjong`.
-.PHONY: dev test test-rust test-python test-web test-e2e lint fmt docs web serve web-dev bench
+.PHONY: dev dev-windows test test-rust test-python test-web test-e2e lint fmt docs web serve web-dev bench
 
 dev:            ## Build the Rust extension, install the Python package (editable) and UI deps
 	pip install -e ".[dev]"
 	npm install --prefix web
+
+# Windows: the env's conda-forge cargo (GNU) cannot link, and `make` is often missing.
+# This target prints the PowerShell steps; see CLAUDE.md "Windows (this PC)".
+dev-windows:    ## Print the Windows setup steps (rustup MSVC cargo, PYO3_PYTHON, CUDA torch)
+	@echo '$$env:PATH = "$$env:USERPROFILE\.cargo\bin;" + $$env:PATH'
+	@echo '$$env:PYO3_PYTHON = "$$env:CONDA_PREFIX\python.exe"'
+	@echo 'pip install -e ".[dev]"'
+	@echo 'pip install torch --index-url https://download.pytorch.org/whl/cu130'
+	@echo 'Push-Location web; npm install; Pop-Location'
 
 test: test-rust test-python test-web
 
