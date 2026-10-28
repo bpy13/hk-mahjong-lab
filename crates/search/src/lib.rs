@@ -9,6 +9,8 @@
 //! * [`net`]: running trained networks.
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
 //! * [`solo`]: offense-only estimates for each discard.
+//! * [`target_value`]: P(win), P(self-draw | win) and points by target plan
+//!   ([`target_tables`]).
 //! * [`view`]: what one seat can see.
 //! * [`world`]: structured sampling of hidden tiles for search.
 
@@ -21,6 +23,8 @@ pub mod log;
 pub mod net;
 pub mod pimc;
 pub mod solo;
+pub mod target_tables;
+pub mod target_value;
 pub mod tournament;
 pub mod view;
 pub mod world;

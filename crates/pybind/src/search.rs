@@ -163,6 +163,35 @@ pub(crate) fn hand_progress<'py>(
     Ok(d)
 }
 
+/// The fitted target value table (plan Task 9): `kinds` (names in index order),
+/// `shape` (kind, faan-shanten, tiles-left bucket, melds) and the flat tables
+/// `p_win`, `p_self_draw`, `points` in that row-major order.
+#[pyfunction]
+pub(crate) fn target_value_table(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
+    use mahjong_search::target_tables::{POINTS, P_SELF_DRAW, P_WIN};
+    use mahjong_search::target_value::{
+        TargetKind, FAAN_SHANTEN_BUCKETS, MELD_BUCKETS, TARGET_KINDS, TILES_LEFT_BUCKETS,
+    };
+    let d = PyDict::new(py);
+    d.set_item(
+        "kinds",
+        TargetKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>(),
+    )?;
+    d.set_item(
+        "shape",
+        (
+            TARGET_KINDS,
+            FAAN_SHANTEN_BUCKETS,
+            TILES_LEFT_BUCKETS,
+            MELD_BUCKETS,
+        ),
+    )?;
+    d.set_item("p_win", P_WIN.to_vec())?;
+    d.set_item("p_self_draw", P_SELF_DRAW.to_vec())?;
+    d.set_item("points", POINTS.to_vec())?;
+    Ok(d)
+}
+
 /// For the player to act on their turn: every discard with shanten, acceptance,
 /// faan-aware shanten, faan-aware acceptance and target plan.
 #[pyfunction]
