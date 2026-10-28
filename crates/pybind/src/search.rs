@@ -5,7 +5,10 @@ use crate::{rng_from, value_error, PyState};
 use mahjong_analysis::{discards, faan_shanten, shanten, Structure, SuitPlan, Target};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::State;
-use mahjong_search::{duplicate, pimc, solo as solo_sim, Agent, Danger, PimcConfig, SeatView};
+use mahjong_search::tournament::tournament as run_tournament;
+use mahjong_search::{
+    pimc, solo as solo_sim, Agent, Danger, PimcConfig, SeatView, Seatings, TournamentConfig,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::time::Duration;
@@ -218,44 +221,44 @@ pub(crate) fn solo<'py>(
     Ok(out)
 }
 
-/// A duplicate tournament: each wall is played four times with the four agents
-/// rotated through the seats. Returns per-agent totals (input order) and draws.
+/// A duplicate tournament: each wall is played in every seating (`seatings=4`:
+/// the agents rotated; `seatings=24`: all permutations). Returns the report as a
+/// dict in the `hk-tournament/1` JSON shape (`mahjong_search::tournament`):
+/// per-agent points with independent and wall-paired bootstrap intervals, rates,
+/// pattern shares, deal-ins by winner, liability points, and pairwise paired
+/// differences. The older keys (`agents[i].mean`, `ci95`, `wins`, `draws`,
+/// `seat_points`, `hands`) keep their meaning.
 #[pyfunction]
-#[pyo3(signature = (agents, deals, seed=0, **rules))]
+#[pyo3(signature = (agents, deals, seed=0, seatings=4, bootstrap=2000, **rules))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tournament<'py>(
     py: Python<'py>,
     agents: Vec<String>,
     deals: usize,
     seed: u64,
+    seatings: usize,
+    bootstrap: usize,
     rules: Option<&Bound<'py, PyDict>>,
-) -> PyResult<Bound<'py, PyDict>> {
+) -> PyResult<Bound<'py, PyAny>> {
     if agents.len() != 4 {
         return Err(value_error("need exactly four agent specs"));
     }
+    let seatings =
+        Seatings::from_count(seatings).ok_or_else(|| value_error("seatings must be 4 or 24"))?;
     let rules = rules_from(rules)?;
     let parsed = agents
         .iter()
         .map(|s| Agent::parse(s).map_err(value_error))
         .collect::<PyResult<Vec<_>>>()?;
     let arr: [Agent; 4] = parsed.try_into().map_err(|_| value_error("four agents"))?;
-    let t = py.detach(move || duplicate(&arr, deals, rules, seed));
-    let out = PyDict::new(py);
-    let list = PyList::empty(py);
-    for (spec, r) in agents.iter().zip(t.agents) {
-        let d = PyDict::new(py);
-        d.set_item("agent", spec)?;
-        d.set_item("hands", r.hands)?;
-        d.set_item("mean", r.mean())?;
-        d.set_item("ci95", r.ci95())?;
-        d.set_item("wins", r.wins)?;
-        d.set_item("self_drawn", r.self_drawn)?;
-        d.set_item("deal_ins", r.deal_ins)?;
-        d.set_item("win_faan", r.win_faan)?;
-        list.append(d)?;
-    }
-    out.set_item("agents", list)?;
-    out.set_item("draws", t.draws)?;
-    out.set_item("seat_points", t.seat_points.to_vec())?;
-    out.set_item("hands", 4 * deals)?;
-    Ok(out)
+    let names: [String; 4] = agents.try_into().map_err(|_| value_error("four agents"))?;
+    let config = TournamentConfig {
+        deals,
+        seatings,
+        rules,
+        seed,
+        bootstrap,
+    };
+    let json = py.detach(move || run_tournament(&arr, &config).summary().to_json(&names));
+    py.import("json")?.call_method1("loads", (json,))
 }
