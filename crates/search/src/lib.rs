@@ -4,6 +4,7 @@
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
 //! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
 //! * [`features`]: the observation encoding for learning.
+//! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
 //! * [`solo`]: offense-only estimates for each discard.
@@ -15,6 +16,7 @@ pub mod bots;
 pub mod danger;
 pub mod danger_tables;
 pub mod features;
+pub mod log;
 pub mod net;
 pub mod pimc;
 pub mod solo;
