@@ -1,0 +1,32 @@
+[package]
+name = "mahjong-app-api"
+description = "The app-facing adapter over the Hong Kong mahjong engine: JSON calls per hk-games docs/engine-interface.md, built to WebAssembly with wasm-bindgen."
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+bench = false
+
+[dependencies]
+mahjong-tiles.workspace = true
+mahjong-games.workspace = true
+mahjong-hk.workspace = true
+mahjong-analysis.workspace = true
+mahjong-search.workspace = true
+rand.workspace = true
+# Instant that also works in the browser (performance.now()).
+web-time.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Natively every search runs in a one-thread pool (the app's `threads = 1`); in the
+# browser rayon's global pool already runs on the calling thread.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
