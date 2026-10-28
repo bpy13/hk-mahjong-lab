@@ -101,6 +101,10 @@ def danger(state: HkState, seat: int) -> dict[str, Any]:
 def hand_progress(state: HkState, seat: int) -> dict[str, Any]:
     """Plain and faan-aware shanten of ``seat``'s hand, with the target plan."""
 
+def target_value_table() -> dict[str, Any]:
+    """The fitted target value table: ``kinds``, ``shape`` (kind, faan-shanten, tiles-left
+    bucket, melds) and flat ``p_win``, ``p_self_draw``, ``points`` lists in row-major order."""
+
 def discard_table(state: HkState) -> list[dict[str, Any]]:
     """Every discard's shanten, acceptance and target, for a turn decision."""
 
