@@ -26,14 +26,27 @@
 //! With few samples the search therefore defers to the heuristic instead of
 //! acting on noise.
 //!
-//! Like all PIMC methods it infers little from how opponents have played (beyond
-//! how developed hands typically are at this stage) and lets each sample's
-//! future be played as if everyone knew it ("strategy fusion"). Its numbers are
-//! estimates under the rollout bot's style of play, not equilibrium values.
+//! Like all PIMC methods it lets each sample's future be played as if everyone
+//! knew it ("strategy fusion"). Its numbers are estimates under the rollout bot's
+//! style of play, not equilibrium values. With the default sampler it infers
+//! little from how opponents have played (beyond how developed hands typically
+//! are at this stage); [`pimc_sampled`] and [`pimc_with_sampler`] can instead
+//! draw opponents' hands from the trained belief model
+//! ([`WorldSampler::Belief`]). The sampler is a separate argument rather than a
+//! [`PimcConfig`] field because the app's engine builds `PimcConfig` with every
+//! field named, so a new field would break it.
+//!
+//! **Weighted samples.** When the sampler is weighted, each determinization
+//! carries an importance weight; weights are clipped at their 95th percentile
+//! (so one sample cannot dominate) and every mean, rate and paired difference
+//! is a weighted one. Standard errors use the effective sample size
+//! `(Σw)² / Σw²`. Weights are computed after all samples are in, in sample
+//! order, so the result is the same on one thread as on many.
 
 use crate::bots::{best_discard, Bot, Fast, Metric, Value};
 use crate::view::SeatView;
-use crate::world::sample_world;
+use crate::world::sample_world_from;
+pub use crate::world::WorldSampler;
 use mahjong_games::{play_out, Game, Policy};
 use mahjong_hk::{Action, State};
 use mahjong_tiles::Tile;
@@ -225,11 +238,20 @@ pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
 /// # Panics
 /// Panics if the hand is over.
 pub fn pimc(state: &State, config: &PimcConfig) -> Analysis {
+    pimc_sampled(state, config, &WorldSampler::BestOfK)
+}
+
+/// [`pimc`] with determinizations drawn by `sampler`.
+///
+/// # Panics
+/// Panics if the hand is over.
+pub fn pimc_sampled(state: &State, config: &PimcConfig, sampler: &WorldSampler) -> Analysis {
     let (candidates, baseline) = shortlist(state, config.candidates.max(1));
     let seat = state.current_player().expect("hand in progress");
-    pimc_with(
+    pimc_with_sampler(
         state,
         config,
+        sampler,
         candidates,
         baseline,
         &Rollout::for_seat(seat),
@@ -248,6 +270,28 @@ pub fn pimc_with<P: Policy<State>>(
     baseline: Action,
     rollout: &P,
 ) -> Analysis {
+    pimc_with_sampler(
+        state,
+        config,
+        &WorldSampler::BestOfK,
+        candidates,
+        baseline,
+        rollout,
+    )
+}
+
+/// [`pimc_with`] with determinizations drawn by `sampler`.
+///
+/// # Panics
+/// Panics if the hand is over or `baseline` is not among `candidates`.
+pub fn pimc_with_sampler<P: Policy<State>>(
+    state: &State,
+    config: &PimcConfig,
+    sampler: &WorldSampler,
+    candidates: Vec<Action>,
+    baseline: Action,
+    rollout: &P,
+) -> Analysis {
     let start = Instant::now();
     let seat = state.current_player().expect("hand in progress");
     let base = candidates
@@ -255,18 +299,19 @@ pub fn pimc_with<P: Policy<State>>(
         .position(|&a| a == baseline)
         .expect("baseline is a candidate");
     let mut samples: Vec<Vec<Sample>> = Vec::new();
+    let mut log_weights: Vec<f64> = Vec::new();
     let batch = rayon::current_num_threads().max(1) * 4;
     while samples.len() < config.samples {
         let from = samples.len();
         let n = batch.min(config.samples - from);
-        let results: Vec<Vec<Sample>> = (from..from + n)
+        let results: Vec<(f64, Vec<Sample>)> = (from..from + n)
             .into_par_iter()
             .map(|i| {
                 let mut rng = SmallRng::seed_from_u64(
                     config.seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
                 );
-                let world = sample_world(state, seat, &mut rng);
-                candidates
+                let (world, log_w) = sample_world_from(state, seat, sampler, &mut rng);
+                let row = candidates
                     .iter()
                     .map(|&a| {
                         let mut s = world.clone();
@@ -274,10 +319,14 @@ pub fn pimc_with<P: Policy<State>>(
                         play_out(&mut s, rollout, &mut rng);
                         Sample::of(&s, seat)
                     })
-                    .collect()
+                    .collect();
+                (log_w, row)
             })
             .collect();
-        samples.extend(results);
+        for (log_w, row) in results {
+            log_weights.push(log_w);
+            samples.push(row);
+        }
         if config
             .time_limit
             .is_some_and(|limit| start.elapsed() >= limit)
@@ -285,6 +334,12 @@ pub fn pimc_with<P: Policy<State>>(
             break;
         }
     }
+    // `None`: every sample counts once (the unweighted arithmetic, unchanged).
+    let weights = sampler.weighted().then(|| clipped_weights(&log_weights));
+    let stat = |xs: &[f64]| match &weights {
+        Some(w) => weighted_mean_se(xs, w),
+        None => mean_se(xs),
+    };
     let n = samples.len().max(1) as f64;
     let mut moves: Vec<ActionStats> = candidates
         .iter()
@@ -295,10 +350,21 @@ pub fn pimc_with<P: Policy<State>>(
                 .iter()
                 .map(|s| s[c].points - s[base].points)
                 .collect();
-            let (mean, se) = mean_se(&pts);
-            let (diff, diff_se) = mean_se(&diffs);
-            let rate =
-                |f: fn(&Sample) -> bool| samples.iter().filter(|s| f(&s[c])).count() as f64 / n;
+            let (mean, se) = stat(&pts);
+            let (diff, diff_se) = stat(&diffs);
+            let rate = |f: fn(&Sample) -> bool| match &weights {
+                Some(w) => {
+                    let total: f64 = w.iter().sum();
+                    samples
+                        .iter()
+                        .zip(w)
+                        .filter(|(s, _)| f(&s[c]))
+                        .map(|(_, w)| w)
+                        .sum::<f64>()
+                        / total
+                }
+                None => samples.iter().filter(|s| f(&s[c])).count() as f64 / n,
+            };
             ActionStats {
                 action,
                 n: samples.len() as u32,
@@ -328,4 +394,148 @@ fn mean_se(xs: &[f64]) -> (f64, f64) {
     let mean = xs.iter().sum::<f64>() / n;
     let var = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
     (mean, (var / n).sqrt())
+}
+
+/// Importance weights from their logarithms: scaled so the largest is 1, then
+/// clipped at the 95th percentile so one sample cannot dominate.
+pub fn clipped_weights(log_weights: &[f64]) -> Vec<f64> {
+    if log_weights.is_empty() {
+        return Vec::new();
+    }
+    let top = log_weights
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let mut w: Vec<f64> = log_weights.iter().map(|lw| (lw - top).exp()).collect();
+    let mut sorted = w.clone();
+    sorted.sort_by(f64::total_cmp);
+    let cap = sorted[(sorted.len() * 95).div_ceil(100).saturating_sub(1)];
+    for x in &mut w {
+        *x = x.min(cap);
+    }
+    w
+}
+
+/// Weighted mean and its standard error, using the effective sample size
+/// `(Σw)² / Σw²` (equal weights give [`mean_se`]).
+fn weighted_mean_se(xs: &[f64], w: &[f64]) -> (f64, f64) {
+    let total: f64 = w.iter().sum();
+    if xs.is_empty() || total <= 0.0 {
+        return mean_se(xs);
+    }
+    let mean = xs.iter().zip(w).map(|(x, w)| x * w).sum::<f64>() / total;
+    let var = xs
+        .iter()
+        .zip(w)
+        .map(|(x, w)| w * (x - mean).powi(2))
+        .sum::<f64>()
+        / total;
+    let n_eff = total * total / w.iter().map(|w| w * w).sum::<f64>();
+    (mean, (var / (n_eff - 1.0).max(1.0)).sqrt())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::belief::BeliefModel;
+    use mahjong_hk::RuleSet;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    #[test]
+    fn weighted_statistics_reduce_to_the_unweighted_ones() {
+        let xs = [1.0, -3.0, 8.0, 0.5, 2.0];
+        let (m, se) = mean_se(&xs);
+        let (wm, wse) = weighted_mean_se(&xs, &[0.4; 5]);
+        assert!((m - wm).abs() < 1e-12);
+        assert!((se - wse).abs() < 1e-12);
+        // A heavier weight pulls the mean towards its sample.
+        let (pulled, _) = weighted_mean_se(&xs, &[1.0, 1.0, 5.0, 1.0, 1.0]);
+        assert!(pulled > m);
+    }
+
+    #[test]
+    fn weights_are_clipped_at_the_95th_percentile() {
+        // One huge weight among 40 ordinary ones is cut to the 95th percentile.
+        let mut lw = vec![0.0; 39];
+        lw.push(50.0);
+        let w = clipped_weights(&lw);
+        assert_eq!(w.len(), 40);
+        assert!(w.iter().all(|&x| x <= w[0] + 1e-12));
+        let (mean, _) = weighted_mean_se(
+            &(0..40)
+                .map(|i| if i == 39 { 100.0 } else { 0.0 })
+                .collect::<Vec<_>>(),
+            &w,
+        );
+        assert!(mean < 5.0, "the outlier dominated: {mean}");
+        assert!(clipped_weights(&[]).is_empty());
+    }
+
+    fn position(seed: u64, steps: usize) -> State {
+        let bot = Bot::by_name("fast").unwrap();
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut s = State::new_deal(RuleSet::default(), &mut rng);
+        for _ in 0..steps {
+            if s.is_terminal() {
+                break;
+            }
+            let legal = s.legal_actions_vec();
+            let a = bot.choose(&s, &legal, &mut rng);
+            s.apply(a);
+        }
+        s
+    }
+
+    #[test]
+    fn belief_pimc_is_the_same_on_one_thread() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/belief.mjnn");
+        if !p.exists() {
+            eprintln!("models/belief.mjnn missing: skipped");
+            return;
+        }
+        let model = Arc::new(BeliefModel::load(&p).unwrap());
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let mut checked = 0;
+        for weights in [true, false] {
+            let config = PimcConfig {
+                samples: 24,
+                candidates: 3,
+                seed: 5,
+                ..PimcConfig::default()
+            };
+            let sampler = WorldSampler::belief(Arc::clone(&model), weights);
+            for (seed, steps) in [(1, 20), (2, 45)] {
+                let s = position(seed, steps);
+                if s.is_terminal() {
+                    continue;
+                }
+                let many = pimc_sampled(&s, &config, &sampler);
+                let single = one.install(|| pimc_sampled(&s, &config, &sampler));
+                let key = |a: &Analysis| {
+                    a.moves
+                        .iter()
+                        .map(|m| {
+                            (
+                                m.action,
+                                m.mean.to_bits(),
+                                m.diff.to_bits(),
+                                m.diff_se.to_bits(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(key(&single), key(&many), "weights {weights}, seed {seed}");
+                for m in &many.moves {
+                    assert!(m.mean.is_finite() && m.diff_se.is_finite());
+                    assert!((0.0..=1.0).contains(&m.win_rate));
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked >= 2);
+    }
 }
