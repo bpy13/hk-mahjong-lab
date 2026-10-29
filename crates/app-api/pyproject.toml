@@ -1,0 +1,17 @@
+# The Python binding of mahjong-app-api for the hk-games server (D15). Build it into the
+# server's env with maturin, from this folder:
+#   maturin develop --release --features python
+# or from hk-games: server\engines\build.ps1 -Game mahjong.
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mahjong-app-api"
+version = "0.1.0"
+description = "Hong Kong mahjong rules, bots and solver as JSON calls (hk-games engine interface v0)"
+requires-python = ">=3.11"
+
+[tool.maturin]
+module-name = "mahjong_app_api"
+features = ["python", "pyo3/extension-module"]

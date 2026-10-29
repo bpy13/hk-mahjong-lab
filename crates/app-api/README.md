@@ -85,6 +85,12 @@ generator from `(seed, number of actions so far, call)`, so a hand restored from
 continues exactly as the original would: the random bot picks the same move, the solver runs
 the same search.
 
+## Python binding
+
+The feature `python` (off by default; the wasm build is unchanged) adds the class `mahjong_app_api.MahjongApi` with the same calls as the WebAssembly class (`hint_with_samples` takes `samples`), and `API_VERSION`. Build it into an env with `maturin develop --release --features python` here, or `server\engines\build.ps1 -Game mahjong` from hk-games (set `PYO3_PYTHON` for `cargo test --features python`). The call releases the GIL during searches.
+
+Replay (hk-games D28): the deal depends only on `seed`. `bot_action` seeds its generator from `(seed, actions so far, level index)`, so every level except the expert is exact. The expert is exact only at `budget_ms = 0`; with a budget the search stops on the clock, so its sample count varies.
+
 ## Shapes
 
 ### Tiles

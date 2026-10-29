@@ -22,6 +22,14 @@ serde_json = "1"
 
 # Natively every search runs in a one-thread pool (the app's `threads = 1`); in the
 # browser rayon's global pool already runs on the calling thread.
+# The server's Python binding (hk-games D15). Off by default so the wasm build is unchanged;
+# `--features python` adds the `mahjong_app_api.MahjongApi` class (see README "Python binding").
+pyo3 = { version = "0.30", optional = true, features = ["abi3-py311"] }
+
+[features]
+default = []
+python = ["dep:pyo3"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon.workspace = true
 
