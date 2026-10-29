@@ -19,8 +19,8 @@ use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
 use mahjong_search::{ActionStats, Analysis, Bot};
 use mahjong_tiles::Tile;
-use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -173,8 +173,8 @@ impl GameEntry {
     /// A seeded generator for the decision at this point of the hand: the same
     /// position always draws the same numbers, so a restored hand continues
     /// exactly as the original would have.
-    fn rng(&self, salt: u64) -> SmallRng {
-        SmallRng::seed_from_u64(self.decision_seed(salt))
+    fn rng(&self, salt: u64) -> ChaCha8Rng {
+        ChaCha8Rng::seed_from_u64(self.decision_seed(salt))
     }
 
     fn decision_seed(&self, salt: u64) -> u64 {
@@ -276,13 +276,13 @@ impl Api {
             check_seat(s)?;
         }
         let rules = rules_from_json(cfg.variants.as_ref())?;
-        let mut rng = SmallRng::seed_from_u64(cfg.seed);
+        let mut rng = ChaCha8Rng::seed_from_u64(cfg.seed);
         let state = State::new_deal(rules, &mut rng);
         // Re-derive the wall the engine shuffled, so a snapshot can carry it.
         let mut wall = State::all_tiles(&rules);
         {
             use rand::seq::SliceRandom;
-            let mut rng = SmallRng::seed_from_u64(cfg.seed);
+            let mut rng = ChaCha8Rng::seed_from_u64(cfg.seed);
             wall.shuffle(&mut rng);
         }
         let entry = GameEntry {
