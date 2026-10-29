@@ -177,8 +177,11 @@ correlated, so these rates carry about ±2–3 points of noise.
 
 Strength (AC4: PIMC-64 with belief sampling against three `value`, 1,000 walls × 4
 seatings, with and without weights): `runs/matches/pimc64-belief.json` and
-`runs/matches/pimc64-belief-w0.json` (job `runs/matches/task7/`); results to be added
-when the matches finish.
+`runs/matches/pimc64-belief-w0.json` (job `runs/matches/task7/`). With weights
+**+1.24 ± 1.21** per hand (bootstrap [+0.40, +2.07]), win 24.6 %, deal-in 17.8 %; without
+weights +1.25 ± 1.22, deal-in 18.8 %. Paired by wall, the weights add −0.02 ± 1.07 points
+but one point less deal-in. AC4's +3 bar is missed; the margin over `value` is
+significant. Details: [study-results/phase4-build.md](study-results/phase4-build.md) §2.
 
 ### The `ev` bot as anchor and rollout policy (plan Task 11)
 

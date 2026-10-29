@@ -375,6 +375,14 @@ paired by wall, with a bootstrap 95 % interval.
     `calibrate` (seed 7): weighted shanten within 0.15 in 5 of 6 buckets (bucket 5 +0.19); win
     −1.5 points, deal-in −3.2 points vs real play (best-of-K +0.9 / −4.4). Both 1,000-deal
     matches run in `runs/matches/task7/` (waits for thirteen-solver). Not ticked until AC4 is read.
+  - Status (2026-10-30, matches read): **AC4 not met; run continues (proposal §9).** 4,000
+    hands each, 18 threads, ≈ 55 min per match. `weights=1` +1.24 ± 1.21 (bootstrap
+    [+0.40, +2.07]), deal-in 17.8 % (bar ≤ 17.9 % met); `weights=0` +1.25 ± 1.22, deal-in
+    18.8 %. Weights minus no weights, paired by chunk: −0.02 [−1.09, +1.06]. Misses: +3 bar,
+    rollout deal-in −3.2 (bar 3), shanten bucket 5 +0.19. First PIMC with a significant
+    edge over `value`; best-of-K is not kept as the fallback (no evidence it is stronger).
+    `weights=1` stays the teacher reference until Task 11. Not ticked (bars missed);
+    `docs/study-results/phase4-build.md` §2, summaries in `docs/study-results/data/`.
 
 ## Phase 2 – Brian's EV bot (fable for the formula, opus for the rest)
 
