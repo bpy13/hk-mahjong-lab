@@ -56,6 +56,55 @@ one head are exported to a small binary format (`MJNN`) that Rust runs directly,
 so networks play in the same duplicate tournaments as the bots and can drive
 search. Every agent, networks included, always declares a legal win.
 
+### 3.1 The suit-shared CNN (build run, plan Task 14)
+
+`python/mahjong/rl/cnn.py` (design in its module docs; Rust: `crates/search/src/cnn.rs`,
+file format MJNN v3). The 26 tile planes are cut into three suits of 9 tiles and the
+7 honours. One convolution tower (kernel 3, 128 channels, 6 residual blocks) runs on
+every suit with the **same weights**, so a shape learned in characters is known in dots
+and bamboo. Before each block every position gets a context vector built from the sum
+and the maximum over suits of each suit's pooled channels plus a dense honour-and-scalar
+branch; sum and max ignore suit order, so swapping two suits in the input swaps the
+outputs exactly (tests in Python and Rust).
+
+```
+features (933) ─┬─ suits 3 × (26 planes × 9) ─ stem conv ─ 6 × [context + conv + conv] ─┐
+                └─ honours 26 × 7 + 49 scalars ─ 512 ─ 512 (h) ─────────── context ──────┤
+                                       merge [Σ suits, max suits, h] → 512 (z) ─┬─ policy 134
+                                                                                ├─ target 45
+                                                                                └─ value 4 (zero-sum)
+```
+
+Heads: **policy** (the 134 action codes; per-tile actions of suited tiles from a 1×1
+convolution per position, honour and global actions from `z`), **target** (45 plan
+classes = plan kind 5 × suit 3 × structure 3, `labels::target_class`; flush classes per
+suit; the 18 unused slots fixed at −10⁴), **value** (final points of the four relative
+seats, zero-sum). An optional oracle critic (`CnnConfig(oracle=True)`) feeds the hidden
+oracle block into the value head in training only; the export leaves it out.
+Augmentation: `augment()` applies a random suit permutation per row to features, legal
+masks, actions, target classes and the oracle block.
+
+Measured on this PC (random weights, `python -m mahjong.rl.cnn --out models/cnn-test.mjnn
+--int8`, `net_speed`, one thread, CPU shared with other jobs): **2,187,569 parameters**;
+file **8.75 MB fp32, 2.22 MB int8** (one scale per output row; Rust expands int8 to
+fp32 when loading); forward pass **2.1–2.5 ms**; int8 top-1 agreement with fp32 on 1,000
+held-out positions 99.8 %, fp32 Rust vs PyTorch within 1e-4 (`python/tests/test_cnn.py`).
+
+### 3.2 Search labels (plan Task 13)
+
+`cargo run --release -p mahjong-search --example label -- --decisions 1000000 --out
+runs/labels --chunk 20000 --seed 3 --teacher "<agent spec>"` plays single hands with
+the teacher in one seat (hand index mod 4) and `ev:belief=models/belief.mjnn,floor=none`
+in the other three, and writes one row per teacher decision with a choice: features,
+oracle block, legal mask, up to 12 search candidates (mean, interval, paired difference
+with the baseline and its standard error, rollout win and deal-in rates), baseline and
+chosen move, the target class after the move, the final four-seat deltas and how the
+hand ended for the labelled seat (layout: `crates/search/src/labels.rs`, reader
+`python/mahjong/rl/labels.py`, 2,654 bytes per row). Hands are seeded from (seed,
+chunk, hand), so a rerun resumes after the last complete chunk with the same rows, and
+a directory refuses a different teacher. The detached job is
+`experiments/task13_label.ps1` (it waits for Task 11's matches and picks the teacher).
+
 ## 4. Methods
 
 **Distillation** (`distill.py`). Hands are played by the `value` bot in all four

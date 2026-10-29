@@ -24,6 +24,19 @@ with their defaults.
   (the higher mean), and say in `docs/study-results/phase4-build.md` §1 if the difference's
   interval includes 0.
 
+- **Task 7: AC4 missed.** Belief-PIMC-64 scores +1.24 ± 1.21 per hand vs `value` (bar
+  +3); weights add −0.02 points but cut deal-ins from 18.8 % to 17.8 %. The run goes on
+  (proposal §9). Default: keep belief sampling with weights as the reference teacher, not
+  the best-of-K fallback, because no result shows best-of-K is stronger.
+- **Task 13: the teacher's labels mostly copy `value`.** In the smoke run 3 % of the
+  teacher's moves differ from the `value` anchor (the search keeps the anchor unless a
+  move beats it by two standard errors). Distillation will learn mostly `value`'s play.
+  Default: label as planned; Task 15 weights rows by the search margin. Alternative:
+  lower `z` (e.g. `z=1`) for labelling, which needs a new label run.
+- **Task 13: the teacher pick.** `runs/labels-job/teacher.txt` says `auto` (the higher
+  mean). If Task 11's `anchor=ev,rollout=ev` wins, labelling takes about 4–8 days
+  instead of 15–25 h. To force Task 7's spec, write it into that file before the job starts.
+
 ## Pending work
 - Task 5 belief model (425a7d2): count NLL beats both baselines (0.551 vs 0.634 and 0.662);
   deal-in calibration 4 of 6 buckets; **tenpai over-predicted in all 6 buckets** (by 5–12 %

@@ -4,10 +4,12 @@
 //! * [`tournament`]: duplicate tournaments (4 rotations or all 24 seatings).
 //! * [`belief`]: the trained belief model (MJNN v2), cached per state.
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
+//! * [`cnn`]: the suit-shared 1-D CNN (MJNN v3, plan Task 14).
 //! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
 //! * [`ev`]: Brian's explicit EV bot (B15, `docs/ev-bot.md`) and the [`ev::Belief`]
 //!   interface for opponent models.
 //! * [`features`]: the observation encoding for learning.
+//! * [`labels`]: search-labelled decisions for distillation (plan Task 13).
 //! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
@@ -20,10 +22,12 @@
 pub mod agent;
 pub mod belief;
 pub mod bots;
+pub mod cnn;
 pub mod danger;
 pub mod danger_tables;
 pub mod ev;
 pub mod features;
+pub mod labels;
 pub mod log;
 pub mod net;
 pub mod pimc;

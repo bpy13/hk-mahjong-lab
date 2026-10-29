@@ -532,6 +532,21 @@ paired by wall, with a bootstrap 95 % interval.
     look like strong play, not `fast` play (one search seat per hand keeps the cost at one
     labelled decision stream). Start this the moment Task 11 is decided; Phase 3 runs in
     parallel on the few spare threads (it is light).
+  - Status (2026-10-30): built (`crates/search/src/labels.rs`, `examples/label.rs`,
+    `python/mahjong/rl/labels.py`, `python/tests/test_labels.py`; `Agent::search` exposes
+    the search's `Analysis`; `LogWriter::open_layout` reuses the log machinery; 2,654
+    bytes per row, features as float16; other seats `ev:belief=models/belief.mjnn,floor=none`).
+    Resume test: one 300-row run and a stop-after-2-chunks run plus resume give
+    byte-identical chunks; a different teacher is refused. Smoke with Task 7's spec: 200
+    rows, ≈ 22 rows per hand, 3 % of moves differ from the `value` anchor. Queued detached
+    job `experiments/task13_label.ps1` (pid 27120, affinity 0xFFFF0, 8 threads, frozen
+    `runs/labels-job/bin/label.exe`): waits for Task 11's job, then takes the teacher from
+    `runs/labels-job/teacher.txt` (`auto` = higher mean of `pimc64-belief` and `pimc64-ev`).
+    Estimate: Task 7's teacher ≈ 15–25 h (start ≈ 09:00–10:00 today); `anchor=ev,rollout=ev`
+    ≈ 7.6 × that (4–8 days). Check: `Get-Content runs\labels\progress.txt;
+    Get-Content runs\labels-job\run.log -Tail 5`. Resume: rerun the `Invoke-CimMethod ...
+    experiments\task13_label.ps1` command (kept teacher in `teacher-used.txt`). Dry run:
+    `powershell -File experiments\task13_label.ps1 -DryRun`. Not ticked until 50 chunks exist.
 
 - [ ] **Task 14: Suit-shared 1-D CNN with policy, target and four-seat value heads** (fable)
   - Files: create `python/mahjong/rl/cnn.py` (model, suit-swap augmentation, int8 export),
@@ -554,6 +569,15 @@ paired by wall, with a bootstrap 95 % interval.
     (target ≤ 5 ms; record the number).
   - Notes: action codes stay 0–133 (CLAUDE.md). The `.wasm` size matters to the app: report
     the int8 file size (target ≤ 5 MB).
+  - Status (2026-10-30): designed and built **on opus, not fable** (this session has no
+    fable). `python/mahjong/rl/cnn.py` (design in its docstring and `docs/rl.md` §3.1),
+    `crates/search/src/cnn.rs` (MJNN v3 inside `Mlp`, so `net:`/`netpimc:` take it),
+    `features::encode_planes`, `pybind net_forward`, tests `test_cnn.py` and `tests/cnn_io.rs`.
+    Defaults C = 128, 6 blocks, 512-wide dense parts: 2,187,569 parameters; fp32 8.75 MB,
+    int8 2.22 MB; forward 2.1–2.5 ms on one thread (`net_speed`, CPU shared). fp32 Rust vs
+    PyTorch within 1e-4 and int8 top-1 agreement 99.8 % on 1,000 held-out positions (random
+    weights). Suit-swap equivariance is exact by construction and tested. Not ticked: the
+    plan's bars are met on untrained weights; training waits for Task 13's labels (Task 15).
 
 - [ ] **Task 15: Distil the labels** (GPU)
   - Files: create `python/mahjong/rl/distill_cnn.py`; modify `python/mahjong/rl/evaluate.py`

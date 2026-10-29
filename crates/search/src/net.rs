@@ -24,7 +24,14 @@
 //! model's are listed in `docs/belief.md`); a `policy` slice, when present, is
 //! what [`NetPolicy`] reads. A v2 network without a `policy` slice is not a
 //! policy and [`Mlp::scores`] must not be called on it.
+//!
+//! **Version 3** is the suit-shared 1-D CNN of plan Task 14 ([`crate::cnn`]):
+//! the v2 named slices (input `features`; outputs `policy`, `target`, `value`)
+//! followed by the architecture, its hyper-parameters and named tensors (fp32
+//! or int8). [`Mlp`] runs it through the same methods, so `net:` and
+//! `netpimc:` agents take v3 files unchanged.
 
+use crate::cnn::{SuitCnn, OUTPUT_LEN};
 use crate::features::{encode, ORACLE_LEN, STATE_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
@@ -57,7 +64,7 @@ pub struct Slice {
 
 /// Dot product with eight independent accumulators, which the compiler turns
 /// into SIMD (a single running sum cannot be vectorized without reordering).
-fn dot(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn dot(a: &[f32], b: &[f32]) -> f32 {
     let (ca, ra) = a.as_chunks::<8>();
     let (cb, rb) = b[..a.len()].as_chunks::<8>();
     let mut acc = [0.0f32; 8];
@@ -69,13 +76,21 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     acc.iter().sum::<f32>() + ra.iter().zip(rb).map(|(x, y)| x * y).sum::<f32>()
 }
 
-/// A loaded network.
+/// What computes the outputs: dense layers (v1, v2) or the suit-shared CNN (v3).
+#[derive(Debug)]
+enum Body {
+    Dense(Vec<Layer>),
+    Cnn(Box<SuitCnn>),
+}
+
+/// A loaded network: a multilayer perceptron (MJNN v1, v2) or the suit-shared
+/// CNN (v3, [`crate::cnn`]); both are run through the same interface.
 #[derive(Debug)]
 pub struct Mlp {
     version: u32,
     inputs: Vec<Slice>,
     outputs: Vec<Slice>,
-    layers: Vec<Layer>,
+    body: Body,
 }
 
 fn read_u32(r: &mut impl Read) -> std::io::Result<u32> {
@@ -149,7 +164,7 @@ impl Mlp {
         Self::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    /// Parses an `MJNN` buffer (version 1 or 2).
+    /// Parses an `MJNN` buffer (version 1, 2 or 3).
     pub fn from_bytes(bytes: &[u8]) -> Result<Mlp, String> {
         let mut r = bytes;
         let mut magic = [0u8; 4];
@@ -170,9 +185,35 @@ impl Mlp {
                     range: 0..NUM_ACTION_CODES,
                 }],
             ),
-            2 => (read_slices(&mut r)?, read_slices(&mut r)?),
+            2 | 3 => (read_slices(&mut r)?, read_slices(&mut r)?),
             v => return Err(format!("unsupported MJNN version {v}")),
         };
+        if version == 3 {
+            let cnn = SuitCnn::read(&mut r)?;
+            if inputs.len() != 1
+                || inputs[0].name != "features"
+                || inputs[0].range != (0..STATE_LEN)
+            {
+                return Err(format!(
+                    "an MJNN v3 network reads exactly `features` 0..{STATE_LEN}"
+                ));
+            }
+            if let Some(s) = outputs.iter().find(|s| s.range.end > OUTPUT_LEN) {
+                return Err(format!(
+                    "output slice {} is {:?}, beyond {OUTPUT_LEN} outputs",
+                    s.name, s.range
+                ));
+            }
+            if !r.is_empty() {
+                return Err(format!("{} bytes after the last tensor", r.len()));
+            }
+            return Ok(Mlp {
+                version,
+                inputs,
+                outputs,
+                body: Body::Cnn(Box::new(cnn)),
+            });
+        }
         let n = read_u32(&mut r).map_err(err)? as usize;
         if n == 0 {
             return Err("a network needs at least one layer".into());
@@ -222,23 +263,37 @@ impl Mlp {
             version,
             inputs,
             outputs,
-            layers,
+            body: Body::Dense(layers),
         })
     }
 
-    /// The file format version (1 or 2).
+    /// The file format version (1, 2 or 3).
     pub fn version(&self) -> u32 {
         self.version
     }
 
     /// Length of the input vector.
     pub fn input_len(&self) -> usize {
-        self.layers[0].inp
+        match &self.body {
+            Body::Dense(layers) => layers[0].inp,
+            Body::Cnn(_) => STATE_LEN,
+        }
     }
 
     /// Length of the output vector.
     pub fn output_len(&self) -> usize {
-        self.layers[self.layers.len() - 1].out
+        match &self.body {
+            Body::Dense(layers) => layers[layers.len() - 1].out,
+            Body::Cnn(_) => OUTPUT_LEN,
+        }
+    }
+
+    /// Learnable values used at play time.
+    pub fn parameters(&self) -> usize {
+        match &self.body {
+            Body::Dense(layers) => layers.iter().map(|l| l.w.len() + l.b.len()).sum(),
+            Body::Cnn(c) => c.parameters(),
+        }
     }
 
     /// The named input slices, in file order.
@@ -279,12 +334,16 @@ impl Mlp {
     /// One forward pass on an input vector (zero-padded to the input size).
     pub fn forward(&self, features: &[f32]) -> Vec<f32> {
         let mut x: Vec<f32> = features.to_vec();
-        x.resize(self.layers[0].inp, 0.0);
-        for (i, l) in self.layers.iter().enumerate() {
+        x.resize(self.input_len(), 0.0);
+        let layers = match &self.body {
+            Body::Dense(layers) => layers,
+            Body::Cnn(c) => return c.forward(&x),
+        };
+        for (i, l) in layers.iter().enumerate() {
             let mut y: Vec<f32> = (0..l.out)
                 .map(|o| l.b[o] + dot(&l.w[o * l.inp..(o + 1) * l.inp], &x))
                 .collect();
-            if i + 1 < self.layers.len() {
+            if i + 1 < layers.len() {
                 for v in &mut y {
                     *v = v.max(0.0);
                 }

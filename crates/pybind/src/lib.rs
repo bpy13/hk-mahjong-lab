@@ -466,6 +466,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(search::solo, m)?)?;
     m.add_function(wrap_pyfunction!(search::tournament, m)?)?;
     m.add_function(wrap_pyfunction!(rl::feature_sizes, m)?)?;
+    m.add_function(wrap_pyfunction!(rl::net_forward, m)?)?;
     m.add_function(wrap_pyfunction!(rl::encode_state, m)?)?;
     m.add_function(wrap_pyfunction!(rl::teacher_data, m)?)?;
     m.add_class::<rl::VecEnv>()?;
