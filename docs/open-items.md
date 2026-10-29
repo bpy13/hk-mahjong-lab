@@ -16,6 +16,12 @@ with their defaults.
   belief model (Task 5) comes next; the matches will be rerun with it.
 
 ## Pending work
+- Task 5 belief model (425a7d2): count NLL beats both baselines (0.551 vs 0.634 and 0.662);
+  deal-in calibration 4 of 6 buckets; **tenpai over-predicted in all 6 buckets** (by 5–12 %
+  relative). AC3 not fully met; `docs/belief.md` §4.3 proposes a per-bucket temperature fitted
+  on a second training-field log. Task 6's `danger_check --belief` shows whether it matters.
+  The discard-order block was dropped (+0.13 % NLL, bar 2 %). A new `outcome` head gives the
+  EV bot's discard-win chance, replacing the `2.0 × self-draw` guess.
 - Task 9's target table: 31 of 37 held-out buckets within their 95 % interval; every miss
   under-predicts by 0.4–2 points (limit hands 2.1). Refit with a bias correction, or accept it.
 - Task 10: the EV-versus-realised decile plot needs a per-decision log the tournament runner
