@@ -1,5 +1,7 @@
 # mahjong — Hong Kong mahjong solver & RL lab
 
+[![CI](https://github.com/bpy13/hk-mahjong-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/bpy13/hk-mahjong-lab/actions/workflows/ci.yml)
+
 A research codebase for studying **Hong Kong mahjong** (香港麻雀) under the rules
 in [docs/rules/hk.md](docs/rules/hk.md) (3-faan minimum, 10-faan limit, half-spicy
 payout, flowers, 12-tile liability). It pairs a fast Rust rules engine with:
@@ -13,6 +15,29 @@ payout, flowers, 12-tile liability). It pairs a fast Rust rules engine with:
 3. **Reinforcement learning**: imitation of the best bot, Deep Monte Carlo
    self-play and PPO with Suphx-style oracle guiding, compared head-to-head with
    the bots and the solver, then combined with search.
+
+![Study mode: the solver's top 3 discards with expected points, win and deal-in rates, and the faan-aware hand table](docs/img/study-ui.png)
+
+## Results
+
+Duplicate tournaments (same walls, seats rotated) against three `value` bots, so 0
+means "as good as `value`", the best rule-based bot. Points per hand, "±" is a 95%
+interval. Numbers copied from [phase1-solver.md](docs/study-results/phase1-solver.md)
+(§1, §4.2) and [phase3-rl.md](docs/study-results/phase3-rl.md) (§2).
+
+| Agent | Points / hand | Win | Deal-in |
+|---|---|---|---|
+| PIMC solver, 128 samples (pooled over 32–128: +1.7 ± 3.2) | +2.0 ± 5.1 | 22.9% | 17.9% |
+| `value` (the reference field) | 0.0 | 23.9% | 17.9% |
+| `ppo` (PPO + oracle guiding) | −0.1 ± 2.9 | 13.8% | 22.0% |
+| `defensive` | −1.9 ± 1.5 | 18.9% | 14.8% |
+| `distill` (imitation of `value`) | −5.6 ± 1.8 | 12.2% | 20.1% |
+| `efficiency` (fastest complete hand, ignores faan) | −10.3 ± 1.1 | 2.9% | 22.3% |
+| `dmc` (Deep Monte Carlo) | −11.5 ± 1.5 | 1.0% | 24.6% |
+
+Takeaway: corrected PIMC and PPO reach the level of the best heuristic bot (neither is
+separated from it at 95%), while playing for speed alone (`efficiency`) loses 10.3
+points per hand under the 3-faan minimum. Full write-ups: [docs/study-results/](docs/study-results/).
 
 ## Quick start
 
