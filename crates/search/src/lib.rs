@@ -2,6 +2,7 @@
 //!
 //! * [`agent`]: agents by spec string.
 //! * [`tournament`]: duplicate tournaments (4 rotations or all 24 seatings).
+//! * [`belief`]: the trained belief model (MJNN v2), cached per state.
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
 //! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
 //! * [`ev`]: Brian's explicit EV bot (B15, `docs/ev-bot.md`) and the [`ev::Belief`]
@@ -17,6 +18,7 @@
 //! * [`world`]: structured sampling of hidden tiles for search.
 
 pub mod agent;
+pub mod belief;
 pub mod bots;
 pub mod danger;
 pub mod danger_tables;
@@ -33,6 +35,7 @@ pub mod view;
 pub mod world;
 
 pub use agent::Agent;
+pub use belief::{BeliefModel, BeliefOutput, OpponentBelief};
 pub use bots::{Bot, Efficiency, Fast, RandomBot, Value};
 pub use danger::Danger;
 pub use ev::{
