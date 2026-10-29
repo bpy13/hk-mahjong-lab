@@ -31,7 +31,7 @@ is conservative because they share walls (`runs/matches/task11/compare.json`).
 
 | Agent | Points / hand | Win | Deal-in | Minus Task 7 reference |
 |---|---|---|---|---|
-| Belief-PIMC-64, anchor `value` (Task 7) | pending | | | 0 |
+| Belief-PIMC-64, anchor `value` (Task 7) | +1.24 ± 1.21 | 24.6 % | 17.8 % | 0 |
 | Belief-PIMC-64, anchor `ev`, rollout `ev` | pending | | | pending |
 | Belief-PIMC-64, anchor `ev`, rollout `fast` | pending | | | pending |
 
@@ -39,3 +39,50 @@ is conservative because they share walls (`runs/matches/task11/compare.json`).
 the interval of the difference includes 0, this section says so; what to pick then is an
 open question for Brian (`docs/open-items.md`), because anchor `ev` with `ev` rollouts
 costs about 7 times as much machine time per label.
+
+## 2. Belief-driven determinization (plan Task 7, AC4)
+
+**Question.** Does PIMC-64 get stronger when each sampled world draws the opponents'
+hidden hands from the belief model (Task 5) instead of best-of-K by shanten? And do the
+importance weights (each world weighted by belief likelihood over proposal density) add
+anything on top?
+
+**Matches.** 1,000 walls × 4 seatings (4,000 hands each), seeds 7000–7019 in 20 chunks
+of 50 walls, against three `value` bots. Both matches used the same walls. Job
+`runs/matches/task7/` (2026-10-30 01:10–02:59, 18 threads; about 55 minutes per match,
+far below the plan's 8-hour estimate). Summaries: `data/pimc64-belief.json`,
+`data/pimc64-belief-w0.json` (copies of `runs/matches/*.json`).
+
+| Agent (`pimc:samples=64,candidates=4,belief=models/belief.mjnn,…`) | Points / hand | Bootstrap 95 % | Win | Deal-in | Mean faan |
+|---|---|---|---|---|---|
+| `weights=1` | +1.24 ± 1.21 | [+0.40, +2.07] | 24.6 % | 17.8 % | 4.86 |
+| `weights=0` | +1.25 ± 1.22 | [+0.33, +2.17] | 25.1 % | 18.8 % | 4.91 |
+| `value` (the three opponents, `weights=1` match) | −0.41 | | 23.7 % | 18.9 % | 4.70 |
+
+Weights on minus weights off, paired by chunk (20 chunks of the same walls): −0.02 per
+hand, 95 % interval [−1.09, +1.06].
+
+**Against AC4 and Task 7's done-when.**
+
+| Bar | Result | Met? |
+|---|---|---|
+| ≥ +3 per hand vs `value`, CI excluding 0 | +1.24, CI [+0.40, +2.07] excludes 0 but stays below +3 | **no** |
+| Deal-in ≤ 17.9 % (`value`'s rate in Phase 1) | 17.8 % with weights; 18.8 % without | yes (weights=1 only, by 0.1 point) |
+| Rollout win rate within 3 points of real play | −1.5 points (`docs/solver.md` §4) | yes |
+| Rollout deal-in rate within 3 points of real play | −3.2 points | **no** (by 0.2) |
+| Sampled opponents' shanten within 0.15 per bucket | 5 of 6 buckets (bucket 5 +0.19) | **no** (one bucket) |
+
+**Compared with earlier baselines.** Phase 1's best-of-K PIMC-64 scored +1.0 ± 6.1 over
+240 hands, and +1.7 ± 3.2 pooled over 32–128 samples (`phase1-solver.md` §4.2). Those
+intervals are too wide to rank the samplers. Belief-PIMC-64 is the first PIMC whose
+margin over `value` is significant; it is not shown to beat best-of-K, because no
+best-of-K match on these walls exists.
+
+**Verdict.** AC4 fails on strength: about +1.2 per hand, not +3. The belief sampler makes
+the sampled worlds more realistic (shanten and rollout win rate) and gives a small,
+significant edge over `value`. The weights add no points (difference −0.02 ± 1.07) but
+cut the deal-in rate by one point. Following proposal §9 the run continues. The
+`weights=1` spec stays the reference teacher until Task 11's `ev` anchor result is in;
+the plan's "keep best-of-K" fallback is not applied, since nothing shows best-of-K is
+stronger. Most of the remaining rollout gap (deal-ins under-predicted by about 3
+points with every sampler) comes from the `fast` rollout policy, which Task 11 replaces.
