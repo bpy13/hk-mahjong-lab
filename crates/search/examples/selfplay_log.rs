@@ -17,11 +17,18 @@
 //! * `holdout`: one each of value, closed, the PPO network
 //!   (`net:path=models/ppo.mjnn`) and defensive, in a random seat order. Use a
 //!   different `--seed`: hand seeds derive from `--seed` and the hand index.
+//!
+//! `--bestof K` (plan Task 5's best-of-K baseline) also draws `K` structured
+//! determinizations (`world::sample_world`) at every decision and writes, beside
+//! each chunk, `bestof-NNNNN.bin`: per row `[3][34][5]` bytes, how many of the
+//! `K` samples gave relative opponent `o` 0–4 copies of tile `t`. The sampler
+//! uses its own generator, so the hands played are the same as without it.
 
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{RuleSet, State};
 use mahjong_search::log::{capture, finish, row_bytes, LogWriter};
-use mahjong_search::Agent;
+use mahjong_search::{sample_world, Agent};
+use mahjong_tiles::{Tile, NUM_KINDS};
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
@@ -48,6 +55,7 @@ struct Args {
     holdout: bool,
     threads: usize,
     chunk: usize,
+    bestof: usize,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -58,6 +66,7 @@ fn parse_args() -> Result<Args, String> {
         holdout: false,
         threads: 14,
         chunk: 500,
+        bestof: 0,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -69,6 +78,7 @@ fn parse_args() -> Result<Args, String> {
             "--seed" => a.seed = num(v()?)?,
             "--threads" => a.threads = num(v()?)?.max(1) as usize,
             "--chunk" => a.chunk = num(v()?)?.max(1) as usize,
+            "--bestof" => a.bestof = num(v()?)?.min(255) as usize,
             "--field" => {
                 a.holdout = match v()?.as_str() {
                     "train" => false,
@@ -109,13 +119,22 @@ fn seat_agents(holdout: bool, hand: u64, rng: &mut SmallRng) -> [u8; 4] {
     ids
 }
 
+/// Bytes per row of the best-of-K sidecar: 3 opponents × 34 kinds × 5 counts.
+const BESTOF_ROW: usize = 3 * NUM_KINDS * 5;
+
+/// A hand's encoded rows and, with `--bestof`, the sidecar bytes.
+struct HandOut {
+    rows: Vec<u8>,
+    bestof: Vec<u8>,
+}
+
 /// Plays one hand and returns its encoded rows.
 ///
 /// A hand with a search seat runs in its own one-thread pool. In the shared
 /// pool, PIMC's inner parallel loop lets a waiting thread steal whole hands, so
 /// one search decision waited on chains of stolen hands and a 500-hand chunk
 /// ended with two busy cores for most of its time (5× slower overall).
-fn play_hand(agents: &[Agent], holdout: bool, seed: u64, hand: u64) -> Vec<u8> {
+fn play_hand(agents: &[Agent], holdout: bool, seed: u64, hand: u64, bestof: usize) -> HandOut {
     let mut rng = SmallRng::seed_from_u64(hand_seed(seed, hand));
     let ids = seat_agents(holdout, hand, &mut rng);
     if ids
@@ -126,18 +145,46 @@ fn play_hand(agents: &[Agent], holdout: bool, seed: u64, hand: u64) -> Vec<u8> {
             .num_threads(1)
             .build()
             .expect("one-thread pool");
-        return one.install(|| play_seated(agents, ids, hand, &mut rng));
+        return one.install(|| play_seated(agents, ids, hand, &mut rng, bestof));
     }
-    play_seated(agents, ids, hand, &mut rng)
+    play_seated(agents, ids, hand, &mut rng, bestof)
 }
 
-fn play_seated(agents: &[Agent], ids: [u8; 4], hand: u64, rng: &mut SmallRng) -> Vec<u8> {
+/// Appends the best-of-`k` count histogram of this decision to `out` (its own
+/// generator, seeded from the hand and the step, so play is unchanged).
+fn bestof_row(s: &State, me: usize, hand: u64, step: u16, k: usize, out: &mut Vec<u8>) {
+    let mut rng = SmallRng::seed_from_u64(hand_seed(hand ^ 0x5eed_b0cf, u64::from(step)));
+    let mut hist = [0u8; BESTOF_ROW];
+    for _ in 0..k {
+        let w = sample_world(s, me, &mut rng);
+        for r in 1..4 {
+            let h = w.hand((me + r) % 4);
+            for t in Tile::all_kinds() {
+                let c = (h[t] as usize).min(4);
+                hist[((r - 1) * NUM_KINDS + t.index() as usize) * 5 + c] += 1;
+            }
+        }
+    }
+    out.extend_from_slice(&hist);
+}
+
+fn play_seated(
+    agents: &[Agent],
+    ids: [u8; 4],
+    hand: u64,
+    rng: &mut SmallRng,
+    bestof: usize,
+) -> HandOut {
     let mut s = State::new_deal(RuleSet::default(), rng);
     let mut pending = Vec::new();
     let mut legal = Vec::new();
     let mut step = 0u16;
+    let mut sidecar = Vec::new();
     while let Some(p) = s.current_player() {
         pending.push(capture(&s, hand as u32, step, ids));
+        if bestof > 0 {
+            bestof_row(&s, p, hand, step, bestof, &mut sidecar);
+        }
         s.legal_actions(&mut legal);
         let a = agents[ids[p] as usize].choose(&s, &legal, rng);
         s.apply(a);
@@ -148,7 +195,10 @@ fn play_seated(agents: &[Agent], ids: [u8; 4], hand: u64, rng: &mut SmallRng) ->
     for r in &pending {
         finish(r, &result, &mut out);
     }
-    out
+    HandOut {
+        rows: out,
+        bestof: sidecar,
+    }
 }
 
 fn json_list(xs: &[&str]) -> String {
@@ -180,12 +230,13 @@ fn main() {
         .map(|n| Agent::parse(n).unwrap_or_else(|e| panic!("agent {n}: {e}")))
         .collect();
     let meta_head = format!(
-        "\"field\": \"{}\", \"seed\": {}, \"hands_target\": {}, \"chunk_hands\": {}, \"threads\": {}, \"agents\": {}",
+        "\"field\": \"{}\", \"seed\": {}, \"hands_target\": {}, \"chunk_hands\": {}, \"threads\": {}, \"bestof\": {}, \"agents\": {}",
         if args.holdout { "holdout" } else { "train" },
         args.seed,
         args.hands,
         args.chunk,
         args.threads,
+        args.bestof,
         json_list(names)
     );
     // A resumed run must keep the chunk size, or hand indices would shift.
@@ -217,13 +268,22 @@ fn main() {
     for c in first..n_chunks {
         let lo = c * args.chunk;
         let hi = ((c + 1) * args.chunk).min(args.hands);
-        let rows: Vec<Vec<u8>> = pool.install(|| {
+        let hands: Vec<HandOut> = pool.install(|| {
             (lo..hi)
                 .into_par_iter()
-                .map(|h| play_hand(&agents, args.holdout, args.seed, h as u64))
+                .map(|h| play_hand(&agents, args.holdout, args.seed, h as u64, args.bestof))
                 .collect()
         });
-        let bytes = rows.concat();
+        let bytes: Vec<u8> = hands.iter().flat_map(|h| h.rows.iter().copied()).collect();
+        if args.bestof > 0 {
+            let side: Vec<u8> = hands
+                .iter()
+                .flat_map(|h| h.bestof.iter().copied())
+                .collect();
+            debug_assert_eq!(side.len() / BESTOF_ROW, bytes.len() / row_bytes());
+            std::fs::write(args.out.join(format!("bestof-{c:05}.bin")), side)
+                .expect("write the best-of-K sidecar");
+        }
         let status = format!(
             "\"hands_done\": {hi}, \"complete\": {}, \"updated_unix\": {}, \"session_seconds\": {}",
             hi == args.hands,

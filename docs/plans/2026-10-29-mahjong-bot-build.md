@@ -317,6 +317,12 @@ paired by wall, with a bootstrap 95 % interval.
     `--resume`; check command `Get-Content runs\belief\train.log -Tail 5`. Machine time
     marked: **≤ 6 h CPU or 3 GPU-h**. If the discard-order block does not improve the
     hold-out NLL by ≥ 2 %, drop it and say so in `docs/belief.md`.
+  - Status (2026-10-29): built; `models/belief.mjnn` (MJNN v2, 2.6 MB) committed; 349 s of GPU for
+    5 epochs. AC3: count NLL 0.551 beats uniform 0.634 and best-of-64 0.662 per kind; hidden-tile
+    test passes; deal-in within the interval in 4 of 6 buckets (misses: bucket 0 at 1 in 10,000 vs
+    none seen, bucket 5 at 0.0346 vs ≥ 0.0348); tenpai over-predicted 5–12 % in every bucket on the
+    hold-out field. Not ticked (`docs/belief.md` §4). Discard block dropped (+0.13 %, §5).
+    Added the `outcome` head (`x_o` for the EV bot, ev-bot.md §9 Q1).
 
 - [ ] **Task 6: Payment-aware danger from the belief model** `[parallel-ok after Task 5]`
   - Files: modify `crates/search/src/danger.rs` (add `Danger::from_belief(state, me, &Belief)`,
