@@ -4,6 +4,8 @@
 //! * [`tournament`]: duplicate tournaments (4 rotations or all 24 seatings).
 //! * [`bots`]: rule-based players (random, efficiency, value, defensive, fast).
 //! * [`danger`]: a deal-in danger model fitted to simulated games ([`danger_tables`]).
+//! * [`ev`]: Brian's explicit EV bot (B15, `docs/ev-bot.md`) and the [`ev::Belief`]
+//!   interface for opponent models.
 //! * [`features`]: the observation encoding for learning.
 //! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
@@ -18,6 +20,7 @@ pub mod agent;
 pub mod bots;
 pub mod danger;
 pub mod danger_tables;
+pub mod ev;
 pub mod features;
 pub mod log;
 pub mod net;
@@ -32,6 +35,9 @@ pub mod world;
 pub use agent::Agent;
 pub use bots::{Bot, Efficiency, Fast, RandomBot, Value};
 pub use danger::Danger;
+pub use ev::{
+    Belief, Beliefs, EvBot, EvConfig, EvDecision, EvReason, EvTerms, HeuristicBelief, SeatBelief,
+};
 pub use net::{Mlp, NetPolicy};
 pub use pimc::{pimc, pimc_with, shortlist, ActionStats, Analysis, PimcConfig, Rollout};
 pub use solo::{solo, SoloStats};

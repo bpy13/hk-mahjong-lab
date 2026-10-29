@@ -407,3 +407,45 @@ Task 6's additions.
 ## 10. Measured numbers
 
 Filled in by Task 10 (the AC5 match, timing, the EV-versus-realised plot) and Task 21.
+
+### 10.1 Task 10, provisional (HeuristicBelief, 2026-10-29)
+
+**Provisional:** these numbers use `HeuristicBelief` (§8), not the trained belief model.
+Task 5 does not exist yet; the real-belief matches follow it. Target table: Task 9's
+20,000-hand fit (commit 7e18101).
+
+**Timing (AC5).** 0.37 ms per decision on one thread, release build, position 2, 1,000 calls
+(`cargo test -p mahjong-search --release --test ev_bot`). The bar is < 5 ms.
+
+**The `Pay(me)` floor decides the test positions.** For both §5 hands, `faan_shanten` picks
+a full flush with all chows (清一色 7 + 平糊 1 + 門前清 1 + 無花 1 = 10 faan). So
+`Pay(me) = points(10) = 128`, against a table mean far below that.
+
+| Position | Floor on (default, §9 Q4) | Floor off (`ev:floor=none`) |
+|---|---|---|
+| 1, nobody threatens | discards `R` to chase the flush (`value` plays `3p`) | `3p`, as `value`; §6 checks pass |
+| 2, deliberate deal-in | keeps the safe tile `2p` (EV −13.45 vs −15.87 for `2m`) | `2m`, margin 11.3; `stops_big_hand` and `deal_in_now` keys |
+| 3, liable for B | not `2m`, margin 26.0; `liability` key | not `2m`, margin 12.2; `liability` key |
+
+`crates/search/tests/ev_bot.rs` asserts §6's expected answers with `floor=none`. With the
+floor it asserts position 1's keys and position 3 in full, and only prints position 2.
+**Open question for Brian:** keep the floor (then the bot does not make B15's deliberate
+deal-in in position 2), or drop it, or apply it only near a target (for example `s ≤ 1`).
+
+**Matches.** 1,000 walls × 4 seatings = 4,000 hands, seed 2026, `ev` in one seat against
+three copies of the field. Points per hand for `ev`, with the 95 % wall-bootstrap interval:
+
+| `ev` spec | Field | Points / hand | 95 % interval | Win | Self-draw | Deal-in | Mean faan |
+|---|---|---|---|---|---|---|---|
+| `ev` (floor on) | 3 × `value` | −7.44 | [−8.35, −6.59] | 2.6 % | 0.8 % | 9.8 % | 6.13 |
+| `ev` (floor on) | 3 × `defensive` | −5.23 | [−6.15, −4.29] | 3.5 % | 0.9 % | 7.5 % | 6.11 |
+| `ev:floor=none` | 3 × `value` | −2.46 | [−3.41, −1.58] | 14.6 % | 3.5 % | 11.5 % | 4.98 |
+| `ev:floor=none` | 3 × `defensive` | −0.37 | [−1.46, +0.71] | 16.0 % | 4.6 % | 10.6 % | 5.01 |
+
+AC5 asks for `ev` above `defensive`'s −1.9 against `value`, with an interval excluding 0.
+Neither provisional variant meets it. With the floor, the bot chases 10-faan hands it
+rarely completes (2.6 % wins). Without it, the bot wins 14.6 % against `value`'s 25 % and
+deals in less (11.5 % vs 18.1 %). Files: `runs/matches/ev-*-heuristic.json` (not committed).
+
+**Not done in this step:** the EV-versus-realised decile plot (§3) needs a per-decision log,
+which the tournament runner does not write yet. It belongs with the real-belief match.

@@ -4,7 +4,12 @@
 //!
 //! Spec strings:
 //!
-//! * a bot name: `random`, `efficiency`, `value`, `defensive`, `closed`, `fast`;
+//! * a bot name: `random`, `efficiency`, `value`, `defensive`, `closed`, `fast`, `ev`;
+//! * `ev` with options, e.g. `ev:horizon=8,clip=0.95,tie_margin=0.5,r_disc=2,
+//!   four_meld_win=0.5,feed_clip=0.5-1.5,warn_p=0.1,fold=safest,floor=target`
+//!   ([`crate::ev`],
+//!   `docs/ev-bot.md` §4). Without `belief=` it uses the heuristic belief;
+//!   `belief=models/belief.mjnn` needs the Task 5 loader and is an error until then;
 //! * `pimc` with options, e.g. `pimc:samples=64,candidates=4,ms=300,z=2`
 //!   (see [`crate::pimc::Analysis::choose`] for `z`);
 //! * `net:path=models/x.mjnn`: a trained network ([`crate::net`]);
@@ -14,6 +19,7 @@
 //!   in every seat.
 
 use crate::bots::Bot;
+use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
 use crate::pimc::Rollout;
 use crate::pimc::{pimc, pimc_with, PimcConfig};
@@ -128,6 +134,23 @@ impl Agent {
                     config: c,
                     net_rollouts,
                 })
+            }
+            "ev" => {
+                let mut config = EvConfig::default();
+                let mut belief: Option<String> = None;
+                options(opts, |k, v| {
+                    if k == "belief" {
+                        belief = Some(v.to_string());
+                        Ok(())
+                    } else {
+                        config.set(k, v)
+                    }
+                })?;
+                let belief: Arc<dyn Belief> = match belief {
+                    Some(path) => load_belief(&path)?,
+                    None => Arc::new(HeuristicBelief),
+                };
+                Ok(Agent::Bot(Bot::Ev(EvBot::new(config, belief))))
             }
             _ if opts.is_empty() => Bot::by_name(name)
                 .map(Agent::Bot)
