@@ -770,3 +770,54 @@ fn timing_of_hint_bot_and_review() {
         );
     }
 }
+
+/// Plays up to `max_moves` of a hand from `seed` with `level` bots at `budget_ms`; returns every
+/// response (deal view, each action, each result) so two runs compare byte for byte.
+fn transcript(seed: u64, level: &str, budget_ms: u32, max_moves: usize) -> Vec<String> {
+    let mut api = Api::new();
+    let id = new_game(&mut api, seed);
+    let mut out = Vec::new();
+    for seat in 0..4 {
+        out.push(api.view(&id, seat));
+    }
+    for _ in 0..max_moves {
+        if ok(&api.view(&id, 0))["over"].as_bool().unwrap() {
+            break;
+        }
+        let action = api.bot_action(&id, level, budget_ms);
+        let mut v = ok(&action);
+        // The wall-clock time the call took is the one field that may differ.
+        v.as_object_mut().unwrap().remove("budget_used_ms");
+        let applied = api.apply(&id, &v.to_string());
+        out.push(v.to_string());
+        out.push(applied);
+    }
+    out.push(api.snapshot(&id));
+    out
+}
+
+/// D28 (server replay): the deal depends only on the seed, and a bot's move depends only
+/// on the position and the level. Rule-based levels ignore the budget; the expert is
+/// deterministic at `budget_ms = 0` (a fixed number of samples, no clock).
+#[test]
+fn same_seed_replays_identically_through_the_json_api() {
+    let (_cpu, _) = shared();
+    // The expert searches, so only its first moves are compared (a full hand is slow in debug).
+    for (level, budget, moves) in [
+        ("random", 200, 1000),
+        ("easy", 200, 1000),
+        ("hard", 200, 1000),
+        ("expert", 0, 3),
+    ] {
+        let a = transcript(20261030, level, budget, moves);
+        let b = transcript(20261030, level, budget, moves);
+        assert_eq!(a, b, "level {level} replayed differently");
+        assert!(a.len() > 10, "level {level} played no hand");
+    }
+    let other = transcript(7, "random", 200, 1000);
+    assert_ne!(
+        transcript(20261030, "random", 200, 1000)[0],
+        other[0],
+        "different seeds deal different hands"
+    );
+}
