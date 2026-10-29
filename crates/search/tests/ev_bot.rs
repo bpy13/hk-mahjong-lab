@@ -5,11 +5,12 @@
 
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Meld, MeldKind, PositionPhase, PositionSpec, RuleSet, State};
-use mahjong_search::ev::FAAN_BUCKETS;
-use mahjong_search::{Belief, Beliefs, Bot, EvBot, EvConfig, EvDecision, SeatBelief};
+use mahjong_search::ev::{load_belief, FAAN_BUCKETS};
+use mahjong_search::{Agent, Belief, Beliefs, Bot, EvBot, EvConfig, EvDecision, SeatBelief};
 use mahjong_tiles::{parse_tiles, Tile, TileCounts, NUM_KINDS};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -393,4 +394,92 @@ fn a_decision_takes_under_5_ms_on_one_thread() {
     eprintln!("ev: {per_call_ms:.3} ms per decision over {calls} calls");
     let budget = if cfg!(debug_assertions) { 100.0 } else { 5.0 };
     assert!(per_call_ms < budget, "{per_call_ms:.3} ms per decision");
+}
+
+/// The trained belief model (`ev:belief=models/belief.mjnn`), when present.
+fn trained() -> Option<Arc<dyn Belief>> {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/belief.mjnn");
+    p.exists()
+        .then(|| load_belief(p.to_str().unwrap()).expect("the committed model loads"))
+}
+
+/// With the trained model, `x_o` is the `outcome` head's discard-win chance
+/// (not `r_disc × sd_o`), every move is legal, and a decision (network
+/// included, each on a new state so the cache does not help) stays under
+/// 5 ms on one thread in a release build (AC5).
+#[test]
+fn the_trained_belief_drives_the_bot_within_the_time_budget() {
+    let Some(belief) = trained() else {
+        eprintln!("models/belief.mjnn missing: skipped");
+        return;
+    };
+    for pay_floor in [true, false] {
+        let config = EvConfig {
+            pay_floor,
+            ..EvConfig::default()
+        };
+        let bot = EvBot::new(config, Arc::clone(&belief));
+        let value = Bot::by_name("value").unwrap();
+        let mut rng = SmallRng::seed_from_u64(21);
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let (mut decisions, mut seconds, mut x_differs) = (0usize, 0.0f64, false);
+        one.install(|| {
+            for _ in 0..3 {
+                let mut s = State::new_deal(RuleSet::default(), &mut rng);
+                while let Some(p) = s.current_player() {
+                    let legal = s.legal_actions_vec();
+                    let a = if p == 0 && legal.len() > 1 {
+                        let start = Instant::now();
+                        let d = bot.decide(&s);
+                        seconds += start.elapsed().as_secs_f64();
+                        decisions += 1;
+                        assert!(legal.contains(&d.action), "{:?} not legal", d.action);
+                        for (_, x) in &d.candidates {
+                            assert!(x.ev.is_finite());
+                            for o in 1..4 {
+                                assert!(
+                                    (0.0..=1.0).contains(&x.x[o]) && (0.0..=1.0).contains(&x.sd[o])
+                                );
+                                x_differs |= (x.x[o] - 2.0 * x.sd[o]).abs() > 1e-6;
+                            }
+                            assert_eq!(x.x[0], 0.0);
+                        }
+                        d.action
+                    } else {
+                        value.choose(&s, &legal, &mut rng)
+                    };
+                    s.apply(a);
+                }
+            }
+        });
+        let per_call_ms = 1000.0 * seconds / decisions.max(1) as f64;
+        eprintln!(
+            "ev:belief (floor {pay_floor}): {per_call_ms:.3} ms per decision over {decisions}"
+        );
+        assert!(decisions > 20);
+        assert!(x_differs, "x_o comes from the model, not r_disc × sd_o");
+        let budget = if cfg!(debug_assertions) { 200.0 } else { 5.0 };
+        assert!(per_call_ms < budget, "{per_call_ms:.3} ms per decision");
+    }
+}
+
+/// The spec string loads the model; a policy network is refused.
+#[test]
+fn the_ev_spec_loads_the_trained_belief() {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/belief.mjnn");
+    if !p.exists() {
+        return;
+    }
+    let spec = format!("ev:belief={},floor=none", p.display());
+    assert!(matches!(Agent::parse(&spec), Ok(Agent::Bot(Bot::Ev(_)))));
+    let spec = format!("defensive:belief={}", p.display());
+    assert!(matches!(Agent::parse(&spec), Ok(Agent::Bot(Bot::Value(_)))));
+    assert!(Agent::parse("defensive:nope=1").is_err());
+    let ppo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/ppo.mjnn");
+    if ppo.exists() {
+        assert!(Agent::parse(&format!("ev:belief={}", ppo.display())).is_err());
+    }
 }

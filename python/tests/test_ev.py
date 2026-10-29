@@ -1,11 +1,12 @@
 """The ``ev`` bot through pybind (plan Task 10): ``ev_terms``, the agent spec and a tiny match.
 
-The belief model is the heuristic fallback here (no stub from Python), so these tests check
-shapes and invariants; the constructed positions with a stubbed belief are in
-``crates/search/tests/ev_bot.rs``.
+The belief model is the heuristic fallback here (no stub from Python), except one test that
+reads ``models/belief.mjnn``; these tests check shapes and invariants. The constructed
+positions with a stubbed belief are in ``crates/search/tests/ev_bot.rs``.
 """
 
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -65,6 +66,23 @@ def test_spec_options_and_errors() -> None:
         ev_terms(s, "ev:belief=models/no-such-belief.mjnn")
     with pytest.raises(ValueError, match="ev spec"):
         ev_terms(s, "value")
+
+
+BELIEF = Path(__file__).resolve().parents[2] / "models" / "belief.mjnn"
+
+
+@pytest.mark.skipif(not BELIEF.exists(), reason="models/belief.mjnn missing")
+def test_the_trained_belief_supplies_x() -> None:
+    s = position()
+    out = ev_terms(s, f"ev:belief={BELIEF}")
+    assert out["choice"] in s.legal_actions()
+    for c in out["candidates"]:
+        assert len(c["x"]) == 4 and c["x"][2] == 0.0
+        assert all(0.0 <= v <= 1.0 for v in c["x"])
+    # Without the model, x is r_disc × sd.
+    for c in ev_terms(s)["candidates"]:
+        assert c["x"] == pytest.approx([2.0 * v for v in c["sd"]])
+    assert agent_action(s, f"defensive:belief={BELIEF}", seed=1) in s.legal_actions()
 
 
 def test_a_tiny_match_runs() -> None:

@@ -170,6 +170,7 @@ pub(crate) fn ev_terms<'py>(
         d.set_item("fold_plan", tiles(&x.fold_plan))?;
         d.set_item("tenpai", x.tenpai.to_vec())?;
         d.set_item("sd", x.sd.to_vec())?;
+        d.set_item("x", x.x.to_vec())?;
         d.set_item("pay", x.pay.to_vec())?;
         d.set_item("pay_sd", x.pay_sd.to_vec())?;
         cands.append(d)?;
