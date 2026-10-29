@@ -38,7 +38,7 @@ use crate::bots::{Bot, Fast, Value};
 use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
 use crate::pimc::Rollout;
-use crate::pimc::{pimc, pimc_anchored, pimc_sampled, pimc_with_sampler, PimcConfig};
+use crate::pimc::{pimc, pimc_anchored, pimc_sampled, pimc_with_sampler, Analysis, PimcConfig};
 pub use crate::tournament::{duplicate, AgentResult, TournamentResult};
 use crate::world::{default_tilt, WorldSampler, BELIEF_DRAWS};
 use mahjong_games::{Game, Policy};
@@ -353,27 +353,35 @@ impl Agent {
     }
 }
 
-impl Policy<State> for Agent {
-    fn choose<R: Rng + ?Sized>(&self, state: &State, legal: &[Action], rng: &mut R) -> Action {
-        if legal.len() == 1 {
-            return legal[0];
-        }
+impl Agent {
+    /// For a search agent, the search's analysis of the decision in `state` and
+    /// the `z` its [`Analysis::choose`] uses; `None` for bots and bare networks,
+    /// and for `netpimc` when a win is legal (it declares it without searching).
+    /// Draws the search seed from `rng` exactly as [`Policy::choose`] does, so
+    /// `analysis.choose(z)` is the move `choose` would play (plan Task 13's
+    /// labeller reads the per-candidate numbers from here).
+    ///
+    /// # Panics
+    /// Panics if the hand is over.
+    pub fn search<R: Rng + ?Sized>(
+        &self,
+        state: &State,
+        legal: &[Action],
+        rng: &mut R,
+    ) -> Option<(Analysis, f64)> {
+        let seeded = |c: &PimcConfig, rng: &mut R| PimcConfig {
+            seed: rng.gen(),
+            ..c.clone()
+        };
         match self {
-            Agent::Bot(b) => b.choose(state, legal, rng),
-            Agent::Net(n) => n.choose(state, legal, rng),
+            Agent::Bot(_) | Agent::Net(_) => None,
             Agent::Pimc(c) => {
-                let config = PimcConfig {
-                    seed: rng.gen(),
-                    ..c.clone()
-                };
-                pimc(state, &config).choose(config.z)
+                let config = seeded(c, rng);
+                Some((pimc(state, &config), config.z))
             }
             Agent::PimcSampled { config, sampler } => {
-                let config = PimcConfig {
-                    seed: rng.gen(),
-                    ..config.clone()
-                };
-                pimc_sampled(state, &config, sampler).choose(config.z)
+                let config = seeded(config, rng);
+                Some((pimc_sampled(state, &config, sampler), config.z))
             }
             Agent::PimcAnchored {
                 config,
@@ -381,11 +389,9 @@ impl Policy<State> for Agent {
                 anchor,
                 rollout,
             } => {
-                let config = PimcConfig {
-                    seed: rng.gen(),
-                    ..config.clone()
-                };
-                pimc_anchored(state, &config, sampler, anchor, rollout).choose(config.z)
+                let config = seeded(config, rng);
+                let a = pimc_anchored(state, &config, sampler, anchor, rollout);
+                Some((a, config.z))
             }
             Agent::NetPimc {
                 net,
@@ -393,16 +399,13 @@ impl Policy<State> for Agent {
                 net_rollouts,
                 sampler,
             } => {
-                if let Some(&w) = legal
+                if legal
                     .iter()
-                    .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
+                    .any(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
                 {
-                    return w;
+                    return None;
                 }
-                let config = PimcConfig {
-                    seed: rng.gen(),
-                    ..config.clone()
-                };
+                let config = seeded(config, rng);
                 let candidates = top_actions(&net.0, state, config.candidates.max(1));
                 let baseline = candidates[0];
                 let a = if *net_rollouts {
@@ -417,7 +420,33 @@ impl Policy<State> for Agent {
                         &Rollout::for_seat(state.current_player().expect("to act")),
                     )
                 };
-                a.choose(config.z)
+                Some((a, config.z))
+            }
+        }
+    }
+}
+
+impl Policy<State> for Agent {
+    fn choose<R: Rng + ?Sized>(&self, state: &State, legal: &[Action], rng: &mut R) -> Action {
+        if legal.len() == 1 {
+            return legal[0];
+        }
+        match self {
+            Agent::Bot(b) => b.choose(state, legal, rng),
+            Agent::Net(n) => n.choose(state, legal, rng),
+            Agent::NetPimc { .. } => {
+                if let Some(&w) = legal
+                    .iter()
+                    .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
+                {
+                    return w;
+                }
+                let (a, z) = self.search(state, legal, rng).expect("a search agent");
+                a.choose(z)
+            }
+            _ => {
+                let (a, z) = self.search(state, legal, rng).expect("a search agent");
+                a.choose(z)
             }
         }
     }
