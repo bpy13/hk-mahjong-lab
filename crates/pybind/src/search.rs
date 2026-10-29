@@ -7,7 +7,7 @@ use mahjong_games::{Game, Policy};
 use mahjong_hk::State;
 use mahjong_search::tournament::tournament as run_tournament;
 use mahjong_search::{
-    pimc, solo as solo_sim, Agent, Danger, PimcConfig, SeatView, Seatings, TournamentConfig,
+    pimc, solo as solo_sim, Agent, Bot, Danger, PimcConfig, SeatView, Seatings, TournamentConfig,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -115,6 +115,84 @@ pub(crate) fn agent_action(
         let legal = s.legal_actions_vec();
         agent.choose(&s, &legal, &mut rng_from(seed)).code()
     }))
+}
+
+/// The `ev` bot's decision for the player to act (plan Task 10,
+/// `docs/ev-bot.md` §2.3): `choice` (action code), `candidates` (best `ev`
+/// first, every term per candidate; per-seat lists have four entries) and
+/// `reasons` (`[{"key": ..., "args": {...}}]`). `spec` is an `ev` agent spec.
+#[pyfunction]
+#[pyo3(signature = (state, spec="ev"))]
+pub(crate) fn ev_terms<'py>(
+    py: Python<'py>,
+    state: &Bound<'py, PyState>,
+    spec: &str,
+) -> PyResult<Bound<'py, PyDict>> {
+    let s = snapshot(state)?;
+    let bot = match Agent::parse(spec).map_err(value_error)? {
+        Agent::Bot(Bot::Ev(b)) => b,
+        _ => {
+            return Err(value_error(
+                "ev_terms needs an ev spec (\"ev\" or \"ev:...\")",
+            ))
+        }
+    };
+    let decision = py.detach(move || bot.decide(&s));
+    let tiles = |v: &[mahjong_tiles::Tile]| v.iter().map(|t| t.index() as u32).collect::<Vec<_>>();
+    let out = PyDict::new(py);
+    out.set_item("choice", decision.action.code())?;
+    out.set_item("text", decision.action.to_string())?;
+    let cands = PyList::empty(py);
+    for (a, x) in &decision.candidates {
+        let d = PyDict::new(py);
+        d.set_item("action", a.code())?;
+        d.set_item("text", a.to_string())?;
+        d.set_item("discard", x.discard.map(|t| t.index() as u32))?;
+        d.set_item("ev", x.ev)?;
+        d.set_item("offence", x.offence)?;
+        d.set_item("defence", x.defence)?;
+        d.set_item("p_win", x.p_win)?;
+        d.set_item("p_sd", x.p_sd)?;
+        d.set_item("pay_me", x.pay_me)?;
+        d.set_item("shares_me", x.shares_me)?;
+        d.set_item("phi", x.phi)?;
+        d.set_item("faan_shanten", x.faan_shanten)?;
+        d.set_item("target_faan", x.target_faan)?;
+        d.set_item("kappa", x.kappa)?;
+        d.set_item("cont", x.cont)?;
+        d.set_item("p_now", x.p_now.to_vec())?;
+        d.set_item("deal_in_now", x.deal_in_now.to_vec())?;
+        d.set_item("self_draw", x.self_draw.to_vec())?;
+        d.set_item("other_feeds", x.other_feeds.to_vec())?;
+        d.set_item("later", x.later)?;
+        d.set_item("liability", x.liability)?;
+        d.set_item("liability_by_seat", x.liability_by_seat.to_vec())?;
+        d.set_item("fold_plan", tiles(&x.fold_plan))?;
+        d.set_item("tenpai", x.tenpai.to_vec())?;
+        d.set_item("sd", x.sd.to_vec())?;
+        d.set_item("pay", x.pay.to_vec())?;
+        d.set_item("pay_sd", x.pay_sd.to_vec())?;
+        cands.append(d)?;
+    }
+    out.set_item("candidates", cands)?;
+    let reasons = PyList::empty(py);
+    for r in &decision.reasons {
+        let d = PyDict::new(py);
+        d.set_item("key", r.key)?;
+        let args = PyDict::new(py);
+        for &(name, v) in &r.args {
+            // Seats and share counts are whole numbers.
+            if matches!(name, "seat" | "shares") {
+                args.set_item(name, v as i64)?;
+            } else {
+                args.set_item(name, v)?;
+            }
+        }
+        d.set_item("args", args)?;
+        reasons.append(d)?;
+    }
+    out.set_item("reasons", reasons)?;
+    Ok(out)
 }
 
 /// The heuristic danger model for `seat`: per-tile deal-in estimates (34) and

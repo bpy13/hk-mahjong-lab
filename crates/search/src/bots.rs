@@ -15,6 +15,7 @@
 //! Every bot declares a legal win whenever it can.
 
 use crate::danger::Danger;
+use crate::ev::EvBot;
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::{Game, Policy};
@@ -128,7 +129,12 @@ pub(crate) fn best_discard(view: &SeatView, candidates: &[Tile], metric: Metric)
 }
 
 /// The hand and melds after claiming `action` on `tile` from `from`.
-fn after_claim(view: &SeatView, action: Action, tile: Tile, from: usize) -> Option<SeatView> {
+pub(crate) fn after_claim(
+    view: &SeatView,
+    action: Action,
+    tile: Tile,
+    from: usize,
+) -> Option<SeatView> {
     let mut hand = view.concealed;
     let mut melds = view.melds.clone();
     match action {
@@ -411,13 +417,17 @@ pub enum Bot {
     Efficiency(Efficiency),
     Value(Value),
     Fast(Fast),
+    /// Brian's explicit EV design ([`crate::ev`]).
+    Ev(EvBot),
 }
 
 impl Bot {
     /// Builds a bot by name: `random`, `efficiency`, `value`, `defensive`,
-    /// `closed` (value, never claims melds), `fast`.
+    /// `closed` (value, never claims melds), `fast`, `ev` (with the heuristic
+    /// belief; `ev:` spec options are parsed by [`crate::Agent`]).
     pub fn by_name(name: &str) -> Option<Bot> {
         Some(match name {
+            "ev" => Bot::Ev(EvBot::default()),
             "random" => Bot::Random(RandomBot),
             "efficiency" => Bot::Efficiency(Efficiency::default()),
             "value" => Bot::Value(Value::default()),
@@ -436,6 +446,7 @@ impl Policy<State> for Bot {
             Bot::Efficiency(b) => b.choose(state, legal, rng),
             Bot::Value(b) => b.choose(state, legal, rng),
             Bot::Fast(b) => b.choose(state, legal, rng),
+            Bot::Ev(b) => b.choose(state, legal, rng),
         }
     }
 }

@@ -95,6 +95,11 @@ def analyze(
 def agent_action(state: HkState, spec: str, seed: int | None = None) -> int:
     """The action an agent spec (``"value"``, ``"pimc:samples=64"``) chooses."""
 
+def ev_terms(state: HkState, spec: str = "ev") -> dict[str, Any]:
+    """The ``ev`` bot's decision for the player to act (``docs/ev-bot.md`` §2.3): ``choice``
+    (action code), ``text``, ``candidates`` (best ``ev`` first, every term; per-seat lists of
+    four) and ``reasons`` (``[{"key": "reason.ev....", "args": {...}}]``)."""
+
 def danger(state: HkState, seat: int) -> dict[str, Any]:
     """Heuristic per-tile deal-in danger (``tiles``) and per-seat ``threat``."""
 

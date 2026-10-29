@@ -430,6 +430,7 @@ paired by wall, with a bootstrap 95 % interval.
     defensive` is reported too.
   - Notes: machine time ≈ 15 min per 4,000-hand match (no search). Every number the bot uses
     is exposed in `EvTerms` so hints can show it (the app stream maps terms to keys).
+  - Status (2026-10-29): built with `HeuristicBelief`; 0.37 ms/decision; §6 answers hold only with `ev:floor=none`; provisional matches miss AC5 (`docs/ev-bot.md` §10.1); real-belief matches wait on Task 5.
 
 - [ ] **Task 11: EV bot as the PIMC anchor and rollout policy**
   - Files: modify `crates/search/src/pimc.rs` (`Rollout::with(own: Bot, opponents: Bot)`;

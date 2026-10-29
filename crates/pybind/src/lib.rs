@@ -458,6 +458,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert::pattern_names, m)?)?;
     m.add_function(wrap_pyfunction!(search::analyze, m)?)?;
     m.add_function(wrap_pyfunction!(search::agent_action, m)?)?;
+    m.add_function(wrap_pyfunction!(search::ev_terms, m)?)?;
     m.add_function(wrap_pyfunction!(search::danger, m)?)?;
     m.add_function(wrap_pyfunction!(search::hand_progress, m)?)?;
     m.add_function(wrap_pyfunction!(search::target_value_table, m)?)?;
