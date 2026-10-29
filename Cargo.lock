@@ -442,6 +442,7 @@ dependencies = [
  "mahjong-tiles",
  "pyo3",
  "rand 0.8.8",
+ "rand_chacha",
  "rayon",
  "serde",
  "serde_json",

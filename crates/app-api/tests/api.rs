@@ -326,7 +326,7 @@ fn illegal_actions_are_rejected_with_a_code() {
 /// Plays random bots until a claim window where `wanted` is legal for the
 /// declaring seat; returns that seat. Tries several seeds.
 fn reach_claim(api: &mut Api, id: &mut String, wanted: &str) -> usize {
-    for seed in 100..160 {
+    for seed in 100..500 {
         *id = new_game(api, seed);
         loop {
             let legal = ok(&api.legal_actions(id));
@@ -341,7 +341,7 @@ fn reach_claim(api: &mut Api, id: &mut String, wanted: &str) -> usize {
             ok(&api.apply(id, &a.to_string()));
         }
     }
-    panic!("no claim window offering {wanted} in 60 seeds");
+    panic!("no claim window offering {wanted} in 400 seeds");
 }
 
 #[test]
