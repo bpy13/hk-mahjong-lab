@@ -219,6 +219,42 @@ pub fn encode(state: &State, out: &mut [f32]) {
     debug_assert_eq!(k, SCALARS);
 }
 
+/// Tiles per suit (positions of the suit-shared convolution).
+pub const SUIT_LEN: usize = 9;
+/// Honour kinds (winds, then dragons).
+pub const HONOUR_KINDS: usize = 7;
+/// Length of [`encode_planes`]'s suit block: 3 suits × 9 positions × 26 planes.
+pub const SUIT_BLOCK_LEN: usize = 3 * SUIT_LEN * PLANES;
+/// Length of [`encode_planes`]'s rest block: honours (26 planes × 7) then the
+/// scalars.
+pub const REST_LEN: usize = PLANES * HONOUR_KINDS + SCALARS;
+
+/// The suit-shared CNN's view of [`encode`]'s output (plan Task 14).
+///
+/// `suits` gets, for suit `s` (characters, dots, bamboo) and position `i`
+/// (tile `i + 1`), the 26 plane values of that tile at
+/// `(s * 9 + i) * 26 + plane` (suit-major, then position, then plane, so each
+/// position's planes are contiguous for the convolution). `rest` gets the
+/// honour columns plane-major (`plane * 7 + honour`) followed by the
+/// [`SCALARS`] scalars. The PyTorch model (`mahjong.rl.cnn`) reads the same
+/// layout.
+///
+/// # Panics
+/// Panics if a slice has the wrong length.
+pub fn encode_planes(features: &[f32], suits: &mut [f32], rest: &mut [f32]) {
+    assert_eq!(features.len(), STATE_LEN);
+    assert_eq!(suits.len(), SUIT_BLOCK_LEN);
+    assert_eq!(rest.len(), REST_LEN);
+    for p in 0..PLANES {
+        let plane = &features[p * NUM_KINDS..(p + 1) * NUM_KINDS];
+        for (k, &v) in plane[..3 * SUIT_LEN].iter().enumerate() {
+            suits[k * PLANES + p] = v;
+        }
+        rest[p * HONOUR_KINDS..(p + 1) * HONOUR_KINDS].copy_from_slice(&plane[3 * SUIT_LEN..]);
+    }
+    rest[PLANES * HONOUR_KINDS..].copy_from_slice(&features[PLANES * NUM_KINDS..]);
+}
+
 /// Encodes what is hidden from the player to act into `out` (length
 /// [`ORACLE_LEN`]): each opponent's concealed tiles (relative seats 1–3, count
 /// / 4) and the next 16 tiles of the wall (count / 4).
@@ -271,6 +307,17 @@ mod tests {
             encode(&s, &mut a);
             encode(&other, &mut b);
             assert_eq!(a, b, "the encoding depends on hidden tiles");
+            // The CNN view is a permutation of the flat encoding.
+            let mut suits = vec![0.0; SUIT_BLOCK_LEN];
+            let mut rest = vec![0.0; REST_LEN];
+            encode_planes(&a, &mut suits, &mut rest);
+            assert_eq!(SUIT_BLOCK_LEN + REST_LEN, STATE_LEN);
+            let t = 9 + 4; // 5p
+            for p in 0..PLANES {
+                assert_eq!(suits[t * PLANES + p], a[p * NUM_KINDS + t]);
+                assert_eq!(rest[p * HONOUR_KINDS + 2], a[p * NUM_KINDS + 29]);
+            }
+            assert_eq!(rest[REST_LEN - 1], a[STATE_LEN - 1]);
             assert!(a
                 .iter()
                 .all(|x| x.is_finite() && (-0.01..=1.01).contains(x)));

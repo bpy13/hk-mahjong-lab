@@ -138,6 +138,10 @@ def tournament(
 def feature_sizes() -> tuple[int, int, int]:
     """``(STATE_LEN, ORACLE_LEN, NUM_ACTION_CODES)``."""
 
+def net_forward(path: str, features: bytes) -> tuple[bytes, tuple[int, int]]:
+    """Runs an MJNN file (v1-v3) in Rust on ``n x input_len`` float32 rows; returns the
+    ``n x output_len`` float32 outputs and ``(input_len, output_len)``."""
+
 def encode_state(state: HkState) -> tuple[list[float], list[float], list[int]]:
     """Features, oracle features and legal-action mask for the player to act."""
 

@@ -9,7 +9,7 @@ use crate::{value_error, PyState};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State, NUM_ACTION_CODES};
 use mahjong_search::features::{encode, encode_oracle, ORACLE_LEN, STATE_LEN};
-use mahjong_search::Agent;
+use mahjong_search::{Agent, Mlp};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use rand::rngs::SmallRng;
@@ -25,6 +25,38 @@ fn f32_bytes<'py>(py: Python<'py>, v: &[f32]) -> Bound<'py, PyBytes> {
 #[pyfunction]
 pub(crate) fn feature_sizes() -> (usize, usize, usize) {
     (STATE_LEN, ORACLE_LEN, NUM_ACTION_CODES)
+}
+
+/// Runs an MJNN network file (v1–v3) in Rust on feature rows (`features`:
+/// little-endian `float32` bytes, `n × input_len`); returns the outputs as
+/// `float32` bytes (`n × output_len`) and `(input_len, output_len)`. For
+/// checking an export against PyTorch (plan Task 14).
+#[pyfunction]
+pub(crate) fn net_forward<'py>(
+    py: Python<'py>,
+    path: &str,
+    features: &[u8],
+) -> PyResult<(Bound<'py, PyBytes>, (usize, usize))> {
+    let net = Mlp::load(path).map_err(value_error)?;
+    let (inp, out) = (net.input_len(), net.output_len());
+    if !features.len().is_multiple_of(4 * inp) {
+        return Err(value_error(format!(
+            "{} bytes is not a whole number of {inp}-float rows",
+            features.len()
+        )));
+    }
+    let x: Vec<f32> = features
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
+        .collect();
+    let y: Vec<f32> = py.detach(|| {
+        x.par_chunks(inp)
+            .flat_map_iter(|row| net.forward(row))
+            .collect()
+    });
+    Ok((f32_bytes(py, &y), (inp, out)))
 }
 
 /// The encoding of the decision of the player to act: `(features, oracle, mask)`
