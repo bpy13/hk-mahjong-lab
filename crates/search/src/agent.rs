@@ -19,6 +19,14 @@
 //!   `draws=` and `tilt=` override the candidate hands per opponent (16) and the
 //!   shanten tilt of its resampling step ([`crate::world::default_tilt`]);
 //!   `netpimc` takes the same options;
+//!   `anchor=value|ev` picks the baseline bot the search must beat (default
+//!   `value`) and `rollout=fast|ev` the bot that plays the searcher's own later
+//!   moves in the rollouts (default `fast`; opponents always play the defending
+//!   `fast`). The `ev` bot there reads the `belief=` model when one is given
+//!   (else the heuristic belief) and runs with `floor=none`, the stronger
+//!   setting in Task 10's matches (`docs/ev-bot.md` §10.2); `ev_<key>=<value>`
+//!   passes any `ev:` option to it, e.g. `ev_floor=target,ev_horizon=6`
+//!   ([`crate::pimc::pimc_anchored`]);
 //! * `net:path=models/x.mjnn`: a trained network ([`crate::net`]);
 //! * `netpimc:path=models/x.mjnn,samples=32,candidates=4,rollout=fast`: network-
 //!   guided search. The network proposes the candidates and is the baseline that
@@ -26,11 +34,11 @@
 //!   in every seat.
 
 use crate::belief::BeliefModel;
-use crate::bots::{Bot, Value};
+use crate::bots::{Bot, Fast, Value};
 use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
 use crate::pimc::Rollout;
-use crate::pimc::{pimc, pimc_sampled, pimc_with_sampler, PimcConfig};
+use crate::pimc::{pimc, pimc_anchored, pimc_sampled, pimc_with_sampler, PimcConfig};
 pub use crate::tournament::{duplicate, AgentResult, TournamentResult};
 use crate::world::{default_tilt, WorldSampler, BELIEF_DRAWS};
 use mahjong_games::{Game, Policy};
@@ -49,6 +57,16 @@ pub enum Agent {
     PimcSampled {
         config: PimcConfig,
         sampler: WorldSampler,
+    },
+    /// PIMC with another baseline bot or own-rollout bot
+    /// (`pimc:...,anchor=ev,rollout=ev`). Specs without `anchor=` and
+    /// `rollout=` keep the two variants above, so their play is unchanged.
+    PimcAnchored {
+        config: PimcConfig,
+        sampler: WorldSampler,
+        anchor: Box<Bot>,
+        /// The rollout policies; its seat is replaced by the player to act.
+        rollout: Box<Rollout>,
     },
     Net(NetPolicy),
     NetPimc {
@@ -156,6 +174,81 @@ impl PimcSpec {
     }
 }
 
+/// The `pimc` options `anchor=`, `rollout=` and `ev_<key>=` (see the module
+/// docs). Kept apart from [`PimcSpec`] because `netpimc` has its own
+/// `rollout=`.
+struct AnchorSpec {
+    anchor: Option<String>,
+    rollout: Option<String>,
+    ev: EvConfig,
+    ev_options: bool,
+}
+
+impl AnchorSpec {
+    fn new() -> AnchorSpec {
+        AnchorSpec {
+            anchor: None,
+            rollout: None,
+            // floor=none: the stronger `ev` in Task 10's matches.
+            ev: EvConfig {
+                pay_floor: false,
+                ..EvConfig::default()
+            },
+            ev_options: false,
+        }
+    }
+
+    /// Handles one option; `Ok(false)` if `k` is not one of these.
+    fn option(&mut self, k: &str, v: &str) -> Result<bool, String> {
+        match k {
+            "anchor" if matches!(v, "value" | "ev") => self.anchor = Some(v.to_string()),
+            "anchor" => return Err(format!("anchor is value or ev, not {v:?}")),
+            "rollout" if matches!(v, "fast" | "ev") => self.rollout = Some(v.to_string()),
+            "rollout" => return Err(format!("rollout is fast or ev, not {v:?}")),
+            _ => match k.strip_prefix("ev_") {
+                Some(key) if key != "belief" => {
+                    self.ev.set(key, v)?;
+                    self.ev_options = true;
+                }
+                _ => return Ok(false),
+            },
+        }
+        Ok(true)
+    }
+
+    /// The anchor and rollout policies, or `None` when both are the defaults
+    /// (`value`, `fast`), in which case the plain PIMC agents are used.
+    fn finish(self, sampler: &WorldSampler) -> Result<Option<(Bot, Rollout)>, String> {
+        let anchor_ev = self.anchor.as_deref() == Some("ev");
+        let rollout_ev = self.rollout.as_deref() == Some("ev");
+        if !anchor_ev && !rollout_ev {
+            if self.ev_options {
+                return Err("ev_ options need anchor=ev or rollout=ev".to_string());
+            }
+            return Ok(None);
+        }
+        let belief: Arc<dyn Belief> = match sampler {
+            WorldSampler::Belief { model, .. } => Arc::clone(model) as Arc<dyn Belief>,
+            WorldSampler::BestOfK => Arc::new(HeuristicBelief),
+        };
+        let ev = Bot::Ev(EvBot::new(self.ev, belief));
+        let anchor = if anchor_ev {
+            ev.clone()
+        } else {
+            Bot::Value(Value::default())
+        };
+        let own = if rollout_ev {
+            ev
+        } else {
+            Bot::Fast(Fast::default())
+        };
+        Ok(Some((
+            anchor,
+            Rollout::with(0, own, Rollout::default_opponents()),
+        )))
+    }
+}
+
 fn load_net(path: Option<String>) -> Result<NetPolicy, String> {
     let path = path.ok_or("network agents need path=...")?;
     Ok(NetPolicy(Arc::new(Mlp::load(path)?)))
@@ -168,16 +261,24 @@ impl Agent {
         match name {
             "pimc" => {
                 let mut c = PimcSpec::new(64, 4);
+                let mut a = AnchorSpec::new();
                 options(opts, |k, v| {
-                    if c.option(k, v)? {
+                    if c.option(k, v)? || a.option(k, v)? {
                         Ok(())
                     } else {
                         Err(format!("unknown pimc option {k:?}"))
                     }
                 })?;
-                Ok(match c.finish()? {
-                    (config, WorldSampler::BestOfK) => Agent::Pimc(config),
-                    (config, sampler) => Agent::PimcSampled { config, sampler },
+                let (config, sampler) = c.finish()?;
+                Ok(match (a.finish(&sampler)?, sampler) {
+                    (Some((anchor, rollout)), sampler) => Agent::PimcAnchored {
+                        config,
+                        sampler,
+                        anchor: Box::new(anchor),
+                        rollout: Box::new(rollout),
+                    },
+                    (None, WorldSampler::BestOfK) => Agent::Pimc(config),
+                    (None, sampler) => Agent::PimcSampled { config, sampler },
                 })
             }
             "net" => {
@@ -274,6 +375,18 @@ impl Policy<State> for Agent {
                 };
                 pimc_sampled(state, &config, sampler).choose(config.z)
             }
+            Agent::PimcAnchored {
+                config,
+                sampler,
+                anchor,
+                rollout,
+            } => {
+                let config = PimcConfig {
+                    seed: rng.gen(),
+                    ..config.clone()
+                };
+                pimc_anchored(state, &config, sampler, anchor, rollout).choose(config.z)
+            }
             Agent::NetPimc {
                 net,
                 config,
@@ -339,5 +452,59 @@ mod tests {
             }
         }
         assert!(Agent::parse(&format!("pimc:belief={model},weights=2")).is_err());
+    }
+
+    #[test]
+    fn pimc_anchor_and_rollout_options() {
+        // The defaults keep the plain agents (and so their play).
+        assert!(matches!(
+            Agent::parse("pimc:samples=8,anchor=value,rollout=fast"),
+            Ok(Agent::Pimc(_))
+        ));
+        assert!(Agent::parse("pimc:anchor=net").is_err());
+        assert!(Agent::parse("pimc:rollout=net").is_err());
+        assert!(Agent::parse("pimc:ev_floor=none").is_err());
+        assert!(Agent::parse("pimc:anchor=ev,ev_floor=max").is_err());
+        assert!(Agent::parse("pimc:anchor=ev,ev_nope=1").is_err());
+        // netpimc keeps its own rollout= values.
+        assert!(Agent::parse("netpimc:rollout=ev").is_err());
+        let ev_of = |b: &Bot| match b {
+            Bot::Ev(e) => Some(e.config.clone()),
+            _ => None,
+        };
+        match Agent::parse("pimc:anchor=ev,samples=8") {
+            Ok(Agent::PimcAnchored {
+                anchor, rollout, ..
+            }) => {
+                let c = ev_of(&anchor).expect("ev anchor");
+                assert!(!c.pay_floor, "floor=none by default");
+                assert!(format!("{rollout:?}").contains("Fast"));
+            }
+            other => panic!("{other:?}"),
+        }
+        match Agent::parse("pimc:rollout=ev,ev_floor=target,ev_horizon=6") {
+            Ok(Agent::PimcAnchored {
+                anchor, rollout, ..
+            }) => {
+                assert!(matches!(*anchor, Bot::Value(_)));
+                assert!(format!("{rollout:?}").contains("horizon: 6"));
+                assert!(format!("{rollout:?}").contains("pay_floor: true"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let model = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/belief.mjnn");
+        if !std::path::Path::new(model).exists() {
+            return;
+        }
+        let spec = format!("pimc:samples=64,candidates=4,belief={model},anchor=ev,rollout=ev");
+        match Agent::parse(&spec) {
+            Ok(Agent::PimcAnchored {
+                sampler, anchor, ..
+            }) => {
+                assert!(sampler.weighted());
+                assert!(format!("{anchor:?}").contains("BeliefModel"));
+            }
+            other => panic!("{spec}: {other:?}"),
+        }
     }
 }

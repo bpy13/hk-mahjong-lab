@@ -42,11 +42,14 @@ pub use ev::{
     Belief, Beliefs, EvBot, EvConfig, EvDecision, EvReason, EvTerms, HeuristicBelief, SeatBelief,
 };
 pub use net::{Mlp, NetPolicy};
-pub use pimc::{pimc, pimc_with, shortlist, ActionStats, Analysis, PimcConfig, Rollout};
+pub use pimc::{
+    pimc, pimc_anchored, pimc_with, shortlist, shortlist_anchored, ActionStats, Analysis,
+    PimcConfig, Rollout,
+};
 pub use solo::{solo, SoloStats};
 pub use tournament::{
     duplicate, tournament, AgentResult, Seatings, Summary, Tournament, TournamentConfig,
     TournamentResult,
 };
 pub use view::SeatView;
-pub use world::sample_world;
+pub use world::{sample_world, WorldSampler};

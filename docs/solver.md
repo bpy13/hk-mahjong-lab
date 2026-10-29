@@ -87,7 +87,8 @@ study mode shows it (the coloured bar, with the percentage on hover).
    hands come from the trained belief model ([belief.md](belief.md)) instead; see
    "Belief-driven determinization" below.
 3. **Rollouts**: in each determinization every candidate is played to the end of
-   the hand by the `fast` bot in all four seats. All candidates share the
+   the hand by the `fast` bot in all four seats (the opponents' copies fold against
+   threats; `rollout=ev` swaps the searcher's own copy for the `ev` bot, Task 11 below). All candidates share the
    determinization (common random numbers), so their *differences* are measured
    with much less noise than their absolute values.
 4. **Output**: per candidate, mean points with a 95% confidence interval, win
@@ -178,6 +179,39 @@ Strength (AC4: PIMC-64 with belief sampling against three `value`, 1,000 walls �
 seatings, with and without weights): `runs/matches/pimc64-belief.json` and
 `runs/matches/pimc64-belief-w0.json` (job `runs/matches/task7/`); results to be added
 when the matches finish.
+
+### The `ev` bot as anchor and rollout policy (plan Task 11)
+
+Spec `pimc:...,anchor=value|ev,rollout=fast|ev[,ev_<key>=<value>]`, e.g.
+`pimc:samples=64,candidates=4,belief=models/belief.mjnn,anchor=ev,rollout=ev`. In Rust:
+`pimc_anchored(state, &config, &sampler, &anchor, &rollout)` with
+`shortlist_anchored(state, n, &anchor)` and `Rollout::with(seat, own, opponents)`.
+
+- **Anchor.** The baseline the search must beat by two standard errors (step 5 above) is
+  the anchor bot's choice instead of `value`'s; it is added to the candidates when the
+  faan-aware measure did not pick it. With `anchor=ev` the search therefore falls back to
+  the `ev` bot whenever the samples do not separate the moves.
+- **Rollout.** `rollout=ev` plays the searcher's own later moves with the `ev` bot; the
+  opponents keep the defending `fast`. (Changing the opponents' rollout policy would cost
+  four times as much and is not part of Task 11.)
+- **The `ev` bot used.** It reads the `belief=` model when one is given (the same loaded
+  model as the sampler), else the heuristic belief, and runs with `floor=none`, the
+  stronger setting in Task 10's matches (−0.99 against −7.23 points per hand vs `value`,
+  [ev-bot.md](ev-bot.md) §10.2). `ev_<key>=<value>` passes any `ev:` option, e.g.
+  `ev_floor=target`.
+- **Unchanged defaults.** Without `anchor=ev` or `rollout=ev` the spec builds the same
+  agent as before (tests `value_anchor_with_the_default_rollout_is_plain_pimc` and
+  `pimc_anchor_and_rollout_options`); the app's `pimc_with` and `Rollout::for_seat` are
+  untouched. The one-thread guard covers the `ev` anchor and rollout
+  (`tests/one_thread.rs`).
+- **Cost.** On 4 threads, belief-PIMC-64 took 1.0 s per hand against three `value` bots;
+  with `anchor=ev,rollout=ev` 7.6 s per hand (4 hands each, so rough). The `ev` bot's
+  0.4–0.7 ms per decision in every own rollout move dominates.
+
+Strength: `runs/matches/pimc64-ev.json` (anchor and rollout `ev`) and
+`runs/matches/pimc64-ev-anchor.json` (anchor `ev`, rollout `fast`), on Task 7's walls
+(job `runs/matches/task11/`); the comparison goes in
+[study-results/phase4-build.md](study-results/phase4-build.md).
 
 **No peeking.** Determinization sorts the pool of hidden tiles before shuffling, so
 two positions that differ only in hidden tiles produce *identical* solver output

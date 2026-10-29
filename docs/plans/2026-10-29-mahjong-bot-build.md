@@ -466,6 +466,18 @@ paired by wall, with a bootstrap 95 % interval.
     result in `docs/study-results/phase4-build.md` (draft section). Machine time ≈ 8 h,
     headless.
   - Notes: whichever anchor scores higher becomes the Phase 4 labeller (Task 13).
+  - Status (2026-10-29): built (`pimc_anchored`, `shortlist_anchored`, `Rollout::with`;
+    `Agent::PimcAnchored`; spec `anchor=value|ev,rollout=fast|ev,ev_<key>=`; the `ev` bot there
+    uses the `belief=` model and `floor=none`; specs without the new options build the same
+    agents as before). Tests: `pimc::`, `agent::`, `--test one_thread` (new `ev` case). Cost:
+    7.6 s per hand vs 1.0 s for Task 7's spec (4 threads). Matches `pimc64-ev` (anchor and
+    rollout `ev`) and `pimc64-ev-anchor` (anchor only) on Task 7's walls in
+    `runs/matches/task11/`, detached, waiting for Task 7's job to exit, then ≈ 2.5–3.5 h on
+    18 threads; uses the frozen extension `runs/matches/task11/pkg/` (Task 7 imports
+    `python/mahjong/_core.pyd`, left untouched). Check: `Get-Content
+    runs\matches\pimc64-ev.progress, runs\matches\task11\run.log -Tail 5`. Resume: rerun the
+    same `Invoke-CimMethod ... run.ps1` command (finished chunks are skipped). Draft section:
+    `docs/study-results/phase4-build.md` §1. Not ticked until the result is in.
 
 ## Phase 3 – Brian's 400 hands: tooling (opus)
 
