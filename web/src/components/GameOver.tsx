@@ -13,11 +13,16 @@ interface Props {
   meta: Meta
   onNewGame: () => void
   onClose: () => void
+  /** Benchmark hands: the next benchmark hand (absent once all 400 are played). */
+  onNextBenchmark?: () => void
+  /** Benchmark hands: the button text with the count; also hides the review. */
+  benchmarkLabel?: string
 }
 
 /** The end of a hand: every hand revealed, each win's faan breakdown, payments,
- * and the post-hand review. */
-export function GameOver({ view, meta, onNewGame, onClose }: Props) {
+ * and the post-hand review (not after benchmark hands). */
+export function GameOver({ view, meta, onNewGame, onClose, onNextBenchmark, benchmarkLabel }: Props) {
+  const benchmark = benchmarkLabel !== undefined
   const r = view.result!
   const [review, setReview] = useState<ReviewItem[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -81,11 +86,19 @@ export function GameOver({ view, meta, onNewGame, onClose }: Props) {
         </tbody>
       </table>
       <div className="buttons">
-        <button className="primary" onClick={onNewGame}>再來一局</button>
+        {benchmark ? (
+          <button className="primary" data-testid="benchmark-next" onClick={onNextBenchmark} disabled={!onNextBenchmark}>
+            下一局 · {benchmarkLabel}
+          </button>
+        ) : (
+          <button className="primary" onClick={onNewGame}>再來一局</button>
+        )}
         <button onClick={onClose}>關閉</button>
-        <button onClick={loadReview} disabled={loading || review !== null}>
-          {loading ? '檢討中…' : '檢討'}
-        </button>
+        {!benchmark && (
+          <button onClick={loadReview} disabled={loading || review !== null}>
+            {loading ? '檢討中…' : '檢討'}
+          </button>
+        )}
       </div>
       {review && <Review items={review} />}
     </div>

@@ -21,7 +21,13 @@ web/test-results/
 web/playwright-report/
 
 # Experiment outputs (large; results that matter are summarized in docs/study-results/)
-/runs/
+/runs/*
+# Brian's benchmark (plan Task 12): the fixed walls and the config are committed;
+# his hand logs (runs/benchmark/hands/) and replay outputs stay ignored.
+!/runs/benchmark/
+/runs/benchmark/*
+!/runs/benchmark/walls.json
+!/runs/benchmark/config.json
 /checkpoints/
 /logs/
 

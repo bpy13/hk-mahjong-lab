@@ -66,6 +66,11 @@ export interface GameView {
   seed: number
   level: string
   human: number
+  /** `benchmark` for Brian's benchmark hands (no hints, no review). */
+  tag: string | null
+  /** The bots' agent spec. */
+  opponents: string
+  benchmark_index: number | null
   rules: Rules
   observation: Observation
   legal: { action: number; label: string }[]
@@ -128,6 +133,14 @@ export interface ReviewItem {
   loss: number | null
 }
 
+export interface BenchmarkProgress {
+  played: number
+  total: number
+  next: number | null
+  in_progress: number | null
+  opponents: string
+}
+
 export interface Meta {
   levels: Record<string, { label: string; spec: string; about: string }>
   patterns: Record<string, string>
@@ -152,6 +165,8 @@ export const api = {
   step: (id: string) => call<GameView>('POST', `/api/games/${id}/step`),
   hints: (id: string, ms: number) => call<Hints>('GET', `/api/games/${id}/hints?ms=${ms}`),
   review: (id: string) => call<{ decisions: ReviewItem[] }>('GET', `/api/games/${id}/review`),
+  benchmarkNext: () => call<GameView>('POST', '/api/benchmark/next'),
+  benchmarkProgress: () => call<BenchmarkProgress>('GET', '/api/benchmark/progress'),
 }
 
 export const DEFAULT_RULES: Rules = {

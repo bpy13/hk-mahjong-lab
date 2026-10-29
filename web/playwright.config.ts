@@ -11,6 +11,7 @@ export default defineConfig({
     command: 'mahjong serve --port 8767',
     url: 'http://127.0.0.1:8767/api/meta',
     reuseExistingServer: false,
-    env: { MAHJONG_GAME_LOG_DIR: 'test-results/games' },
+    // Benchmark hands from the browser test never land in Brian's runs/benchmark/hands.
+    env: { MAHJONG_GAME_LOG_DIR: 'test-results/games', MAHJONG_BENCHMARK_HANDS_DIR: 'test-results/benchmark-hands' },
   },
 })

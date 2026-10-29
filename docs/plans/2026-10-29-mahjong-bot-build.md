@@ -445,7 +445,7 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 3 – Brian's 400 hands: tooling (opus)
 
-- [ ] **Task 12: Benchmark mode in the lab UI, replay and label export**
+- [x] **Task 12: Benchmark mode in the lab UI, replay and label export**
   - Files: create `runs/benchmark/walls.json` (generated: 400 walls, seed 2026, Brian's seat
     = wall index mod 4; committed, ~300 KB), `python/mahjong/benchmark.py` (walls, session
     order, replay, paired margin, label export), `python/tests/test_benchmark.py`; modify

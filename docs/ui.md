@@ -82,6 +82,34 @@ After a hand, **檢討** re-analyzes each of your decisions that had a choice (3
 samples, 8 candidates) and lists those where your move scored more than half a
 point below the solver's best, with the total.
 
+## Benchmark (基準測試)
+
+Brian's 400-hand human benchmark (decision B21). In the 新局 dialog, the button
+**基準測試 n / 400** starts the next unplayed hand. Each hand uses a fixed wall from
+`runs/benchmark/walls.json` (400 walls, seed 2026); you sit in seat `index % 4`.
+The three opponents use the spec in `runs/benchmark/config.json` (default `value`).
+
+* No study panel, no hints and no 檢討 in benchmark hands; the API refuses them (403).
+* The header shows which hand it is (基準測試 第 n / 400 局).
+* Every action is logged to `runs/benchmark/hands/<index>.json` (gitignored: Brian's
+  data). A hand left unfinished comes back first, from its log (the button says 續打).
+* At the end of a hand, **下一局 · 基準測試 n / 400** starts the next one.
+* Every bot move is seeded from the wall index and the actions so far. A replay
+  therefore meets the same bot moves until the agent first differs from Brian.
+
+After playing:
+
+```sh
+mahjong hk benchmark progress
+mahjong hk benchmark replay --agent value --out runs/benchmark/replay-value.json
+mahjong hk benchmark labels --agent value --out runs/benchmark/labels.json
+```
+
+`replay` prints the paired margin (agent minus Brian, points per hand) with a 95%
+interval. `labels` exports every decision where Brian's move and the agent's first
+choice differ: a `Position` snapshot (`HkState.from_position` arguments) plus both
+moves. `MAHJONG_BENCHMARK_HANDS_DIR` moves the hand logs (the tests use it).
+
 ## Game logs
 
 Every finished hand is written to `runs/games/<id>.json` (seed, rules, level, your
@@ -99,3 +127,5 @@ seat, every action and the result), enough to replay it exactly:
 | POST | `/api/games/{id}/step` | Let the next bot move once |
 | GET | `/api/games/{id}/hints?ms=` | Solver, danger, progress and discard table |
 | GET | `/api/games/{id}/review` | Post-hand review |
+| POST | `/api/benchmark/next` | The next benchmark hand (or the one under way); 409 once all 400 are played |
+| GET | `/api/benchmark/progress` | `{played, total, next, in_progress, opponents}` |

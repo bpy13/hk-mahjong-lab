@@ -58,6 +58,8 @@ button.primary, button.on { background: var(--felt); color: white; border-color:
 .table-head button, .table-head a.button { background: rgba(255,255,255,0.12); color: var(--on-felt); border-color: rgba(255,255,255,0.3); padding: 4px 12px; }
 
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; grid-template-rows: minmax(0, 1fr); gap: 12px; padding: 10px 12px; }
+/* Benchmark hands have no study panel: the table takes the full width. */
+.layout.no-study { grid-template-columns: minmax(0, 1fr); }
 .table {
   position: relative; background: radial-gradient(circle, var(--felt), var(--felt-dark));
   border-radius: 14px; min-height: 0; overflow: hidden; display: grid; gap: 8px; padding: 8px 10px;
