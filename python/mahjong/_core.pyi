@@ -98,7 +98,10 @@ def agent_action(state: HkState, spec: str, seed: int | None = None) -> int:
 def ev_terms(state: HkState, spec: str = "ev") -> dict[str, Any]:
     """The ``ev`` bot's decision for the player to act (``docs/ev-bot.md`` §2.3): ``choice``
     (action code), ``text``, ``candidates`` (best ``ev`` first, every term; per-seat lists of
-    four) and ``reasons`` (``[{"key": "reason.ev....", "args": {...}}]``)."""
+    four) and ``reasons`` (``[{"key": "reason.ev....", "args": {...}}]``). ``x`` per candidate
+    is each opponent's discard-win chance: the belief model's ``outcome`` head with
+    ``spec="ev:belief=models/belief.mjnn"``, else ``r_disc × sd``. ``defensive:belief=<model>``
+    is also an agent spec (folds on expected loss)."""
 
 def danger(state: HkState, seat: int) -> dict[str, Any]:
     """Heuristic per-tile deal-in danger (``tiles``) and per-seat ``threat``."""

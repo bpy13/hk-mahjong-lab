@@ -61,8 +61,10 @@ Derived from the belief:
 - `Pay(o) = Σ_b P_b(o) × points(b)` — expected points per share if `o` wins on a discard.
 - `Pay_sd(o) = Σ_b P_b(o) × points(min(b + 1, 10))` — a self-draw adds 自摸 (1 faan, rules
   §7.1 #1).
-- `x_o = r_disc × sd_o` — P(`o` wins on *someone's* discard before the hand ends). The
-  belief does not output this; `r_disc = 2.0` (§9 Q1).
+- `x_o` — P(`o` wins on *someone's* discard before the hand ends). With the trained
+  model (`ev:belief=models/belief.mjnn`) this is the `outcome` head's discard-win class
+  (`docs/belief.md` §2); with the heuristic fallback `x_o = r_disc × sd_o`, `r_disc = 2.0`
+  (§9 Q1). `EvTerms::x` records which value was used.
 - `win_o = sd_o + x_o`, clipped at 0.95.
 - `P_o(t) = min(tenpai_o × wait_o(t), P_clip)`, `P_clip = 0.95` — P(`o` wins on `t` if I
   discard it now).
@@ -385,6 +387,8 @@ Task 6's additions.
    chance only. Default: `x_o = 2.0 × sd_o`, from real-play rates (about 15 % discard wins
    and 7 % self-draws per seat per hand; plan AC4 text). Better: add a "wins on a discard
    before the hand ends" output to MJNN v2 in a later revision and use it directly.
+   *Done (Tasks 5 and 10):* the model's `outcome` head gives `x_o` directly; `r_disc`
+   applies only to the heuristic fallback.
 2. **Faan buckets mean a discard win.** `P_b(o)` is read as the points of a discard win now
    (the log's `opp_faan_now`), and a self-draw adds one faan. If Task 5 trains the buckets on
    the realised win (`opp_win_faan`, which mixes both), drop the `+1` for `Pay_sd`. Default:
@@ -449,3 +453,46 @@ deals in less (11.5 % vs 18.1 %). Files: `runs/matches/ev-*-heuristic.json` (not
 
 **Not done in this step:** the EV-versus-realised decile plot (§3) needs a per-decision log,
 which the tournament runner does not write yet. It belongs with the real-belief match.
+
+### 10.2 Task 10 with the trained belief model (2026-10-29)
+
+Same format as §10.1: `models/belief.mjnn` (Task 5, `docs/belief.md`) through
+`crates/search/src/belief.rs`, `x_o` from its `outcome` head (no `r_disc`), `sd_o`,
+waits, faan buckets and counts from the model; the same target table, walls and seed
+(1,000 walls × 4 seatings = 4,000 hands, seed 2026). Command, per row:
+`mahjong hk tournament "ev:belief=models/belief.mjnn[,floor=none]" <field> <field> <field>
+--deals 1000 --seed 2026 --out runs/matches/ev-belief-*.json` (about 16 s each; files not
+committed).
+
+**Timing (AC5).** With the network in the loop, every decision a new state (no cache
+help): 0.65 ms per decision with the floor and 0.49 ms without it, one thread, release
+build (`cargo test -p mahjong-search --release --test ev_bot`,
+`the_trained_belief_drives_the_bot_within_the_time_budget`). The bar is < 5 ms.
+
+| `ev` spec | Field | Points / hand | 95 % interval (wall bootstrap) | Win | Self-draw | Deal-in | Mean faan | Belief |
+|---|---|---|---|---|---|---|---|---|
+| `ev:belief=…` (floor on) | 3 × `value` | **−7.23** | [−8.12, −6.36] | 2.9 % | 0.8 % | 9.7 % | 6.12 | trained |
+| `ev:belief=…` (floor on) | 3 × `defensive` | **−5.49** | [−6.36, −4.60] | 3.7 % | 0.9 % | 8.2 % | 6.00 | trained |
+| `ev:belief=…,floor=none` | 3 × `value` | **−0.99** | [−2.02, +0.07] | 17.8 % | 4.1 % | 12.5 % | 4.93 | trained |
+| `ev:belief=…,floor=none` | 3 × `defensive` | **+0.11** | [−0.98, +1.22] | 17.5 % | 5.1 % | 11.2 % | 4.96 | trained |
+| `ev` (floor on) | 3 × `value` | −7.44 | [−8.35, −6.59] | 2.6 % | 0.8 % | 9.8 % | 6.13 | heuristic (§10.1) |
+| `ev` (floor on) | 3 × `defensive` | −5.23 | [−6.15, −4.29] | 3.5 % | 0.9 % | 7.5 % | 6.11 | heuristic (§10.1) |
+| `ev:floor=none` | 3 × `value` | −2.46 | [−3.41, −1.58] | 14.6 % | 3.5 % | 11.5 % | 4.98 | heuristic (§10.1) |
+| `ev:floor=none` | 3 × `defensive` | −0.37 | [−1.46, +0.71] | 16.0 % | 4.6 % | 10.6 % | 5.01 | heuristic (§10.1) |
+
+**AC5 does not hold with either floor setting.** AC5 asks for `ev` above `defensive`'s
+−1.9 against three `value` bots with an interval that excludes −1.9, and not below `value`
+by more than its interval.
+
+- **Floor on (the default, §9 Q4):** −7.23, far below. The trained belief changes almost
+  nothing here (−7.44 with the heuristic). The bot still chases 10-faan targets it rarely
+  completes (2.9 % wins).
+- **Floor off:** −0.99. The point estimate is above −1.9, and 0 lies inside the interval, so
+  the "not below `value`" clause holds. But the interval's lower end (−2.02) does not clear
+  −1.9, so the "beats `defensive`" clause is not shown. The trained belief gains 1.5 points
+  per hand over the heuristic (−2.46). Win rate goes from 14.6 % to 17.8 % and deal-ins
+  from 11.5 % to 12.5 %. Against three `defensive` bots it breaks even (+0.11).
+
+The `Pay(me)` floor question (open item for Brian) decides most of the gap. These numbers
+report both settings and do not choose one. The EV-versus-realised decile plot (§3) is
+still not done: the tournament runner writes no per-decision log.

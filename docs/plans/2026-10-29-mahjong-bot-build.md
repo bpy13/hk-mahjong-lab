@@ -340,6 +340,11 @@ paired by wall, with a bootstrap 95 % interval.
     `cargo test -p mahjong-app-api` still passes (the old `Danger::estimate` is untouched).
   - Notes: the heuristic tables stay as the no-model fallback. Machine time: danger_check
     ≈ 10 min.
+  - Status (2026-10-29): built (`belief.rs` with a per-state cache, `Danger::from_belief`,
+    `expected_loss`, `points_if_win`, `liability_tile`, `defensive:belief=`); `danger::` tests,
+    app-api tests pass. `danger_check --belief models/belief.mjnn 2000` (111 s): 5 of 6 buckets
+    within the interval; bucket 4 misses (0.525 predicted vs [0.385, 0.500]: deal-in rate exact,
+    points per deal-in 21.9 predicted vs 18.5 paid). Not ticked (`docs/belief.md` §6).
 
 - [ ] **Task 7: Belief-driven determinization and discard weights in PIMC**
   - Files: modify `crates/search/src/world.rs` (`WorldSampler::{BestOfK, Belief{model,
@@ -437,6 +442,11 @@ paired by wall, with a bootstrap 95 % interval.
   - Notes: machine time ≈ 15 min per 4,000-hand match (no search). Every number the bot uses
     is exposed in `EvTerms` so hints can show it (the app stream maps terms to keys).
   - Status (2026-10-29): built with `HeuristicBelief`; 0.37 ms/decision; §6 answers hold only with `ev:floor=none`; provisional matches miss AC5 (`docs/ev-bot.md` §10.1); real-belief matches wait on Task 5.
+  - Status (2026-10-29, real belief): `ev:belief=models/belief.mjnn` works (`x_o` from the
+    `outcome` head); 0.65 ms/decision with the network. 4,000 hands, seed 2026, points per hand
+    (bootstrap 95 %): floor on vs `value` −7.23 [−8.12, −6.36], vs `defensive` −5.49; floor off
+    vs `value` −0.99 [−2.02, +0.07], vs `defensive` +0.11 [−0.98, +1.22]. AC5 not met (floor off:
+    above −1.9 but the interval does not clear it). Not ticked; `docs/ev-bot.md` §10.2.
 
 - [ ] **Task 11: EV bot as the PIMC anchor and rollout policy**
   - Files: modify `crates/search/src/pimc.rs` (`Rollout::with(own: Bot, opponents: Bot)`;
