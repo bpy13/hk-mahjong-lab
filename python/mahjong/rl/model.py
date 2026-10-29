@@ -63,18 +63,62 @@ class Net(nn.Module):
         net.load_state_dict(ckpt["state"])
         return net
 
-    def export(self, path: Path, head: str) -> None:
-        """Writes the torso and one head (``"q"`` or ``"pi"``) as an MJNN file."""
+    def export(self, path: Path, head: str, version: int = 1) -> None:
+        """Writes the torso and one head (``"q"`` or ``"pi"``) as an MJNN file.
+
+        ``version=2`` names the slices (``features`` + ``oracle`` in, ``policy`` out).
+        """
         linears = [m for m in self.torso if isinstance(m, nn.Linear)] + [getattr(self, head)]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(b"MJNN" + struct.pack("<II", 1, len(linears)))
-            for lin in linears:
-                w = lin.weight.detach().cpu().numpy().astype("<f4")
-                b = lin.bias.detach().cpu().numpy().astype("<f4")
-                f.write(struct.pack("<II", w.shape[0], w.shape[1]))
-                f.write(w.tobytes(order="C"))
-                f.write(b.tobytes())
+        if version == 1:
+            write_mjnn(path, linears)
+        else:
+            write_mjnn(
+                path,
+                linears,
+                inputs=[("features", STATE_LEN), ("oracle", ORACLE_LEN)],
+                outputs=[("policy", NUM_ACTIONS)],
+            )
+
+
+def _pack_slices(slices: list[tuple[str, int]]) -> bytes:
+    """Named slices laid end to end: ``name_len name offset len`` each."""
+    out = struct.pack("<I", len(slices))
+    offset = 0
+    for name, length in slices:
+        raw = name.encode("utf-8")
+        out += struct.pack("<I", len(raw)) + raw + struct.pack("<II", offset, length)
+        offset += length
+    return out
+
+
+def write_mjnn(
+    path: Path,
+    linears: list[nn.Linear],
+    inputs: list[tuple[str, int]] | None = None,
+    outputs: list[tuple[str, int]] | None = None,
+) -> None:
+    """Writes Linear layers (ReLU between them) in the ``MJNN`` format that
+    ``crates/search/src/net.rs`` reads.
+
+    Without names this is version 1 (a policy over the action codes). With
+    ``inputs`` and ``outputs`` (``(name, length)`` pairs, laid end to end in that
+    order) it is version 2, whose slices the Rust side looks up by name.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        if inputs is None and outputs is None:
+            f.write(b"MJNN" + struct.pack("<I", 1))
+        else:
+            f.write(b"MJNN" + struct.pack("<I", 2))
+            f.write(_pack_slices(inputs or []))
+            f.write(_pack_slices(outputs or []))
+        f.write(struct.pack("<I", len(linears)))
+        for lin in linears:
+            w = lin.weight.detach().cpu().numpy().astype("<f4")
+            b = lin.bias.detach().cpu().numpy().astype("<f4")
+            f.write(struct.pack("<II", w.shape[0], w.shape[1]))
+            f.write(w.tobytes(order="C"))
+            f.write(b.tobytes())
 
 
 def masked(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
