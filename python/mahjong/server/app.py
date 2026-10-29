@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from mahjong import benchmark
 from mahjong._core import analyze, danger, discard_table, hand_progress, solo
 from mahjong.hk import PATTERNS, Rules, action_chinese, tile_chinese
 from mahjong.server.session import LEVELS, Session, SessionStore
@@ -60,6 +61,9 @@ def view(s: Session) -> dict[str, Any]:
         "seed": s.seed,
         "level": s.level,
         "human": s.human,
+        "tag": s.tag,
+        "opponents": s.bot_spec,
+        "benchmark_index": s.benchmark_index,
         "rules": s.rules.kwargs(),
         "observation": obs,
         "legal": [{"action": a, "label": action_chinese(a)} for a in legal],
@@ -93,6 +97,25 @@ def new_game(body: NewGame) -> dict[str, Any]:
     return view(s)
 
 
+@app.post("/api/benchmark/next")
+def benchmark_next() -> dict[str, Any]:
+    """Brian's benchmark (plan Task 12): the next unplayed wall, hints disabled,
+    tagged ``benchmark``. An interrupted hand comes back where it stopped."""
+    try:
+        s = store.benchmark_next()
+    except FileNotFoundError as e:
+        raise HTTPException(500, f"benchmark walls missing: {e.filename}") from e
+    if s is None:
+        raise HTTPException(409, "all benchmark hands are played")
+    return view(s)
+
+
+@app.get("/api/benchmark/progress")
+def benchmark_progress() -> dict[str, Any]:
+    """Played hands out of 400, the next wall and the opponents' spec."""
+    return benchmark.progress()
+
+
 @app.get("/api/games/{sid}")
 def get_game(sid: str) -> dict[str, Any]:
     return view(_session(sid))
@@ -124,6 +147,8 @@ def hints(sid: str, ms: int = 2000, samples: int = 800) -> dict[str, Any]:
     """Study mode: the solver's top moves, danger per tile, hand progress, and
     (on a turn) the discard table with offense-only estimates."""
     s = _session(sid)
+    if s.tag == benchmark.TAG:
+        raise HTTPException(403, "no hints in benchmark hands")
     if not s.human_to_act():
         raise HTTPException(400, "not your decision")
     state = s.snapshot()
@@ -152,6 +177,9 @@ def hints(sid: str, ms: int = 2000, samples: int = 800) -> dict[str, Any]:
 @app.get("/api/games/{sid}/review")
 def review(sid: str) -> dict[str, Any]:
     s = _session(sid)
+    if s.tag == benchmark.TAG:
+        # The solver's verdicts would coach the next 399 hands.
+        raise HTTPException(403, "no review in benchmark hands")
     if not s.state.is_terminal():
         raise HTTPException(400, "the hand is not over")
     items = s.run_review()

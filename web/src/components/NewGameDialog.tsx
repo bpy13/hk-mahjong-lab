@@ -7,10 +7,14 @@ interface Props {
   meta: Meta
   onStart: (level: string, seat: number | null, rules: Rules) => void
   onCancel?: () => void
+  /** Starts the next of Brian's 400 benchmark hands (fixed wall, seat and bots). */
+  onBenchmark: () => void
+  benchmarkLabel: string
+  benchmarkDone: boolean
 }
 
-/** Opponents, seat and every rule variant from docs/rules/hk.md. */
-export function NewGameDialog({ meta, onStart, onCancel }: Props) {
+/** Opponents, seat and every rule variant from docs/rules/hk.md, or a benchmark hand. */
+export function NewGameDialog({ meta, onStart, onCancel, onBenchmark, benchmarkLabel, benchmarkDone }: Props) {
   const [level, setLevel] = useState('hard')
   const [seat, setSeat] = useState<number | null>(null)
   const [rules, setRules] = useState<Rules>(DEFAULT_RULES)
@@ -102,6 +106,14 @@ export function NewGameDialog({ meta, onStart, onCancel }: Props) {
           開始
         </button>
         {onCancel && <button onClick={onCancel}>取消</button>}
+        <button
+          data-testid="benchmark-start"
+          onClick={onBenchmark}
+          disabled={benchmarkDone}
+          title="固定牌牆、座位同對手；冇提示"
+        >
+          {benchmarkLabel}
+        </button>
       </div>
     </div>
   )

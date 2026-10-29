@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GameView, Hints, Meta, Rules } from './api'
+import type { BenchmarkProgress, GameView, Hints, Meta, Rules } from './api'
 import { api } from './api'
+import { benchmarkButtonLabel, benchmarkHeader, isBenchmark } from './benchmark'
 import { ActionBar } from './components/ActionBar'
 import { GameOver } from './components/GameOver'
 import { Hand } from './components/Hand'
@@ -42,6 +43,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showResult, setShowResult] = useState(true)
+  const [progress, setProgress] = useState<BenchmarkProgress | null>(null)
   const hintKey = useRef('')
   const [theme, cycleTheme] = useTheme()
   const tableRef = useRef<HTMLElement>(null)
@@ -60,7 +62,19 @@ export default function App() {
     }
   }
 
-  const start = async (level: string, seat: number | null, rules: Rules) => {
+  const benchmark = isBenchmark(view)
+  const finished = !!view?.result
+
+  // The benchmark count: on load, whenever the dialog opens, and after each benchmark hand.
+  useEffect(() => {
+    if (!dialog && !(benchmark && finished)) return
+    api
+      .benchmarkProgress()
+      .then(setProgress)
+      .catch(() => setProgress(null))
+  }, [dialog, benchmark, finished])
+
+  const open = async (load: () => Promise<GameView>) => {
     setError(null)
     setDialog(false)
     setHints(null)
@@ -68,11 +82,14 @@ export default function App() {
     setSelected(null)
     setShowResult(true)
     try {
-      setView(await api.newGame(level, seat, rules))
+      setView(await load())
     } catch (e) {
       setError(String(e))
     }
   }
+  const start = (level: string, seat: number | null, rules: Rules) => open(() => api.newGame(level, seat, rules))
+  /** The next of Brian's 400 benchmark hands (or the one under way). */
+  const startBenchmark = () => open(api.benchmarkNext)
 
   // Bots move one at a time, paced for readability.
   useEffect(() => {
@@ -90,9 +107,9 @@ export default function App() {
   const humanToAct = !!view && !view.result && !view.bot_to_act
   const decisionKey = view ? `${view.id}:${view.events.length}:${view.observation.wall_remaining}:${view.observation.phase}` : ''
 
-  // Study mode: ask the solver about each new decision.
+  // Study mode: ask the solver about each new decision (never in benchmark hands).
   useEffect(() => {
-    if (!view || !humanToAct || mode === 'off' || hintKey.current === decisionKey) return
+    if (!view || !humanToAct || benchmark || mode === 'off' || hintKey.current === decisionKey) return
     hintKey.current = decisionKey
     setHints(null)
     setHintsLoading(true)
@@ -103,13 +120,14 @@ export default function App() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setHintsLoading(false))
-  }, [view, humanToAct, mode, decisionKey])
+  }, [view, humanToAct, benchmark, mode, decisionKey])
 
   const act = useCallback(
     async (action: number) => {
       if (!view || busy) return
       setBusy(true)
       setError(null)
+      // In benchmark hands no hints load, so the quiz has nothing to say.
       if (mode === 'quiz' && hints) {
         const label = view.legal.find((l) => l.action === action)?.label ?? ''
         setQuiz({
@@ -160,10 +178,21 @@ export default function App() {
   }, [])
 
   if (!meta) return <div className="loading">{error ?? '載入中…'}</div>
-  if (dialog || !view) return <NewGameDialog meta={meta} onStart={start} onCancel={view ? () => setDialog(false) : undefined} />
+  if (dialog || !view)
+    return (
+      <NewGameDialog
+        meta={meta}
+        onStart={start}
+        onCancel={view ? () => setDialog(false) : undefined}
+        onBenchmark={startBenchmark}
+        benchmarkLabel={benchmarkButtonLabel(progress)}
+        benchmarkDone={progress?.next === null}
+      />
+    )
 
   const obs = view.observation
-  const names = (s: number) => (s === view.human ? '你' : `電腦 ${meta.levels[view.level].label}`)
+  const botName = view.level in meta.levels ? meta.levels[view.level].label : view.opponents
+  const names = (s: number) => (s === view.human ? '你' : `電腦 ${botName}`)
   const canDiscard = humanToAct && view.legal.some((l) => isDiscard(l.action))
   const danger = showDanger && hints ? hints.danger.tiles : undefined
   const claim = obs.claim
@@ -181,11 +210,14 @@ export default function App() {
   return (
     <div className="app">
       {error && <div className="error">{error}</div>}
-      <main className="layout">
+      <main className={benchmark ? 'layout no-study' : 'layout'}>
         <section className="table" ref={tableRef}>
           <header className="table-head">
             <h1>香港麻雀</h1>
             <span className="info">
+              {benchmark && view.benchmark_index !== null && (
+                <strong data-testid="benchmark-header">{benchmarkHeader(view.benchmark_index)} · </strong>
+              )}
               {WINDS[view.rules.prevailing_wind]}圈 · 起糊 {view.rules.min_faan} 番 · 你坐{WINDS[view.human]}
             </span>
             <span className="header-buttons">
@@ -259,19 +291,29 @@ export default function App() {
             </div>
           </div>
         </section>
-        <StudyPanel
-          mode={mode}
-          setMode={setMode}
-          hints={hints}
-          loading={hintsLoading}
-          showDanger={showDanger}
-          setShowDanger={setShowDanger}
-          quizFeedback={quiz}
-          onPick={(a) => (isDiscard(a) ? setSelected(a) : act(a))}
-        />
+        {/* Benchmark hands measure Brian alone: no study panel (plan Task 12). */}
+        {!benchmark && (
+          <StudyPanel
+            mode={mode}
+            setMode={setMode}
+            hints={hints}
+            loading={hintsLoading}
+            showDanger={showDanger}
+            setShowDanger={setShowDanger}
+            quizFeedback={quiz}
+            onPick={(a) => (isDiscard(a) ? setSelected(a) : act(a))}
+          />
+        )}
       </main>
       {view.result && showResult && (
-        <GameOver view={view} meta={meta} onNewGame={() => setDialog(true)} onClose={() => setShowResult(false)} />
+        <GameOver
+          view={view}
+          meta={meta}
+          onNewGame={() => setDialog(true)}
+          onClose={() => setShowResult(false)}
+          onNextBenchmark={benchmark && progress?.next !== null ? startBenchmark : undefined}
+          benchmarkLabel={benchmark ? benchmarkButtonLabel(progress) : undefined}
+        />
       )}
     </div>
   )

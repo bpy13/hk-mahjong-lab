@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from mahjong import __version__
+from mahjong import __version__, benchmark
 from mahjong._core import (
     HkState,
     agent_action,
@@ -324,6 +324,68 @@ def analyze_cmd(
             )
         console.print(table)
     show_analysis(state, samples)
+
+
+bench = typer.Typer(
+    help="Brian's 400-hand benchmark (B21): walls, progress, replay, labels.",
+    no_args_is_help=True,
+)
+hk.add_typer(bench, name="benchmark")
+
+
+@bench.command("walls")
+def bench_walls(
+    out: Annotated[Path | None, typer.Option(help="Default runs/benchmark/walls.json.")] = None,
+) -> None:
+    """Regenerate the 400 fixed walls (seed 2026; the committed file must not change)."""
+    typer.echo(f"wrote {benchmark.write_walls(out)}")
+
+
+@bench.command("progress")
+def bench_progress() -> None:
+    """How many benchmark hands are played."""
+    p = benchmark.progress()
+    typer.echo(f"{p['played']} / {p['total']} played; next wall {p['next']}; vs {p['opponents']}")
+
+
+@bench.command("replay")
+def bench_replay(
+    agent: Annotated[str, typer.Option(help="The agent spec to put in Brian's seat.")],
+    out: Annotated[Path | None, typer.Option(help="Write the replay report as JSON.")] = None,
+) -> None:
+    """Replay every finished benchmark hand with AGENT in Brian's seat; print the
+    paired margin (agent minus Brian, points per hand) with a 95% interval."""
+    res = benchmark.replay(agent)
+    m = res["margin"]
+    if not m["n"]:
+        typer.echo("no finished benchmark hands yet")
+    else:
+        typer.echo(
+            f"{m['n']} hands: Brian {res['human_mean']:+.2f}, {agent} {res['agent_mean']:+.2f}, "
+            f"margin {m['mean']:+.2f} ± {m['ci95']:.2f} points/hand (95%)"
+        )
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(res, indent=2), "utf-8")
+
+
+@bench.command("labels")
+def bench_labels(
+    out: Annotated[Path, typer.Option(help="Where to write the positions.")] = Path(
+        "runs/benchmark/labels.json"
+    ),
+    agent: Annotated[str, typer.Option(help="The agent whose first choice is compared.")] = (
+        "value"
+    ),
+) -> None:
+    """Export the positions where Brian's move and the agent's first choice differ."""
+    res = benchmark.labels(agent)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, ensure_ascii=False), "utf-8")
+    typer.echo(
+        f"{len(res['positions'])} positions from {res['decisions']} decisions "
+        f"in {res['hands']} hands -> {out}"
+    )
 
 
 @hk.command("patterns")
