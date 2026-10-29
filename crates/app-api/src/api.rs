@@ -19,7 +19,7 @@ use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
 use mahjong_search::{ActionStats, Analysis, Bot};
 use mahjong_tiles::Tile;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -381,6 +381,12 @@ impl Api {
         let start = Instant::now();
         let action = if legal.len() == 1 {
             legal[0]
+        } else if level == "random" {
+            // `UniformRandom` draws `gen_range(0..len)` on a usize, which rand 0.8 reads as 32 bits
+            // on wasm32 and 64 on the server: a different move per platform. A u32 draw is the
+            // same everywhere, so the server can replay the phone's random bot (hk-games D28).
+            let i = g.rng(level_index).gen_range(0..legal.len() as u32);
+            legal[i as usize]
         } else if let Some(name) = bot_name(level) {
             let bot = Bot::by_name(name).expect("a known engine bot");
             bot.choose(&g.state, &legal, &mut g.rng(level_index))
