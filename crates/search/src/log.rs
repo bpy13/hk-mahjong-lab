@@ -95,7 +95,13 @@ pub const FIELDS: &[Field] = &[
 
 /// Bytes per row.
 pub fn row_bytes() -> usize {
-    FIELDS.iter().map(Field::bytes).sum()
+    layout_bytes(FIELDS)
+}
+
+/// Bytes per row of any packed layout (the labels of [`crate::labels`] use
+/// their own).
+pub fn layout_bytes(fields: &[Field]) -> usize {
+    fields.iter().map(Field::bytes).sum()
 }
 
 /// Converts an `f32` to IEEE half-precision bits, rounding to nearest even.
@@ -338,6 +344,8 @@ pub struct LogWriter {
     /// Rows in each finished chunk, in order.
     chunks: Vec<u64>,
     meta_head: String,
+    fields: &'static [Field],
+    layout_version: u32,
 }
 
 impl LogWriter {
@@ -350,26 +358,47 @@ impl LogWriter {
     /// Fails on I/O errors, or when an existing chunk's size is not a whole
     /// number of rows (a log written with a different layout).
     pub fn open(dir: &Path, meta_head: String) -> io::Result<LogWriter> {
+        Self::open_layout(dir, meta_head, FIELDS, LAYOUT_VERSION)
+    }
+
+    /// [`LogWriter::open`] for rows of another layout (`fields`, written to
+    /// `meta.json` with `layout_version`).
+    ///
+    /// # Errors
+    /// As [`LogWriter::open`].
+    pub fn open_layout(
+        dir: &Path,
+        meta_head: String,
+        fields: &'static [Field],
+        layout_version: u32,
+    ) -> io::Result<LogWriter> {
         fs::create_dir_all(dir)?;
+        let row = layout_bytes(fields) as u64;
         let mut chunks = Vec::new();
         loop {
             let p = dir.join(chunk_name(chunks.len()));
             let Ok(m) = fs::metadata(&p) else { break };
             let size = m.len();
-            if size % row_bytes() as u64 != 0 {
+            if size % row != 0 {
                 return Err(io::Error::other(format!(
-                    "{} is not a whole number of {}-byte rows",
+                    "{} is not a whole number of {row}-byte rows",
                     p.display(),
-                    row_bytes()
                 )));
             }
-            chunks.push(size / row_bytes() as u64);
+            chunks.push(size / row);
         }
         Ok(LogWriter {
             dir: dir.to_path_buf(),
             chunks,
             meta_head,
+            fields,
+            layout_version,
         })
+    }
+
+    /// Rows in each complete chunk, in order.
+    pub fn chunk_rows(&self) -> &[u64] {
+        &self.chunks
     }
 
     /// Number of complete chunks.
@@ -391,7 +420,8 @@ impl LogWriter {
         let tmp = self.dir.join(format!("{name}.tmp"));
         fs::write(&tmp, bytes)?;
         fs::rename(&tmp, self.dir.join(&name))?;
-        self.chunks.push((bytes.len() / row_bytes()) as u64);
+        self.chunks
+            .push((bytes.len() / layout_bytes(self.fields)) as u64);
         self.write_meta(status)
     }
 
@@ -402,8 +432,8 @@ impl LogWriter {
     /// Fails on I/O errors.
     pub fn write_meta(&self, status: &str) -> io::Result<()> {
         let mut s = String::from("{\n");
-        let _ = writeln!(s, "  \"layout_version\": {LAYOUT_VERSION},");
-        let _ = writeln!(s, "  \"row_bytes\": {},", row_bytes());
+        let _ = writeln!(s, "  \"layout_version\": {},", self.layout_version);
+        let _ = writeln!(s, "  \"row_bytes\": {},", layout_bytes(self.fields));
         if !self.meta_head.is_empty() {
             let _ = writeln!(s, "  {},", self.meta_head);
         }
@@ -412,7 +442,7 @@ impl LogWriter {
         }
         let _ = writeln!(s, "  \"rows\": {},", self.rows());
         s.push_str("  \"fields\": [\n");
-        for (i, fd) in FIELDS.iter().enumerate() {
+        for (i, fd) in self.fields.iter().enumerate() {
             let shape: Vec<String> = fd.shape.iter().map(|x| x.to_string()).collect();
             let _ = write!(
                 s,
@@ -421,7 +451,11 @@ impl LogWriter {
                 fd.dtype,
                 shape.join(", ")
             );
-            s.push_str(if i + 1 < FIELDS.len() { ",\n" } else { "\n" });
+            s.push_str(if i + 1 < self.fields.len() {
+                ",\n"
+            } else {
+                "\n"
+            });
         }
         s.push_str("  ],\n  \"chunks\": [\n");
         for (i, rows) in self.chunks.iter().enumerate() {
