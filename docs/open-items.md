@@ -14,6 +14,15 @@ with their defaults.
 - **EV bot provisional strength** (heuristic belief, 4,000 hands each): floor on −7.44 vs 3 ×
   value, −5.23 vs 3 × defensive; `floor=none` −2.46 and −0.37. Neither meets AC5 yet. The real
   belief model (Task 5) comes next; the matches will be rerun with it.
+- **Task 11: which `ev` the PIMC anchor uses.** `pimc:...,anchor=ev,rollout=ev` builds the
+  `ev` bot with `floor=none`, the stronger setting in Task 10's real-belief matches (−0.99 vs
+  −7.23 per hand vs `value`); the plain `ev` spec keeps the doc's floor. `ev_floor=target`
+  switches it back. Default until Brian answers: `floor=none` for the anchor.
+- **Task 11: the pick if the intervals overlap.** The plan says the higher-scoring anchor labels
+  Phase 4 (Task 13). Anchor `ev` with `ev` rollouts costs about 7 times as much per hand (7.6 s
+  vs 1.0 s on 4 threads), which would stretch Task 13's ≈ 2.3 days. Default: follow the plan
+  (the higher mean), and say in `docs/study-results/phase4-build.md` §1 if the difference's
+  interval includes 0.
 
 ## Pending work
 - Task 5 belief model (425a7d2): count NLL beats both baselines (0.551 vs 0.634 and 0.662);

@@ -20,6 +20,13 @@
 //!    its mean over samples and standard error. Because both moves see the same
 //!    futures, the difference is measured far more precisely than either mean.
 //!
+//! **Anchor and rollout policy.** [`pimc_anchored`] replaces the [`Value`]
+//! baseline with another bot's choice (the *anchor*, e.g. the `ev` bot,
+//! [`shortlist_anchored`]) and the player's own rollout moves with another bot
+//! ([`Rollout::with`]); the opponents keep the defending `Fast`. The `ev` bot in
+//! the rollouts costs about 0.4–0.7 ms per decision against `Fast`'s few
+//! microseconds, so such searches are many times slower per sample.
+//!
 //! [`Analysis::choose`] turns this into a move: always declare a legal win;
 //! otherwise play the candidate with the best mean only if it beats the baseline
 //! by more than `z` standard errors of the paired difference, else the baseline.
@@ -178,7 +185,32 @@ impl Rollout {
         Rollout {
             seat,
             own: Bot::Fast(Fast::default()),
-            opponents: Bot::Fast(Fast::new(1.0)),
+            opponents: Rollout::default_opponents(),
+        }
+    }
+
+    /// Rollouts from `seat`'s point of view with `own` playing `seat`'s later
+    /// moves and `opponents` the other three seats (`pimc:...,rollout=ev`
+    /// passes the `ev` bot as `own`).
+    pub fn with(seat: usize, own: Bot, opponents: Bot) -> Rollout {
+        Rollout {
+            seat,
+            own,
+            opponents,
+        }
+    }
+
+    /// The opponents' policy of [`Rollout::for_seat`]: a `Fast` bot that
+    /// folds against threats.
+    pub fn default_opponents() -> Bot {
+        Bot::Fast(Fast::new(1.0))
+    }
+
+    /// The same policies seen from another seat.
+    pub fn for_other_seat(&self, seat: usize) -> Rollout {
+        Rollout {
+            seat,
+            ..self.clone()
         }
     }
 }
@@ -202,6 +234,27 @@ impl Policy<State> for Rollout {
 /// baseline action among them.
 pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
     let legal = state.legal_actions_vec();
+    let baseline = Value::default().choose(state, &legal, &mut SmallRng::seed_from_u64(0));
+    shortlist_around(state, &legal, discards, baseline)
+}
+
+/// [`shortlist`] with `anchor`'s choice as the baseline instead of the
+/// [`Value`] bot's (`pimc:...,anchor=ev`). The anchor's choice is added to the
+/// candidates when the faan-aware measure did not pick it.
+pub fn shortlist_anchored(state: &State, discards: usize, anchor: &Bot) -> (Vec<Action>, Action) {
+    let legal = state.legal_actions_vec();
+    let baseline = anchor.choose(state, &legal, &mut SmallRng::seed_from_u64(0));
+    shortlist_around(state, &legal, discards, baseline)
+}
+
+/// The special actions, the best `discards` discards by the faan-aware
+/// measure, and `baseline` (added if missing).
+fn shortlist_around(
+    state: &State,
+    legal: &[Action],
+    discards: usize,
+    baseline: Action,
+) -> (Vec<Action>, Action) {
     let mut out: Vec<Action> = legal
         .iter()
         .copied()
@@ -226,7 +279,6 @@ pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
             remaining.retain(|&x| x != t);
         }
     }
-    let baseline = Value::default().choose(state, &legal, &mut SmallRng::seed_from_u64(0));
     if !out.contains(&baseline) {
         out.push(baseline);
     }
@@ -255,6 +307,32 @@ pub fn pimc_sampled(state: &State, config: &PimcConfig, sampler: &WorldSampler) 
         candidates,
         baseline,
         &Rollout::for_seat(seat),
+    )
+}
+
+/// [`pimc_sampled`] with `anchor`'s choice as the baseline
+/// ([`shortlist_anchored`]) and `rollout`'s policies (seen from the player to
+/// act). With `anchor = value` and [`Rollout::for_seat`]'s policies it is
+/// [`pimc_sampled`].
+///
+/// # Panics
+/// Panics if the hand is over.
+pub fn pimc_anchored(
+    state: &State,
+    config: &PimcConfig,
+    sampler: &WorldSampler,
+    anchor: &Bot,
+    rollout: &Rollout,
+) -> Analysis {
+    let (candidates, baseline) = shortlist_anchored(state, config.candidates.max(1), anchor);
+    let seat = state.current_player().expect("hand in progress");
+    pimc_with_sampler(
+        state,
+        config,
+        sampler,
+        candidates,
+        baseline,
+        &rollout.for_other_seat(seat),
     )
 }
 
@@ -537,5 +615,85 @@ mod tests {
             }
         }
         assert!(checked >= 2);
+    }
+
+    #[test]
+    fn value_anchor_with_the_default_rollout_is_plain_pimc() {
+        let config = PimcConfig {
+            samples: 16,
+            candidates: 3,
+            seed: 9,
+            ..PimcConfig::default()
+        };
+        let anchor = Bot::Value(Value::default());
+        for (seed, steps) in [(3, 18), (4, 40)] {
+            let s = position(seed, steps);
+            if s.is_terminal() {
+                continue;
+            }
+            assert_eq!(shortlist(&s, 3), shortlist_anchored(&s, 3, &anchor));
+            let plain = pimc_sampled(&s, &config, &WorldSampler::BestOfK);
+            // The rollout's seat is replaced by the player to act.
+            let anchored = pimc_anchored(
+                &s,
+                &config,
+                &WorldSampler::BestOfK,
+                &anchor,
+                &Rollout::for_seat(0),
+            );
+            let key = |a: &Analysis| {
+                a.moves
+                    .iter()
+                    .map(|m| (m.action, m.mean.to_bits(), m.diff.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(key(&plain), key(&anchored), "seed {seed}");
+            assert_eq!(plain.baseline, anchored.baseline);
+        }
+    }
+
+    #[test]
+    fn ev_anchor_and_rollout_are_the_same_on_one_thread() {
+        use crate::ev::EvBot;
+        let ev = Bot::Ev(EvBot::default());
+        let config = PimcConfig {
+            samples: 8,
+            candidates: 2,
+            seed: 3,
+            ..PimcConfig::default()
+        };
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let mut checked = 0;
+        for (seed, steps) in [(5, 22), (6, 38)] {
+            let s = position(seed, steps);
+            if s.is_terminal() {
+                continue;
+            }
+            let seat = s.current_player().unwrap();
+            let rollout = Rollout::with(seat, ev.clone(), Rollout::default_opponents());
+            let (list, baseline) = shortlist_anchored(&s, 2, &ev);
+            let legal = s.legal_actions_vec();
+            assert_eq!(
+                baseline,
+                ev.choose(&s, &legal, &mut SmallRng::seed_from_u64(1))
+            );
+            assert!(list.contains(&baseline));
+            let sampler = WorldSampler::BestOfK;
+            let many = pimc_anchored(&s, &config, &sampler, &ev, &rollout);
+            let single = one.install(|| pimc_anchored(&s, &config, &sampler, &ev, &rollout));
+            let key = |a: &Analysis| {
+                a.moves
+                    .iter()
+                    .map(|m| (m.action, m.mean.to_bits(), m.diff.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(key(&single), key(&many), "seed {seed}");
+            assert_eq!(many.baseline, baseline);
+            checked += 1;
+        }
+        assert!(checked >= 1);
     }
 }
