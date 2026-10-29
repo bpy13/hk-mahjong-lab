@@ -13,19 +13,26 @@
 //! * `defensive:belief=models/belief.mjnn`: `defensive` folding on expected loss
 //!   from the belief model ([`crate::Danger::from_belief`]);
 //! * `pimc` with options, e.g. `pimc:samples=64,candidates=4,ms=300,z=2`
-//!   (see [`crate::pimc::Analysis::choose`] for `z`);
+//!   (see [`crate::pimc::Analysis::choose`] for `z`); `belief=models/belief.mjnn`
+//!   draws determinizations from the belief model ([`crate::world::WorldSampler`]),
+//!   with importance weights unless `weights=0` (`weights=1` is the default);
+//!   `draws=` and `tilt=` override the candidate hands per opponent (16) and the
+//!   shanten tilt of its resampling step ([`crate::world::default_tilt`]);
+//!   `netpimc` takes the same options;
 //! * `net:path=models/x.mjnn`: a trained network ([`crate::net`]);
 //! * `netpimc:path=models/x.mjnn,samples=32,candidates=4,rollout=fast`: network-
 //!   guided search. The network proposes the candidates and is the baseline that
 //!   PIMC must beat; rollouts use the `fast` bot or (`rollout=net`) the network
 //!   in every seat.
 
+use crate::belief::BeliefModel;
 use crate::bots::{Bot, Value};
 use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
 use crate::pimc::Rollout;
-use crate::pimc::{pimc, pimc_with, PimcConfig};
+use crate::pimc::{pimc, pimc_sampled, pimc_with_sampler, PimcConfig};
 pub use crate::tournament::{duplicate, AgentResult, TournamentResult};
+use crate::world::{default_tilt, WorldSampler, BELIEF_DRAWS};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, State};
 use rand::Rng;
@@ -36,12 +43,19 @@ use std::time::Duration;
 #[derive(Clone, Debug)]
 pub enum Agent {
     Bot(Bot),
+    /// PIMC with best-of-K determinizations.
     Pimc(PimcConfig),
+    /// PIMC with another world sampler (`pimc:...,belief=...`).
+    PimcSampled {
+        config: PimcConfig,
+        sampler: WorldSampler,
+    },
     Net(NetPolicy),
     NetPimc {
         net: NetPolicy,
         config: PimcConfig,
         net_rollouts: bool,
+        sampler: WorldSampler,
     },
 }
 
@@ -59,20 +73,87 @@ fn options(
     Ok(())
 }
 
-fn pimc_option(c: &mut PimcConfig, k: &str, v: &str) -> Result<bool, String> {
-    let num = || {
-        v.parse::<u64>()
-            .map_err(|_| format!("bad number {v:?} for {k}"))
-    };
-    match k {
-        "samples" => c.samples = num()? as usize,
-        "candidates" => c.candidates = num()? as usize,
-        "ms" => c.time_limit = Some(Duration::from_millis(num()?)),
-        "seed" => c.seed = num()?,
-        "z" => c.z = v.parse().map_err(|_| format!("bad number {v:?} for z"))?,
-        _ => return Ok(false),
+/// PIMC options gathered from a spec; `belief=` and `weights=` may come in
+/// either order, so the sampler is built at the end ([`PimcSpec::finish`]).
+struct PimcSpec {
+    config: PimcConfig,
+    belief: Option<String>,
+    weights: Option<bool>,
+    draws: Option<usize>,
+    tilt: Option<f64>,
+}
+
+impl PimcSpec {
+    fn new(samples: usize, candidates: usize) -> PimcSpec {
+        PimcSpec {
+            config: PimcConfig {
+                samples,
+                candidates,
+                ..PimcConfig::default()
+            },
+            belief: None,
+            weights: None,
+            draws: None,
+            tilt: None,
+        }
     }
-    Ok(true)
+
+    /// Handles one option; `Ok(false)` if `k` is not a PIMC option.
+    fn option(&mut self, k: &str, v: &str) -> Result<bool, String> {
+        let c = &mut self.config;
+        let num = || {
+            v.parse::<u64>()
+                .map_err(|_| format!("bad number {v:?} for {k}"))
+        };
+        match k {
+            "samples" => c.samples = num()? as usize,
+            "candidates" => c.candidates = num()? as usize,
+            "ms" => c.time_limit = Some(Duration::from_millis(num()?)),
+            "seed" => c.seed = num()?,
+            "z" => c.z = v.parse().map_err(|_| format!("bad number {v:?} for z"))?,
+            "belief" => self.belief = Some(v.to_string()),
+            "draws" => self.draws = Some((num()? as usize).max(1)),
+            "tilt" => {
+                self.tilt = Some(
+                    v.parse()
+                        .map_err(|_| format!("bad number {v:?} for tilt"))?,
+                )
+            }
+            "weights" => {
+                self.weights = Some(match v {
+                    "1" => true,
+                    "0" => false,
+                    _ => return Err(format!("weights takes 0 or 1, not {v:?}")),
+                })
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    /// The finished config and sampler: with `belief=`, the belief sampler
+    /// (importance weights on unless `weights=0`), else best-of-K.
+    fn finish(self) -> Result<(PimcConfig, WorldSampler), String> {
+        let sampler = match (self.belief, self.weights) {
+            (Some(path), weights) => {
+                if !std::path::Path::new(&path).exists() {
+                    return Err(format!("belief model {path:?} not found"));
+                }
+                let weights = weights.unwrap_or(true);
+                WorldSampler::Belief {
+                    model: Arc::new(BeliefModel::load(&path)?),
+                    weights,
+                    draws: self.draws.unwrap_or(BELIEF_DRAWS),
+                    tilt: self.tilt.unwrap_or(default_tilt(weights)),
+                }
+            }
+            (None, weights) if weights.is_some() || self.draws.is_some() || self.tilt.is_some() => {
+                return Err("weights=, draws= and tilt= need belief=...".to_string())
+            }
+            (None, _) => WorldSampler::BestOfK,
+        };
+        Ok((self.config, sampler))
+    }
 }
 
 fn load_net(path: Option<String>) -> Result<NetPolicy, String> {
@@ -86,19 +167,18 @@ impl Agent {
         let (name, opts) = spec.split_once(':').unwrap_or((spec, ""));
         match name {
             "pimc" => {
-                let mut c = PimcConfig {
-                    samples: 64,
-                    candidates: 4,
-                    ..PimcConfig::default()
-                };
+                let mut c = PimcSpec::new(64, 4);
                 options(opts, |k, v| {
-                    if pimc_option(&mut c, k, v)? {
+                    if c.option(k, v)? {
                         Ok(())
                     } else {
                         Err(format!("unknown pimc option {k:?}"))
                     }
                 })?;
-                Ok(Agent::Pimc(c))
+                Ok(match c.finish()? {
+                    (config, WorldSampler::BestOfK) => Agent::Pimc(config),
+                    (config, sampler) => Agent::PimcSampled { config, sampler },
+                })
             }
             "net" => {
                 let mut path = None;
@@ -112,15 +192,11 @@ impl Agent {
                 Ok(Agent::Net(load_net(path)?))
             }
             "netpimc" => {
-                let mut c = PimcConfig {
-                    samples: 32,
-                    candidates: 4,
-                    ..PimcConfig::default()
-                };
+                let mut c = PimcSpec::new(32, 4);
                 let mut path = None;
                 let mut net_rollouts = false;
                 options(opts, |k, v| {
-                    if pimc_option(&mut c, k, v)? {
+                    if c.option(k, v)? {
                         return Ok(());
                     }
                     match (k, v) {
@@ -131,10 +207,12 @@ impl Agent {
                     }
                     Ok(())
                 })?;
+                let (config, sampler) = c.finish()?;
                 Ok(Agent::NetPimc {
                     net: load_net(path)?,
-                    config: c,
+                    config,
                     net_rollouts,
+                    sampler,
                 })
             }
             "ev" => {
@@ -189,10 +267,18 @@ impl Policy<State> for Agent {
                 };
                 pimc(state, &config).choose(config.z)
             }
+            Agent::PimcSampled { config, sampler } => {
+                let config = PimcConfig {
+                    seed: rng.gen(),
+                    ..config.clone()
+                };
+                pimc_sampled(state, &config, sampler).choose(config.z)
+            }
             Agent::NetPimc {
                 net,
                 config,
                 net_rollouts,
+                sampler,
             } => {
                 if let Some(&w) = legal
                     .iter()
@@ -207,11 +293,12 @@ impl Policy<State> for Agent {
                 let candidates = top_actions(&net.0, state, config.candidates.max(1));
                 let baseline = candidates[0];
                 let a = if *net_rollouts {
-                    pimc_with(state, &config, candidates, baseline, net)
+                    pimc_with_sampler(state, &config, sampler, candidates, baseline, net)
                 } else {
-                    pimc_with(
+                    pimc_with_sampler(
                         state,
                         &config,
+                        sampler,
                         candidates,
                         baseline,
                         &Rollout::for_seat(state.current_player().expect("to act")),
@@ -220,5 +307,37 @@ impl Policy<State> for Agent {
                 a.choose(config.z)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pimc_belief_options_parse_in_either_order() {
+        assert!(matches!(
+            Agent::parse("pimc:samples=8"),
+            Ok(Agent::Pimc(PimcConfig { samples: 8, .. }))
+        ));
+        assert!(Agent::parse("pimc:weights=1").is_err());
+        assert!(Agent::parse("pimc:belief=no/such/file.mjnn").is_err());
+        let model = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/belief.mjnn");
+        if !std::path::Path::new(model).exists() {
+            return;
+        }
+        for (spec, want) in [
+            (format!("pimc:weights=0,belief={model}"), false),
+            (format!("pimc:belief={model}"), true),
+            (format!("pimc:samples=64,belief={model},weights=1"), true),
+        ] {
+            match Agent::parse(&spec) {
+                Ok(Agent::PimcSampled { sampler, .. }) => {
+                    assert_eq!(sampler.weighted(), want, "{spec}")
+                }
+                other => panic!("{spec}: {other:?}"),
+            }
+        }
+        assert!(Agent::parse(&format!("pimc:belief={model},weights=2")).is_err());
     }
 }

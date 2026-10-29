@@ -367,6 +367,14 @@ paired by wall, with a bootstrap 95 % interval.
   - Notes: machine time **≈ 8 h per 4,000-hand match** on 20 threads (0.2 s per search
     decision, ~20 per hand); headless; check command `Get-Content
     runs\matches\pimc64-belief.progress`. If AC4 fails, record it and go on (proposal §9).
+  - Status (2026-10-29): built (`WorldSampler::{BestOfK, Belief}`, `sample_world_from`, weighted
+    PIMC via `pimc_sampled`/`pimc_with_sampler`; the sampler is an argument, not a `PimcConfig`
+    field, because app-api names every field; `pimc:...,belief=,weights=,draws=,tilt=`). Belief
+    marginals alone gave hands +0.3 to +0.8 shanten too high, so each opponent resamples 16
+    candidates with a shanten tilt (0.8 weighted, 1.2 unweighted, ramped from the deal).
+    `calibrate` (seed 7): weighted shanten within 0.15 in 5 of 6 buckets (bucket 5 +0.19); win
+    −1.5 points, deal-in −3.2 points vs real play (best-of-K +0.9 / −4.4). Both 1,000-deal
+    matches run in `runs/matches/task7/` (waits for thirteen-solver). Not ticked until AC4 is read.
 
 ## Phase 2 – Brian's EV bot (fable for the formula, opus for the rest)
 

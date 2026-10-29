@@ -83,6 +83,9 @@ study mode shows it (the coloured bar, with the percentage on hover).
    opponents' hands ([`world.rs`](../crates/search/src/world.rs); uniform
    re-dealing made the solver ignore danger, see the Phase 1 results). Hidden
    claim declarations of other seats are forgotten and asked again.
+   **Belief sampling** (plan Task 7, `pimc:...,belief=models/belief.mjnn`): opponents'
+   hands come from the trained belief model ([belief.md](belief.md)) instead; see
+   "Belief-driven determinization" below.
 3. **Rollouts**: in each determinization every candidate is played to the end of
    the hand by the `fast` bot in all four seats. All candidates share the
    determinization (common random numbers), so their *differences* are measured
@@ -96,13 +99,94 @@ study mode shows it (the coloured bar, with the percentage on hover).
    paired difference, else the baseline. With few samples the search defers to the
    heuristic instead of acting on noise.
 
+### Belief-driven determinization (plan Task 7)
+
+`WorldSampler::Belief` in [`world.rs`](../crates/search/src/world.rs); spec
+`pimc:samples=64,candidates=4,belief=models/belief.mjnn[,weights=0|1][,draws=16][,tilt=..]`
+(`netpimc` takes the same options). In Rust: `pimc_sampled(state, &config, &sampler)`
+and `pimc_with_sampler(...)`; `pimc` and `pimc_with` keep best-of-K. The sampler is an
+argument, not a `PimcConfig` field, because `crates/app-api` builds `PimcConfig` with
+every field named.
+
+1. **Proposal.** The belief model gives, per opponent and tile kind, P(holding 0–4
+   copies). Each opponent in turn (next seat first) draws a hand of exactly its size from
+   the tiles still hidden; each copy of kind `t` has odds `m_t / (a_t − m_t)` (`m_t` the
+   belief's expected count among the `a_t` copies left). That is "proportional to the
+   expected count" with an exact density `q` (Fisher's noncentral hypergeometric, drawn
+   through a small table over kinds × tiles).
+2. **Structure.** The belief's per-kind marginals are independent, so hands drawn from
+   them alone are far less developed than real ones (+0.3 to +0.8 shanten, below). Each
+   opponent therefore gets `draws = 16` candidate hands, and one is kept with probability
+   proportional to `exp(−tilt × shanten)` (sampling-importance-resampling). The tilt ramps
+   from 0 at the deal (dealt hands are random) to its full value once a sixth of the wall
+   is drawn. Defaults, fitted with `calibrate` on seed 101: tilt 0.8 with weights, 1.2
+   without.
+3. **Weights** (`weights=1`, the default). The resampling weight also multiplies in the
+   belief likelihood over the proposal density, `L / q` with `L = Π_t p_t(h_t)`, and the
+   determinization carries the log of the mean candidate weight, so samples are properly
+   weighted for the target `L × exp(−tilt × shanten)`. PIMC clips the weights at their 95th
+   percentile and reports weighted means, rates and paired differences; standard errors
+   use the effective sample size `(Σw)² / Σw²`. With `weights=0` every sample counts once.
+4. **One thread.** Weights are combined after all samples are in, in sample order, so the
+   result is bit-identical on one thread and on a pool (test
+   `pimc::tests::belief_pimc_is_the_same_on_one_thread`). The sampler reads only the
+   observer's view (test `world::tests::belief_worlds_are_consistent_...`).
+
+**Calibration** (`cargo run --release -p mahjong-search --example calibrate -- --belief
+models/belief.mjnn --hands 200 --every 3 --samples 96`, seed 7, a different seed from the
+fit; seat 0 `value`, three `defensive`, the `danger_check` field).
+
+Opponents' mean shanten at seat 0's turns, real against sampled (16 worlds per turn;
+difference in brackets):
+
+| Bucket | Opponents | Real | Best-of-K | Belief, weights=0 | Belief, weights=1 |
+|---|---|---|---|---|---|
+| 0 | 2,343 | 3.23 | 2.78 (−0.45) | 3.10 (−0.13) | 3.20 (−0.03) |
+| 1 | 2,367 | 2.50 | 2.06 (−0.44) | 2.34 (−0.16) | 2.40 (−0.10) |
+| 2 | 2,187 | 2.08 | 1.59 (−0.49) | 2.09 (+0.01) | 2.11 (+0.02) |
+| 3 | 1,887 | 1.74 | 1.25 (−0.49) | 1.89 (+0.14) | 1.84 (+0.10) |
+| 4 | 1,296 | 1.47 | 0.93 (−0.53) | 1.65 (+0.18) | 1.59 (+0.12) |
+| 5 | 765 | 1.21 | 0.73 (−0.48) | 1.49 (+0.28) | 1.40 (+0.19) |
+
+Best-of-K (K fitted against `value` opponents) makes `defensive` opponents about half a
+shanten too developed in every bucket. The weighted belief sampler is within 0.15 in five
+of six buckets; bucket 5 misses (+0.19). On the fit seed (101) the same bucket was +0.01
+against a real mean of 1.38 (here 1.21), so part of the miss is noise in the real mean,
+which comes from few, correlated late-hand observations. Without the shanten tilt
+(tilt 0, seed 101) the belief hands were +0.33 to +0.54 shanten too high with weights and
++0.38 to +0.79 without.
+
+PIMC's predicted win and deal-in rate for the rest of the hand, after the move `value`
+really played (96 samples, every third turn, 1,138 decisions; 723 early with wall ≥ 45,
+415 late), against what happened:
+
+| Sampler | Win: predicted / actual | Deal-in: predicted / actual | Late win | Late deal-in |
+|---|---|---|---|---|
+| Best-of-K | 26.4 % / 25.6 % (+0.9) | 13.1 % / 17.5 % (−4.4) | 28.7 / 23.6 (+5.1) | 10.5 / 14.5 (−3.9) |
+| Belief, weights=0 | 23.9 % / 25.6 % (−1.6) | 13.9 % / 17.5 % (−3.6) | 26.6 / 23.6 (+2.9) | 10.2 / 14.5 (−4.2) |
+| Belief, weights=1 | 24.1 % / 25.6 % (−1.5) | 14.3 % / 17.5 % (−3.2) | 26.6 / 23.6 (+3.0) | 11.2 / 14.5 (−3.2) |
+
+The belief sampler moves both rates towards real play: the late win rate from +5.1 to
++3.0 points and the deal-in rate from −4.4 to −3.2. Deal-ins are still under-predicted
+by about 3 points with every sampler, so most of that gap is the rollout policy (`fast`
+in every seat), not the sampler; Task 11 tries `ev` rollouts. Plan AC4's "within 3
+points" holds for the win rate overall (−1.5) and is missed narrowly for deal-ins
+(−3.2). Each decision's actual outcome is one hand, and the decisions within a hand are
+correlated, so these rates carry about ±2–3 points of noise.
+
+Strength (AC4: PIMC-64 with belief sampling against three `value`, 1,000 walls × 4
+seatings, with and without weights): `runs/matches/pimc64-belief.json` and
+`runs/matches/pimc64-belief-w0.json` (job `runs/matches/task7/`); results to be added
+when the matches finish.
+
 **No peeking.** Determinization sorts the pool of hidden tiles before shuffling, so
 two positions that differ only in hidden tiles produce *identical* solver output
 for the same seed; a test checks this, and that every bot's decision is unchanged.
 
-**How far to trust it.** PIMC infers little from how opponents have played
-(only how developed hands typically are at this stage, not which tiles they
-discarded) and evaluates each sampled future
+**How far to trust it.** With best-of-K, PIMC infers little from how opponents
+have played (only how developed hands typically are at this stage, not which
+tiles they discarded); the belief sampler reads discards and melds through the
+belief model. Either way it evaluates each sampled future
 as if everyone could see it ("strategy fusion"). Its numbers are estimates *under
 the rollout bot's style of play*. The confidence intervals cover sampling noise
 only, not these model errors. Measured strength is in
