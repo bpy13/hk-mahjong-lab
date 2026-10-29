@@ -15,13 +15,14 @@
 //! Every bot declares a legal win whenever it can.
 
 use crate::danger::Danger;
-use crate::ev::EvBot;
+use crate::ev::{Belief, EvBot};
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Meld, MeldKind, State};
 use mahjong_tiles::{Tile, TileCounts};
 use rand::Rng;
+use std::sync::Arc;
 
 /// How a bot measures progress.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +171,10 @@ struct Brain {
     defense: f64,
     /// Whether to claim discards for melds (wins are always claimed).
     claims: bool,
+    /// With a belief model (plan Task 6), danger comes from
+    /// [`Danger::from_belief`] and the fold picks the tile with the smallest
+    /// expected loss in points; without one, the fitted tables (unchanged).
+    belief: Option<Arc<dyn Belief>>,
 }
 
 impl Brain {
@@ -239,7 +244,17 @@ impl Brain {
             }
         }
         if self.defense > 0.0 && key.0 >= 1 {
-            let danger = Danger::estimate(state, view.seat);
+            let (danger, risk_of): (Danger, fn(&Danger, Tile) -> f64) = match &self.belief {
+                Some(b) => (
+                    Danger::from_belief(state, view.seat, b.as_ref()),
+                    Danger::expected_loss,
+                ),
+                None => (Danger::estimate(state, view.seat), Danger::tile),
+            };
+            // The "clearly safer" margin: 0.3 % deal-in, or that much of one
+            // 3-faan share (8 points) in expected loss.
+            let margin = if self.belief.is_some() { 0.024 } else { 0.003 };
+            let risk = |t: Tile| risk_of(&danger, t);
             let threat = danger.max_threat();
             // Fold when far from ready and someone looks close to winning.
             let fold = (key.0 >= 2 && threat * self.defense >= 0.3)
@@ -247,7 +262,7 @@ impl Brain {
             if fold {
                 best = *discards
                     .iter()
-                    .min_by(|a, b| danger.tile(**a).total_cmp(&danger.tile(**b)))
+                    .min_by(|a, b| risk(**a).total_cmp(&risk(**b)))
                     .expect("a discard");
             } else if threat > 0.0 {
                 // Among equally good discards, prefer the safer one.
@@ -256,11 +271,8 @@ impl Brain {
                     .copied()
                     .filter(|&t| distance_after(&view, t, self.metric).0 == key.0)
                     .collect();
-                if let Some(&safer) = near
-                    .iter()
-                    .min_by(|a, b| danger.tile(**a).total_cmp(&danger.tile(**b)))
-                {
-                    if danger.tile(safer) + 0.003 < danger.tile(best) {
+                if let Some(&safer) = near.iter().min_by(|a, b| risk(**a).total_cmp(&risk(**b))) {
+                    if risk(safer) + margin < risk(best) {
                         best = safer;
                     }
                 }
@@ -343,6 +355,7 @@ impl Default for Efficiency {
             shortlist: 0,
             defense: 0.0,
             claims: true,
+            belief: None,
         })
     }
 }
@@ -355,7 +368,17 @@ impl Value {
             shortlist: 0,
             defense,
             claims: true,
+            belief: None,
         })
+    }
+
+    /// The `defensive` bot (fold strength 1) reading danger from a belief
+    /// model: it folds to the tile with the smallest expected loss in points
+    /// (`defensive:belief=models/belief.mjnn`, plan Task 6).
+    pub fn defensive_with(belief: Arc<dyn Belief>) -> Self {
+        let mut v = Value::new(1.0);
+        v.0.belief = Some(belief);
+        v
     }
 
     /// A value bot that never claims a discard except to win (stays concealed).
@@ -365,6 +388,7 @@ impl Value {
             shortlist: 0,
             defense: 0.0,
             claims: false,
+            belief: None,
         })
     }
 }
@@ -384,6 +408,7 @@ impl Fast {
             shortlist: 5,
             defense,
             claims: true,
+            belief: None,
         })
     }
 }

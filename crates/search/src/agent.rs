@@ -9,7 +9,9 @@
 //!   four_meld_win=0.5,feed_clip=0.5-1.5,warn_p=0.1,fold=safest,floor=target`
 //!   ([`crate::ev`],
 //!   `docs/ev-bot.md` §4). Without `belief=` it uses the heuristic belief;
-//!   `belief=models/belief.mjnn` needs the Task 5 loader and is an error until then;
+//!   `belief=models/belief.mjnn` reads the trained model ([`crate::belief`]);
+//! * `defensive:belief=models/belief.mjnn`: `defensive` folding on expected loss
+//!   from the belief model ([`crate::Danger::from_belief`]);
 //! * `pimc` with options, e.g. `pimc:samples=64,candidates=4,ms=300,z=2`
 //!   (see [`crate::pimc::Analysis::choose`] for `z`);
 //! * `net:path=models/x.mjnn`: a trained network ([`crate::net`]);
@@ -18,7 +20,7 @@
 //!   PIMC must beat; rollouts use the `fast` bot or (`rollout=net`) the network
 //!   in every seat.
 
-use crate::bots::Bot;
+use crate::bots::{Bot, Value};
 use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
 use crate::pimc::Rollout;
@@ -151,6 +153,18 @@ impl Agent {
                     None => Arc::new(HeuristicBelief),
                 };
                 Ok(Agent::Bot(Bot::Ev(EvBot::new(config, belief))))
+            }
+            "defensive" if !opts.is_empty() => {
+                let mut belief = None;
+                options(opts, |k, v| match k {
+                    "belief" => {
+                        belief = Some(v.to_string());
+                        Ok(())
+                    }
+                    _ => Err(format!("unknown defensive option {k:?}")),
+                })?;
+                let belief = load_belief(&belief.ok_or("defensive takes only belief=...")?)?;
+                Ok(Agent::Bot(Bot::Value(Value::defensive_with(belief))))
             }
             _ if opts.is_empty() => Bot::by_name(name)
                 .map(Agent::Bot)

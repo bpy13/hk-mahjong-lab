@@ -17,8 +17,16 @@
 //! 1 − Π(1 − threat × rate), then mapped through a calibration curve fitted on the
 //! tiles players really discarded (they are not a random sample of the unseen
 //! tiles). The `danger_check` example measures the calibration.
+//!
+//! [`Danger::from_belief`] (plan Task 6) builds the same interface from a
+//! belief about each opponent (the trained model, or the tables above through
+//! [`crate::HeuristicBelief`]) and adds payments: [`Danger::expected_loss`] in
+//! points, [`Danger::points_if_win`] and the 12-tile liability check
+//! [`Danger::liability_tile`]. `danger_check --belief <model>` measures the
+//! expected loss per wall-progress bucket. [`Danger::estimate`] is unchanged.
 
 use crate::danger_tables::{CALIBRATION, THREAT, WAIT};
+use crate::ev::{Belief, Beliefs, FIRST_FAAN_BUCKET};
 use mahjong_hk::{Event, State};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
 
@@ -147,11 +155,33 @@ fn calibrate(raw: f64) -> f64 {
     CALIBRATION[CALIBRATION.len() - 1].1
 }
 
+/// The payment-aware parts of a [`Danger`] built from a belief (plan Task 6).
+#[derive(Clone, Debug)]
+struct Payment {
+    /// `P_o(t)`: P(seat `o` wins on `t` if I discard it now); 0 for me and for
+    /// dead tiles.
+    p: [[f64; NUM_KINDS]; 4],
+    /// `Pay(o)`: expected points per share of `o`'s discard win now.
+    pay: [f64; 4],
+    /// Shares I pay when `o` wins on my discard: 1, 3 when I am liable for `o`,
+    /// 0 when someone else is (they pay everything).
+    shares: [f64; 4],
+    /// Seats with three exposed melds and nobody liable for them yet.
+    three_exposed: [bool; 4],
+    /// `P_claim4_o(t)`: o can claim `t` as its fourth exposed meld (a pung from
+    /// any seat, a chow if o is my next seat), from the belief's counts.
+    claim4: [[f64; NUM_KINDS]; 4],
+    /// Whether the unseen copies leave that claim possible at all.
+    can_claim4: [[bool; NUM_KINDS]; 4],
+}
+
 /// Estimated danger of each tile for one seat.
 #[derive(Clone, Debug)]
 pub struct Danger {
     tiles: [f64; NUM_KINDS],
     threat: [f64; 4],
+    /// Present only when built by [`Danger::from_belief`].
+    payment: Option<Box<Payment>>,
 }
 
 impl Danger {
@@ -174,7 +204,141 @@ impl Danger {
         for i in 0..NUM_KINDS {
             tiles[i] = calibrate(1.0 - safe[i]);
         }
-        Danger { tiles, threat }
+        Danger {
+            tiles,
+            threat,
+            payment: None,
+        }
+    }
+
+    /// Payment-aware danger for `me` from a belief about each opponent (plan
+    /// Task 6): the trained model ([`crate::belief::BeliefModel`]) or, as the
+    /// no-model fallback, [`crate::HeuristicBelief`] (the fitted tables).
+    ///
+    /// `tile(t)` is `1 − Π_o (1 − tenpai_o × wait_o(t))` (no calibration curve:
+    /// the model is calibrated per bucket, `docs/belief.md` §4), `threat(o)` is
+    /// `tenpai_o`, and [`Danger::expected_loss`], [`Danger::points_if_win`] and
+    /// [`Danger::liability_tile`] become available. A tile with no unseen copy is
+    /// dead: danger 0, expected loss 0.
+    pub fn from_belief(state: &State, me: usize, belief: &dyn Belief) -> Danger {
+        Self::from_beliefs(state, me, &belief.estimate(state, me))
+    }
+
+    /// [`Danger::from_belief`] from beliefs already estimated.
+    pub fn from_beliefs(state: &State, me: usize, beliefs: &Beliefs) -> Danger {
+        let rules = state.rules();
+        let unseen = state.unseen(me);
+        let points = |f: u8| rules.points(f.min(rules.faan_cap)) as f64;
+        let mut pay = Payment {
+            p: [[0.0; NUM_KINDS]; 4],
+            pay: [0.0; 4],
+            shares: [0.0; 4],
+            three_exposed: [false; 4],
+            claim4: [[0.0; NUM_KINDS]; 4],
+            can_claim4: [[false; NUM_KINDS]; 4],
+        };
+        let mut safe = [1.0f64; NUM_KINDS];
+        let mut threat = [0.0f64; 4];
+        for o in (0..4).filter(|&o| o != me) {
+            let b = &beliefs.seats[o];
+            threat[o] = b.tenpai;
+            pay.pay[o] = b
+                .faan
+                .iter()
+                .enumerate()
+                .map(|(k, &pb)| pb * points(FIRST_FAAN_BUCKET + k as u8))
+                .sum();
+            pay.shares[o] = match state.liable_for(o) {
+                None => 1.0,
+                Some(l) if l == me => 3.0,
+                Some(_) => 0.0,
+            };
+            pay.three_exposed[o] = rules.twelve_tile_liability
+                && state.melds(o).exposed_count() == 3
+                && state.liable_for(o).is_none();
+            let next = o == (me + 1) % 4;
+            for t in Tile::all_kinds() {
+                let i = t.index() as usize;
+                if unseen[t] == 0 {
+                    continue;
+                }
+                let p = (b.tenpai * b.wait[i]).clamp(0.0, 1.0);
+                pay.p[o][i] = p;
+                safe[i] *= 1.0 - p;
+                if pay.three_exposed[o] {
+                    let mut chow = 0.0f64;
+                    let mut chow_possible = false;
+                    if next && t.suit().is_some() {
+                        for (a, c) in [(-2i8, -1i8), (-1, 1), (1, 2)] {
+                            if let (Some(u), Some(v)) = (t.offset(a), t.offset(c)) {
+                                chow_possible |= unseen[u] >= 1 && unseen[v] >= 1;
+                                chow = chow.max(
+                                    b.has_one[u.index() as usize] * b.has_one[v.index() as usize],
+                                );
+                            }
+                        }
+                    }
+                    pay.can_claim4[o][i] = unseen[t] >= 2 || chow_possible;
+                    pay.claim4[o][i] = (b.has_two[i] + chow).min(1.0);
+                }
+            }
+        }
+        let mut tiles = [0.0f64; NUM_KINDS];
+        for i in 0..NUM_KINDS {
+            tiles[i] = 1.0 - safe[i];
+        }
+        Danger {
+            tiles,
+            threat,
+            payment: Some(Box::new(pay)),
+        }
+    }
+
+    /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o) ×
+    /// shares(o)` (every winner is paid under the default `multiple_winners`
+    /// rule). Built by [`Danger::estimate`], which knows no hand values, it is
+    /// `tile(t) × 8` (one share of the 3-faan minimum).
+    pub fn expected_loss(&self, t: Tile) -> f64 {
+        let i = t.index() as usize;
+        match &self.payment {
+            Some(p) => (0..4).map(|o| p.p[o][i] * p.pay[o] * p.shares[o]).sum(),
+            None => self.tiles[i] * 8.0,
+        }
+    }
+
+    /// Expected points per share if `seat` wins on a discard now (`Pay(seat)`);
+    /// 8 (the 3-faan minimum) when built by [`Danger::estimate`].
+    pub fn points_if_win(&self, seat: usize) -> f64 {
+        match &self.payment {
+            Some(p) => p.pay[seat],
+            None => 8.0,
+        }
+    }
+
+    /// The seat that could claim `t` as its **fourth exposed meld** (12-tile
+    /// rule, rules §8.3), making me liable for it: a seat showing three exposed
+    /// melds with nobody liable yet, when the unseen copies leave a pung (or, for
+    /// my next seat, a chow) possible. With several, the one the belief thinks
+    /// likelier to hold the tiles. `None` when built by [`Danger::estimate`].
+    pub fn liability_tile(&self, t: Tile) -> Option<usize> {
+        let p = self.payment.as_ref()?;
+        let i = t.index() as usize;
+        (0..4)
+            .filter(|&o| p.three_exposed[o] && p.can_claim4[o][i])
+            .max_by(|&a, &b| p.claim4[a][i].total_cmp(&p.claim4[b][i]).then(b.cmp(&a)))
+    }
+
+    /// The belief's chance that `seat` can claim `t` as its fourth exposed meld
+    /// (0 when [`Danger::liability_tile`] does not name `seat` as possible).
+    pub fn liability_chance(&self, seat: usize, t: Tile) -> f64 {
+        let i = t.index() as usize;
+        self.payment.as_ref().map_or(0.0, |p| {
+            if p.three_exposed[seat] && p.can_claim4[seat][i] {
+                p.claim4[seat][i]
+            } else {
+                0.0
+            }
+        })
     }
 
     /// Estimated probability that discarding `t` now lets an opponent win.
@@ -196,11 +360,15 @@ impl Danger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::belief::BeliefModel;
     use crate::bots::Bot;
+    use crate::ev::HeuristicBelief;
     use mahjong_games::{Game, Policy};
-    use mahjong_hk::RuleSet;
+    use mahjong_hk::{Meld, MeldKind, PositionPhase, PositionSpec, RuleSet};
+    use mahjong_tiles::parse_tiles;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
+    use std::sync::Arc;
 
     #[test]
     fn estimates_are_probabilities_and_dead_tiles_are_safe() {
@@ -225,5 +393,144 @@ mod tests {
                 s.apply(a);
             }
         }
+    }
+
+    /// The trained model when present, else the table fallback.
+    fn belief() -> Arc<dyn Belief> {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/belief.mjnn");
+        if p.exists() {
+            Arc::new(BeliefModel::load(&p).unwrap())
+        } else {
+            Arc::new(HeuristicBelief)
+        }
+    }
+
+    #[test]
+    fn expected_loss_is_zero_for_dead_tiles() {
+        let mut rng = SmallRng::seed_from_u64(4);
+        let bot = Bot::by_name("fast").unwrap();
+        let beliefs: [Arc<dyn Belief>; 2] = [belief(), Arc::new(HeuristicBelief)];
+        let mut dead = 0;
+        for _ in 0..8 {
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            while let Some(p) = s.current_player() {
+                if s.phase_name() == "turn" {
+                    let unseen = s.unseen(p);
+                    for b in &beliefs {
+                        let d = Danger::from_belief(&s, p, b.as_ref());
+                        for t in Tile::all_kinds() {
+                            let (x, loss) = (d.tile(t), d.expected_loss(t));
+                            assert!((0.0..=1.0).contains(&x), "{t}: {x}");
+                            assert!(loss.is_finite() && loss >= 0.0, "{t}: {loss}");
+                            if unseen[t] == 0 {
+                                assert_eq!((x, loss), (0.0, 0.0), "{t} has no unseen copy");
+                                dead += 1;
+                            }
+                        }
+                        for o in (0..4).filter(|&o| o != p) {
+                            assert!(d.points_if_win(o) >= 8.0 - 1e-9);
+                        }
+                    }
+                }
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(dead > 0, "some dead tile was seen");
+    }
+
+    fn counts(s: &str) -> TileCounts {
+        TileCounts::from_tiles(&parse_tiles(s).unwrap())
+    }
+
+    /// Seat 2 shows three exposed pungs (1s from seat 1, 9s and R from seat 3)
+    /// and holds `7p 7p 5s 6s`; I (seat 0, on turn) hold one 7p and three Wh.
+    fn three_melds_position() -> State {
+        let melds: [Vec<Meld>; 4] = [
+            vec![],
+            vec![],
+            vec![
+                Meld::exposed(MeldKind::Pung, "1s".parse().unwrap(), 1),
+                Meld::exposed(MeldKind::Pung, "9s".parse().unwrap(), 3),
+                Meld::exposed(MeldKind::Pung, "R".parse().unwrap(), 3),
+            ],
+            vec![],
+        ];
+        let hands = [
+            counts("123456789m 7p WhWhWh N"),
+            counts("2p 3p 4p 5p 6p 8p 9p 2s 3s 4s 7s 8s E"),
+            counts("7p 7p 5s 6s"),
+            counts("1m 2m 3m 4m 5m 6m 7m 8m 9m S S W W"),
+        ];
+        let mut used = [0u8; NUM_KINDS];
+        for h in &hands {
+            for t in h.kinds() {
+                used[t.index() as usize] += h[t];
+            }
+        }
+        for m in &melds[2] {
+            for t in m.tiles() {
+                used[t.index() as usize] += 1;
+            }
+        }
+        let mut river = vec![
+            (1, "1s".parse().unwrap(), true),
+            (3, "9s".parse().unwrap(), true),
+            (3, "R".parse().unwrap(), true),
+        ];
+        // The river takes what is left except the wall; 7p stays unseen.
+        let wall = 30;
+        let mut rest: Vec<Tile> = Vec::new();
+        for t in Tile::all_kinds() {
+            for _ in used[t.index() as usize]..4 {
+                rest.push(t);
+            }
+        }
+        rest.sort_by_key(|t| (*t == "7p".parse::<Tile>().unwrap(), t.index()));
+        // Every bonus tile is already shown, so the wall holds playing tiles only.
+        let river_len = rest.len() - wall;
+        for (k, &t) in rest.iter().take(river_len).enumerate() {
+            river.push(((k + 1) % 4, t, false));
+        }
+        let spec = PositionSpec {
+            hands,
+            melds,
+            bonus: [
+                vec![],
+                parse_tiles("F1 F2 F3").unwrap(),
+                parse_tiles("F4 S1 S2").unwrap(),
+                parse_tiles("S3 S4").unwrap(),
+            ],
+            river,
+            wall_remaining: wall,
+            to_move: 0,
+            phase: PositionPhase::Turn,
+            last_drawn: Some("N".parse().unwrap()),
+            kong_chain: 0,
+            liable: [None; 4],
+        };
+        State::from_position(RuleSet::default(), &spec).expect("a valid position")
+    }
+
+    #[test]
+    fn liability_flag_fires_for_the_fourth_exposed_meld() {
+        let s = three_melds_position();
+        let seven: Tile = "7p".parse().unwrap();
+        let white: Tile = "Wh".parse().unwrap();
+        assert_eq!(s.melds(2).exposed_count(), 3);
+        assert!(s.unseen(0)[seven] >= 2);
+        for b in [belief(), Arc::new(HeuristicBelief)] {
+            let d = Danger::from_belief(&s, 0, b.as_ref());
+            assert_eq!(d.liability_tile(seven), Some(2), "{b:?}");
+            // I hold three Wh: at most one copy is unseen, so no pung (and seat 2
+            // is not my next seat, so no chow).
+            assert!(s.unseen(0)[white] <= 1);
+            assert_eq!(d.liability_tile(white), None);
+            assert_eq!(d.liability_chance(2, white), 0.0);
+            assert!(d.liability_chance(2, seven) > 0.0);
+        }
+        // The heuristic danger knows nothing about liability.
+        assert_eq!(Danger::estimate(&s, 0).liability_tile(seven), None);
     }
 }

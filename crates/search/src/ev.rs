@@ -11,9 +11,11 @@
 //!
 //! `P_win`, `P_sd` and `pts_T` come from the target value table
 //! ([`crate::target_value`]); everything about the opponents comes from a
-//! [`Belief`]. The trained belief model (Task 5) plugs in through that trait;
-//! until it exists, [`HeuristicBelief`] reads the fitted danger tables
-//! (`docs/ev-bot.md` §8). Every number the bot uses is kept in [`EvTerms`] so hints
+//! [`Belief`]. The trained belief model ([`crate::belief::BeliefModel`],
+//! `ev:belief=models/belief.mjnn`) plugs in through that trait and supplies the
+//! discard-win chance `x_o` from its `outcome` head; without it,
+//! [`HeuristicBelief`] reads the fitted danger tables and uses
+//! `x_o = r_disc × sd_o` (`docs/ev-bot.md` §8). Every number the bot uses is kept in [`EvTerms`] so hints
 //! can show it; the chosen action's reason keys are in [`EvDecision::reasons`].
 //!
 //! The search is plain arithmetic per candidate: no threads, no randomness.
@@ -49,6 +51,10 @@ pub struct SeatBelief {
     pub faan: [f64; FAAN_BUCKETS],
     /// `sd_o`: P(the seat self-draws a win before the hand ends).
     pub self_draw: f64,
+    /// `x_o`: P(the seat wins on someone's discard before the hand ends), when
+    /// the belief knows it (the trained model's `outcome` head). `None` means
+    /// `x_o = r_disc × sd_o` (§1, §9 Q1).
+    pub discard_win: Option<f64>,
     /// `P1_o(t)`: P(the seat holds at least one copy of `t`).
     pub has_one: [f64; NUM_KINDS],
     /// `P2_o(t)`: P(the seat holds at least two copies of `t`).
@@ -67,6 +73,7 @@ impl SeatBelief {
             wait: [0.0; NUM_KINDS],
             faan,
             self_draw: 0.0,
+            discard_win: None,
             has_one: [0.0; NUM_KINDS],
             has_two: [0.0; NUM_KINDS],
             mean_count: [0.0; NUM_KINDS],
@@ -145,20 +152,14 @@ impl Belief for HeuristicBelief {
     }
 }
 
-/// Loads a trained belief model for `ev:belief=<path>`.
-///
-/// The MJNN v2 belief format and its loader arrive with plan Tasks 5 and 6; until
-/// then this returns an error (never panics) so a spec naming a model fails
-/// clearly instead of silently using the heuristic.
+/// Loads a trained belief model (MJNN v2, [`crate::belief::BeliefModel`]) for
+/// `ev:belief=<path>` and `defensive:belief=<path>`. Errors (never panics) when
+/// the file is missing or is not a belief model.
 pub fn load_belief(path: &str) -> Result<Arc<dyn Belief>, String> {
     if !std::path::Path::new(path).exists() {
-        return Err(format!("ev: belief model {path:?} not found"));
+        return Err(format!("belief model {path:?} not found"));
     }
-    // TODO(plan Task 5/6): read the MJNN v2 belief model here.
-    Err(format!(
-        "ev: loading belief model {path:?} is not built yet (todo: plan Task 5/6 adds the \
-         MJNN v2 loader); omit belief= to use the heuristic fallback"
-    ))
+    Ok(Arc::new(crate::belief::BeliefModel::load(path)?))
 }
 
 // ----- Hyper-parameters. -----
@@ -294,6 +295,8 @@ pub struct EvTerms {
     /// Belief inputs used.
     pub tenpai: [f64; 4],
     pub sd: [f64; 4],
+    /// `x_o`: the belief's discard-win chance, or `r_disc × sd_o` without one.
+    pub x: [f64; 4],
     pub pay: [f64; 4],
     pub pay_sd: [f64; 4],
 }
@@ -416,7 +419,7 @@ impl Table {
             hidden += state.concealed_count(o);
             t.tenpai[o] = b.tenpai;
             t.sd[o] = b.self_draw;
-            t.x[o] = cfg.r_disc * b.self_draw;
+            t.x[o] = b.discard_win.unwrap_or(cfg.r_disc * b.self_draw);
             t.sum_win += (b.self_draw + t.x[o]).min(cfg.clip);
             for (bucket, &pb) in b.faan.iter().enumerate() {
                 let f = FIRST_FAAN_BUCKET + bucket as u8;
@@ -618,6 +621,7 @@ impl Table {
             fold_plan,
             tenpai: self.tenpai,
             sd: self.sd,
+            x: self.x,
             pay: self.pay,
             pay_sd: self.pay_sd,
         }

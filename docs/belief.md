@@ -163,7 +163,49 @@ discards weighted by recency, which is most of the information. The code keeps t
 option (`--discards`, `BeliefConfig(discards=True)`; `net.rs` fills a `discards` input
 slice when a file names one) for a later revision.
 
-## 6. Files
+## 6. In Rust: `belief.rs` and payment-aware danger (plan Task 6)
+
+`crates/search/src/belief.rs` (`BeliefModel`) loads the MJNN v2 file, checks the five
+heads, runs the network for the player to act and turns the logits into probabilities:
+the count mask from `State::unseen` (as `mask_counts`), sigmoids for `tenpai` and
+`waits`, softmaxes for `faan` and `outcome`. Results are cached per public state (64
+entries, keyed by a hash of what the actor sees), so the danger model, the `ev` bot and
+`danger_check` asking about one decision run the network once. It implements the `ev`
+bot's `Belief` trait: `sd_o = outcome[2]`, `x_o = outcome[1]`, `P1`, `P2` and `E[cnt]`
+from the counts, and a wait on a kind with no unseen copy set to 0. Tests:
+`cargo test -p mahjong-search belief::` (probabilities, mask, cache, hidden tiles).
+
+`Danger::from_belief(state, me, &belief)` (`danger.rs`; the old `Danger::estimate` is
+unchanged) gives `tile(t) = 1 − Π_o (1 − tenpai_o × wait_o(t))`, `threat(o) = tenpai_o`,
+and three new numbers: `expected_loss(t) = Σ_o P_o(t) × Pay(o) × shares(o)` in points
+(shares 1, 3 when I am liable for `o`, 0 when another seat is), `points_if_win(o) =
+Pay(o)` and `liability_tile(t)`: the seat with three exposed melds that could claim `t`
+as its fourth (a pung when two copies are unseen, a chow for my next seat). With
+`HeuristicBelief` it is the no-model fallback. `defensive:belief=models/belief.mjnn`
+folds to the tile with the smallest expected loss (default `defensive` unchanged).
+
+`cargo run --release -p mahjong-search --example danger_check -- --belief
+models/belief.mjnn 2000` (2026-10-29, 111 s; seat 0 `value`, three `defensive`; every
+discard by every seat; interval = 95 % normal interval of the observed mean):
+
+| Bucket | Discards | Predicted loss (points) | Observed | Interval | Within | Deal-in predicted | Observed | Points per deal-in predicted / observed |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 28,296 | 0.0023 | 0.0011 | [−0.0006, 0.0029] | yes | 0.009 % | 0.007 % | 23.5 / 16.0 |
+| 1 | 31,535 | 0.0169 | 0.0155 | [0.0055, 0.0255] | yes | 0.070 % | 0.063 % | 21.9 / 24.4 |
+| 2 | 29,178 | 0.0882 | 0.0883 | [0.0680, 0.1086] | yes | 0.39 % | 0.42 % | 21.0 / 19.9 |
+| 3 | 24,136 | 0.2734 | 0.2841 | [0.2439, 0.3243] | yes | 1.17 % | 1.33 % | 21.4 / 19.5 |
+| 4 | 16,232 | 0.5246 | 0.4426 | [0.3848, 0.5004] | **no** | 2.12 % | 2.12 % | 21.9 / 18.5 |
+| 5 | 9,358 | 0.7686 | 0.8780 | [0.7535, 1.0025] | yes | 2.92 % | 3.52 % | 23.0 / 22.6 |
+
+**Five of six buckets are within their interval; bucket 4 is not** (predicted 0.525
+against an upper bound of 0.500), so Task 6's "each within its interval" does not hold.
+The deal-in chance in bucket 4 is exact (2.12 % / 2.12 %); the miss is the hand value:
+the `faan` head expects 21.9 points per deal-in where 18.5 were paid (about 344
+deal-ins in that bucket). Bucket 5 shows the
+other bias of §4.2: deal-ins under-predicted (2.9 % against 3.5 %). The old heuristic's
+table (part 1 of the same run) over-predicts in its 4–20 % buckets.
+
+## 7. Files
 
 - `models/belief.pt` (PyTorch, not committed) and `models/belief.mjnn` (MJNN v2, 2.6 MB,
   committed).
