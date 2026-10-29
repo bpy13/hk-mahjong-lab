@@ -13,6 +13,13 @@ The engine returns keys and numbers only, never display text: tiles are ids such
 reasons `reason.*`, events `event.*`. The Chinese labels of the lab UI (`python/mahjong/hk.py`)
 are the app's dictionary job.
 
+## Optional contract fields not emitted yet
+
+`quality` (on `Hint` and `ReviewItem`), `interval` (on `ReviewItem` and `Grade`) and the `unclear`
+grade are optional fields of the contract (`docs/engine-interface.md` in hk-games). This crate
+does not emit them yet, so the app treats a missing `quality` or `interval` as "no information"
+and never sees `unclear`. `API_VERSION` (in `shapes.rs`, now `0`) is the `"api"` number in every response.
+
 ## Build and test
 
 ```powershell
