@@ -37,4 +37,16 @@ Limits and traps found so far, newest first within each section.
   stream, so this repo's sessions do not change those tests.
 - **Load slows the whole suite.** On an idle PC `cargo test --workspace` took 112 s; under load
   it took 255–636 s (277 s for the passing run) (`faan_targets` and `shanten_brute` alone took 1–5 min each). `pytest` took
-  368 s under load.
+  368 s under load, and 821 s on 2026-10-30 beside the Task 13 labeller (8 threads).
+
+## Random streams
+
+- **Use `ChaCha8Rng` and u32 index draws in anything the app runs.** `SmallRng` is a
+  different generator on wasm32 than on 64-bit, and rand 0.8 reads 32 bits for a usize
+  range on wasm32 but 64 on native. Either one made the app's WebAssembly `expert` play
+  other moves than the server for the same seed (hk-games D28). Since 2026-10-30 PIMC,
+  `solo`, the tournament walls and bootstrap use `ChaCha8Rng`, and the random bots draw
+  `gen_range(0..len as u32)`. `shuffle` and `choose` are safe: rand 0.8 draws u32 for them.
+  A check on 3 seeded hands × 30 moves (`expert`, budget 0): the native and Node builds
+  agreed on 90 of 90 moves; before the change they differed on 5 of 24.
+  Consequence: a tournament seed deals other walls than it did before that date.

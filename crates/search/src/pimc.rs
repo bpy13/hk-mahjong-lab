@@ -50,6 +50,11 @@
 //! `(Σw)² / Σw²`. Weights are computed after all samples are in, in sample
 //! order, so the result is the same on one thread as on many.
 //!
+//! **Same answer in the browser.** Every sample's generator is a `ChaCha8Rng`
+//! seeded from (`seed`, sample index). `SmallRng` is a different generator on
+//! wasm32 than on 64-bit, so the app's WebAssembly build gave other moves than
+//! the server for the same seed (hk-games D28, 2026-10-30).
+//!
 //! **Leaf value** (plan Task 16, `netpimc:...,leaf=value,depth=6`).
 //! [`pimc_with_leaf`] stops each rollout after `depth` discards (any seat's) and
 //! scores the position with a network's four-seat value head instead of playing
@@ -67,8 +72,8 @@ pub use crate::world::WorldSampler;
 use mahjong_games::{play_out, Game, Policy};
 use mahjong_hk::{Action, State};
 use mahjong_tiles::Tile;
-use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::time::Duration;
@@ -309,7 +314,7 @@ impl Policy<State> for Rollout {
 /// baseline action among them.
 pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
     let legal = state.legal_actions_vec();
-    let baseline = Value::default().choose(state, &legal, &mut SmallRng::seed_from_u64(0));
+    let baseline = Value::default().choose(state, &legal, &mut ChaCha8Rng::seed_from_u64(0));
     shortlist_around(state, &legal, discards, baseline)
 }
 
@@ -318,7 +323,7 @@ pub fn shortlist(state: &State, discards: usize) -> (Vec<Action>, Action) {
 /// candidates when the faan-aware measure did not pick it.
 pub fn shortlist_anchored(state: &State, discards: usize, anchor: &Bot) -> (Vec<Action>, Action) {
     let legal = state.legal_actions_vec();
-    let baseline = anchor.choose(state, &legal, &mut SmallRng::seed_from_u64(0));
+    let baseline = anchor.choose(state, &legal, &mut ChaCha8Rng::seed_from_u64(0));
     shortlist_around(state, &legal, discards, baseline)
 }
 
@@ -478,7 +483,7 @@ pub fn pimc_with_leaf<P: Policy<State>>(
         let results: Vec<(f64, Vec<Sample>)> = (from..from + n)
             .into_par_iter()
             .map(|i| {
-                let mut rng = SmallRng::seed_from_u64(
+                let mut rng = ChaCha8Rng::seed_from_u64(
                     config.seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
                 );
                 let (world, log_w) = sample_world_from(state, seat, sampler, &mut rng);
@@ -650,7 +655,7 @@ mod tests {
 
     fn position(seed: u64, steps: usize) -> State {
         let bot = Bot::by_name("fast").unwrap();
-        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let mut s = State::new_deal(RuleSet::default(), &mut rng);
         for _ in 0..steps {
             if s.is_terminal() {
@@ -776,7 +781,7 @@ mod tests {
             let legal = s.legal_actions_vec();
             assert_eq!(
                 baseline,
-                ev.choose(&s, &legal, &mut SmallRng::seed_from_u64(1))
+                ev.choose(&s, &legal, &mut ChaCha8Rng::seed_from_u64(1))
             );
             assert!(list.contains(&baseline));
             let sampler = WorldSampler::BestOfK;

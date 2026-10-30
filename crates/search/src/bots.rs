@@ -431,7 +431,8 @@ impl Policy<State> for RandomBot {
         {
             return w;
         }
-        legal[rng.gen_range(0..legal.len())]
+        // u32, not usize: the same draw on wasm32 and 64-bit (hk-games D28).
+        legal[rng.gen_range(0..legal.len() as u32) as usize]
     }
 }
 

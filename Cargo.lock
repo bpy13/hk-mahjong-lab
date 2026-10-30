@@ -493,6 +493,7 @@ dependencies = [
  "mahjong-hk",
  "mahjong-tiles",
  "rand 0.8.8",
+ "rand_chacha",
  "rayon",
  "web-time",
 ]
