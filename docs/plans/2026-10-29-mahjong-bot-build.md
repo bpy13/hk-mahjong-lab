@@ -600,6 +600,16 @@ paired by wall, with a bootstrap 95 % interval.
     printed (expect ≥ 80 %). Machine time: **≈ 2 GPU-h** plus 15 min CPU; headless; check
     command `Get-Content runs\distill\train.log -Tail 3`.
   - Notes: starts only when `nvidia-smi` shows big2 is not training or holds ≤ 4 GB.
+  - Status (2026-10-30): built (`python/mahjong/rl/distill_cnn.py`, `experiments/phase4_build.py`
+    stages `distill`, `evaluate`, `netpimc`, `python/tests/test_distill_cnn.py`). Labels sit on
+    the GPU as float16; suit swaps are GPU gathers; checkpoint every 15 min plus each epoch;
+    `--resume`. Slice test (27 chunks = 540 k rows, chunk 27 held out, 14 epochs, 8.7 min):
+    held-out top-1 agreement 0.910 (bar 0.80), target accuracy 0.986, Rust int8 vs fp32 top-1
+    0.998 (bar 0.98), 2,187,569 parameters, int8 2.22 MB. Held-out value MSE is lowest after
+    epoch 2 and rises after it, so the full run uses 12 epochs (about 15 min on 1 M rows).
+    The full distillation and the 4,000-hand `evaluate` match run in the queued job
+    `experiments/phase4_job.ps1` once Task 13 has 1 M rows. Not ticked until the job's
+    numbers are in.
 
 - [ ] **Task 16: The network inside PIMC: candidates, rollouts, leaf value**
   - Files: modify `crates/search/src/agent.rs` (`netpimc` gains `belief=`, `leaf=value|
@@ -615,6 +625,18 @@ paired by wall, with a bootstrap 95 % interval.
     relabel 0.5 M decisions with the new searcher (Task 13's example, `--decisions 500000`,
     ~1.2 days) and re-distil (Task 15, `--stage distill2`); otherwise skip to Phase 5 and say
     why in the study results.
+  - Status (2026-10-30): built. `netpimc` takes `leaf=value|rollout` and `depth=N` (default 6;
+    `belief=` it already had); `LeafValue` and `pimc_with_leaf` in `pimc.rs`
+    (`pimc_with_sampler` = `pimc_with_leaf(..., None)`, so no other search changes). Tests in
+    `tests/cnn_io.rs`: a leaf deeper than the hand gives the full-rollout numbers bit for bit,
+    a 2-discard leaf changes them, one thread = the pool, spec parsing and a full hand.
+    Measured on 8 threads with the slice network (32 hands each, labeller running): bare CNN
+    0.03 s per hand, CNN + PIMC-48 full rollouts 1.1 s, leaf value depth 6 2.4 s (the CNN
+    forward pass at every leaf costs more than a `fast` rollout), belief-PIMC-64 2.8 s. So the
+    plan's 1,000 walls × 24 seatings would take ~40 h on 8 threads; the queued job plays
+    **400 walls × 24 seatings** (9,600 hands, ≈ 16 h), seeds 7100–7119, and writes
+    `runs/matches/netpimc.json`, `netpimc-verdict.{json,md}` (Brian's rule and AC7 bar 3) and
+    a `netpimc-partial-verdict.md` after every chunk. Not ticked until the match is in.
 
 ## Phase 5 – PPO self-play past the teacher (opus; GPU)
 

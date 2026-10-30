@@ -30,6 +30,23 @@ with their defaults.
   lower `z` (e.g. `z=1`) for labelling, which needs a new label run.
 - **Task 13: the teacher pick.** Settled: the job uses Task 7's spec
   (`runs/labels-job/teacher-used.txt`), which Task 11's result confirms.
+- **Task 16: 400 walls instead of 1,000.** With all four agents in every hand, the
+  24-seating match costs about 6 s per hand on 8 threads, so 1,000 walls would take about
+  40 h. The queued job plays 400 walls (9,600 hands, about 16 h). Default: 400 walls; if
+  the challenger-minus-teacher interval straddles 0 by a small margin, extend with
+  `--netpimc-walls 800` (finished chunks are kept).
+- **Task 16: the leaf value is slower than full rollouts.** The CNN forward pass at every
+  leaf (2–2.5 ms) costs more than playing the hand out with the `fast` bot, so `leaf=value`
+  only pays if it plays better. Default: measure both in the match, as planned.
+- **Task 15: value-head overfitting.** On a 540 k-row slice the held-out value error was
+  lowest after 2 epochs while move agreement kept rising to 7 epochs. The full run uses 12
+  epochs, a compromise. Default: keep; if the leaf-value search loses, a later run can
+  train the value head with fewer epochs or more dropout.
+- **Brian's rule (2026-10-30), how it is applied.** "Use teacher unless distilled model
+  wins significantly": the job compares each challenger (bare CNN, CNN + PIMC-48, CNN +
+  PIMC-48 leaf value) with belief-PIMC-64 in the same 24-seating match, and a challenger
+  replaces the teacher only if its wall-paired 95 % bootstrap interval of the difference
+  lies above 0 (`runs/matches/netpimc-verdict.md`).
 
 ## Pending work
 - Task 5 belief model (425a7d2): count NLL beats both baselines (0.551 vs 0.634 and 0.662);

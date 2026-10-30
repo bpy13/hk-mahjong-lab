@@ -4,9 +4,15 @@
 
 use mahjong_games::{play_out, Game, Policy};
 use mahjong_hk::{RuleSet, State};
+use mahjong_search::agent::DEFAULT_LEAF_DEPTH;
 use mahjong_search::cnn::{OUTPUT_LEN, POLICY_LEN, TARGET_LEN, UNUSED_TARGET};
 use mahjong_search::features::{encode, PLANES, STATE_LEN};
-use mahjong_search::{Bot, Mlp, NetPolicy};
+use mahjong_search::net::top_actions;
+use mahjong_search::pimc::VALUE_LOG_SCALE;
+use mahjong_search::{
+    pimc_with_leaf, Agent, Analysis, Bot, LeafValue, Mlp, NetPolicy, PimcConfig, Rollout,
+    WorldSampler,
+};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::sync::Arc;
@@ -274,6 +280,158 @@ fn malformed_files_are_errors() {
         t.push(("oracle_value.weight".into(), vec![VH, 136]));
     });
     assert!(Mlp::from_bytes(&ok).is_ok());
+}
+
+// --- Plan Task 16: the network's value head at the leaves of PIMC -------------
+
+/// Live mid-hand states: `value` plays a seeded deal for a random number of steps.
+fn live_states(n: usize, seed: u64) -> Vec<State> {
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let bot = Bot::by_name("value").unwrap();
+    let mut out = Vec::new();
+    while out.len() < n {
+        let mut s = State::new_deal(RuleSet::default(), &mut rng);
+        let stop = rng.gen_range(5..40);
+        for _ in 0..stop {
+            if s.is_terminal() {
+                break;
+            }
+            let legal = s.legal_actions_vec();
+            let a = bot.choose(&s, &legal, &mut rng);
+            s.apply(a);
+        }
+        if !s.is_terminal() && s.legal_actions_vec().len() > 1 {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// What must match between two searches: candidates, sample counts, means and
+/// paired differences, as bits.
+fn search_key(a: &Analysis) -> Vec<(String, u32, u64, u64)> {
+    a.moves
+        .iter()
+        .map(|m| {
+            (
+                m.action.to_string(),
+                m.n,
+                m.mean.to_bits(),
+                m.diff.to_bits(),
+            )
+        })
+        .collect()
+}
+
+fn leaf_search(s: &State, net: &Arc<Mlp>, leaf: Option<&LeafValue>) -> Analysis {
+    let config = PimcConfig {
+        samples: 24,
+        candidates: 3,
+        seed: 11,
+        ..PimcConfig::default()
+    };
+    let candidates = top_actions(net, s, 3);
+    let baseline = candidates[0];
+    let rollout = Rollout::for_seat(s.current_player().unwrap());
+    pimc_with_leaf(
+        s,
+        &config,
+        &WorldSampler::BestOfK,
+        candidates,
+        baseline,
+        &rollout,
+        leaf,
+    )
+}
+
+#[test]
+fn leaf_value_undoes_the_log_scale_for_the_searching_seat() {
+    let net = Arc::new(Mlp::from_bytes(&file(false, "suitcnn-1", |_| {})).unwrap());
+    let leaf = LeafValue::new(Arc::clone(&net), 6).unwrap();
+    for s in live_states(10, 4) {
+        let me = s.current_player().unwrap();
+        let y = net.forward_state(&s);
+        let v = &y[POLICY_LEN + TARGET_LEN..OUTPUT_LEN];
+        for seat in 0..4 {
+            let x = v[(seat + 4 - me) % 4] as f64;
+            let want = x.signum() * VALUE_LOG_SCALE * x.abs().exp_m1();
+            assert!((leaf.points(&s, seat) - want).abs() < 1e-9);
+        }
+    }
+    // A network without a 4-wide value output cannot be a leaf evaluator: a
+    // v1 policy network (one 134-wide output) is refused.
+    let mut v1 = b"MJNN".to_vec();
+    v1.extend(1u32.to_le_bytes());
+    v1.extend(1u32.to_le_bytes());
+    v1.extend((POLICY_LEN as u32).to_le_bytes());
+    v1.extend((STATE_LEN as u32).to_le_bytes());
+    v1.extend(vec![0u8; 4 * POLICY_LEN * STATE_LEN + 4 * POLICY_LEN]);
+    let policy_only = Arc::new(Mlp::from_bytes(&v1).unwrap());
+    assert!(LeafValue::new(policy_only, 6).is_err());
+}
+
+#[test]
+fn a_leaf_deeper_than_the_hand_is_a_full_rollout() {
+    let net = Arc::new(Mlp::from_bytes(&file(false, "suitcnn-1", |_| {})).unwrap());
+    let deep = LeafValue::new(Arc::clone(&net), 10_000).unwrap();
+    let shallow = LeafValue::new(Arc::clone(&net), 2).unwrap();
+    let mut differ = 0;
+    for s in live_states(3, 5) {
+        let full = leaf_search(&s, &net, None);
+        assert_eq!(
+            search_key(&leaf_search(&s, &net, Some(&deep))),
+            search_key(&full)
+        );
+        if search_key(&leaf_search(&s, &net, Some(&shallow))) != search_key(&full) {
+            differ += 1;
+        }
+    }
+    assert!(differ > 0, "a 2-discard leaf never changed a number");
+}
+
+#[test]
+fn leaf_search_on_one_thread_matches_the_default_pool() {
+    let one = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    let net = Arc::new(Mlp::from_bytes(&file(true, "suitcnn-1", |_| {})).unwrap());
+    let leaf = LeafValue::new(Arc::clone(&net), 6).unwrap();
+    for s in live_states(3, 6) {
+        let pool = leaf_search(&s, &net, Some(&leaf));
+        let single = one.install(|| leaf_search(&s, &net, Some(&leaf)));
+        assert_eq!(search_key(&single), search_key(&pool));
+        assert_eq!(single.choose(2.0), pool.choose(2.0));
+    }
+}
+
+#[test]
+fn netpimc_takes_leaf_and_depth_and_plays() {
+    let path = std::env::temp_dir().join(format!("cnn-io-leaf-{}.mjnn", std::process::id()));
+    std::fs::write(&path, file(true, "suitcnn-1", |_| {})).unwrap();
+    let p = path.display();
+    match Agent::parse(&format!("netpimc:path={p},samples=4,leaf=value,depth=4")) {
+        Ok(Agent::NetPimc { leaf: Some(l), .. }) => assert_eq!(l.depth, 4),
+        other => panic!("{other:?}"),
+    }
+    match Agent::parse(&format!("netpimc:path={p},leaf=value")) {
+        Ok(Agent::NetPimc { leaf: Some(l), .. }) => assert_eq!(l.depth, DEFAULT_LEAF_DEPTH),
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        Agent::parse(&format!("netpimc:path={p}")),
+        Ok(Agent::NetPimc { leaf: None, .. })
+    ));
+    assert!(Agent::parse(&format!("netpimc:path={p},depth=3")).is_err());
+    assert!(Agent::parse(&format!("netpimc:path={p},leaf=maybe")).is_err());
+    assert!(Agent::parse(&format!("netpimc:path={p},leaf=value,depth=x")).is_err());
+    // The agent plays a whole hand in every seat.
+    let agent = Agent::parse(&format!("netpimc:path={p},samples=4,leaf=value,depth=2")).unwrap();
+    let mut rng = SmallRng::seed_from_u64(3);
+    let mut s = State::new_deal(RuleSet::default(), &mut rng);
+    play_out(&mut s, &agent, &mut rng);
+    assert!(s.is_terminal());
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

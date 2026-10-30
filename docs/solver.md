@@ -213,8 +213,26 @@ Spec `pimc:...,anchor=value|ev,rollout=fast|ev[,ev_<key>=<value>]`, e.g.
 
 Strength: `runs/matches/pimc64-ev.json` (anchor and rollout `ev`) and
 `runs/matches/pimc64-ev-anchor.json` (anchor `ev`, rollout `fast`), on Task 7's walls
-(job `runs/matches/task11/`); the comparison goes in
-[study-results/phase4-build.md](study-results/phase4-build.md).
+(job `runs/matches/task11/`); the comparison is in
+[study-results/phase4-build.md](study-results/phase4-build.md) §1: anchor `value` wins by
+1.5–2.0 points per hand.
+
+### The network inside the search (plan Task 16)
+
+Spec `netpimc:path=models/cnn-distill.mjnn,samples=48,candidates=4,belief=models/belief.mjnn[,rollout=fast|net][,leaf=rollout|value,depth=6]`.
+The network's top `candidates` moves are the candidates and its first choice is the
+baseline; `belief=` (and `weights=`, `draws=`, `tilt=`) draw the determinizations as
+for `pimc`. With `leaf=value` each rollout stops after `depth` discards (by any seat;
+default 6) and the network's value head scores the position for the searching seat
+(`LeafValue`, `pimc_with_leaf` in Rust): the head predicts each seat's final points
+log-scaled, `sign(x) · ln(1 + |x| / 8)`, from the point of view of the player to act,
+and the leaf undoes the scaling. Rollouts that end before the leaf use the real result;
+win, deal-in and draw rates count only those, so they are lower bounds under
+`leaf=value`. `leaf=value` needs an MJNN v3 network (a 4-wide `value` output).
+`pimc_with_sampler` is `pimc_with_leaf(..., None)`, so every other search is unchanged;
+tests in `crates/search/tests/cnn_io.rs` check that a leaf deeper than the hand gives
+the full-rollout numbers bit for bit, and that the leaf search gives the same answer on
+one thread as on the pool.
 
 **No peeking.** Determinization sorts the pool of hidden tiles before shuffling, so
 two positions that differ only in hidden tiles produce *identical* solver output

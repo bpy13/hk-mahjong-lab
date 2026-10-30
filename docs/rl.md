@@ -105,6 +105,35 @@ chunk, hand), so a rerun resumes after the last complete chunk with the same row
 a directory refuses a different teacher. The detached job is
 `experiments/task13_label.ps1` (it waits for Task 11's matches and picks the teacher).
 
+### 3.3 Distilling the labels (plan Task 15)
+
+`python -m mahjong.rl.distill_cnn --labels runs/labels --out runs/distill --epochs 12
+--minutes 110 [--resume]` (or `python experiments/phase4_build.py --stage distill`)
+trains the CNN of §3.1 on the GPU. The last label chunk is held out. All rows sit on the
+GPU (features as float16, about 1.9 GB per million rows); each batch gets one random
+suit permutation per row, as GPU gathers. Loss: policy cross-entropy against the
+search's move, weighted by its margin (`diff / diff_se` over the best other candidate,
+clipped to [1, 3]); 0.5 × target cross-entropy (rows without a feasible plan skipped);
+0.5 × value MSE against the log-scaled four-seat deltas. AdamW, lr 2e-3, 300 warm-up
+steps, cosine decay to 5 %, batch 2,048, gradient clip 5. A checkpoint
+(`runs/distill/ckpt.pt`) every 15 minutes and after each epoch; `--resume` continues
+with the same batch order. Outputs: `models/cnn-distill.pt` (PyTorch, PPO's `--init`),
+`models/cnn-distill-fp32.mjnn`, `models/cnn-distill.mjnn` (int8), and
+`runs/distill/result.json` (held-out top-1 agreement, Rust int8-vs-fp32 top-1 agreement
+on 1,000 held-out positions, sizes). One epoch over 540 k rows took 45 s on the
+RTX 4060 Ti, so 12 epochs over 1 M rows take about 15 minutes. On that slice held-out
+agreement levelled off near 0.90 after about 7 epochs, while the held-out value error
+rose after epoch 2 (the value target is one noisy hand result shared by about 22 rows).
+
+`experiments/phase4_build.py` then runs `--stage evaluate` (the bare int8 network vs
+three `value` bots on Task 7's 1,000 walls, `runs/matches/cnn-distill.json`) and
+`--stage netpimc` (Task 16: bare network, network + PIMC-48 with full rollouts, network
++ PIMC-48 with the value head at depth 6, and belief-PIMC-64, all 24 seatings;
+`runs/matches/netpimc.json` and `netpimc-verdict.{json,md}`, which apply Brian's rule:
+a challenger replaces the search teacher only if challenger minus teacher has a 95 %
+interval above 0). The detached job `experiments/phase4_job.ps1` waits for the labels
+and runs all three stages from a frozen copy in `runs/phase4/pkg/`.
+
 ## 4. Methods
 
 **Distillation** (`distill.py`). Hands are played by the `value` bot in all four
