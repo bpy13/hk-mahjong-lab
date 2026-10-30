@@ -18,8 +18,15 @@ use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
 fn f32_bytes<'py>(py: Python<'py>, v: &[f32]) -> Bound<'py, PyBytes> {
-    let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-    PyBytes::new(py, &bytes)
+    // Written straight into the Python object: no intermediate byte vector
+    // (`observe` hands over ~2 MB per call).
+    PyBytes::new_with(py, 4 * v.len(), |buf| {
+        for (b, x) in buf.as_chunks_mut::<4>().0.iter_mut().zip(v) {
+            *b = x.to_le_bytes();
+        }
+        Ok(())
+    })
+    .expect("allocating a bytes object")
 }
 
 /// `(STATE_LEN, ORACLE_LEN, NUM_ACTION_CODES)`.
@@ -567,32 +574,28 @@ impl VecEnv {
             .flat_map(|i| (0..sides).map(move |s| 2 * i + s))
             .filter(|&slot| self.observable(slot / 2, slot % 2))
             .collect();
+        // Each row is encoded in parallel straight into its slice of the output
+        // (no per-row vectors to gather afterwards).
+        let n = self.observed.len();
+        let mut feats = vec![0.0f32; n * STATE_LEN];
+        let mut oracle = vec![0.0f32; n * ORACLE_LEN];
+        let mut masks = vec![0u8; n * NUM_ACTION_CODES];
         let this = &*self;
-        let rows: Vec<(Vec<f32>, Vec<f32>, Vec<u8>)> = py.detach(|| {
-            this.observed
-                .par_iter()
-                .map(|&slot| {
+        py.detach(|| {
+            feats
+                .par_chunks_mut(STATE_LEN)
+                .zip(oracle.par_chunks_mut(ORACLE_LEN))
+                .zip(masks.par_chunks_mut(NUM_ACTION_CODES))
+                .zip(this.observed.par_iter())
+                .for_each(|(((f, o), m), &slot)| {
                     let s = this.game(slot);
-                    let mut f = vec![0.0; STATE_LEN];
-                    let mut o = vec![0.0; ORACLE_LEN];
-                    encode(s, &mut f);
-                    encode_oracle(s, &mut o);
-                    let mut m = vec![0u8; NUM_ACTION_CODES];
+                    encode(s, f);
+                    encode_oracle(s, o);
                     for a in s.legal_actions_vec() {
                         m[a.code() as usize] = 1;
                     }
-                    (f, o, m)
-                })
-                .collect()
+                });
         });
-        let mut feats = Vec::with_capacity(rows.len() * STATE_LEN);
-        let mut oracle = Vec::with_capacity(rows.len() * ORACLE_LEN);
-        let mut masks = Vec::with_capacity(rows.len() * NUM_ACTION_CODES);
-        for (f, o, m) in rows {
-            feats.extend(f);
-            oracle.extend(o);
-            masks.extend(m);
-        }
         let seats = self
             .observed
             .iter()

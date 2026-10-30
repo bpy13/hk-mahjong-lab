@@ -42,12 +42,20 @@ with their defaults.
   lowest after 2 epochs while move agreement kept rising to 7 epochs. The full run uses 12
   epochs, a compromise. Default: keep; if the leaf-value search loses, a later run can
   train the value head with fewer epochs or more dropout.
-- **Task 17: PPO throughput 34 K hands per hour (bar 100 K).** Measured in a 3-minute GPU
-  smoke from a random network; Rust feature encoding is the limit. Proposal §9 says: smaller
-  CNN, frozen-CNN baseline, accept about 5 M hands. Default: rerun the 60-minute throughput
-  test from `models/cnn-distill.pt` (shorter hands) before Task 18; if still below 100 K,
-  make `features::encode` cheaper first (its faan-aware acceptance per discard), then apply
-  §9.
+- **Task 17: PPO throughput — encoding sped up (2026-10-30); above 100 K at above-normal
+  priority, load-dependent at normal.** `features::encode` went from 653 to 76 µs per
+  position with bit-identical output. The 3-minute GPU smoke (random network, 256 paired
+  envs, learner hands per hour): old code 46 K; new code 74 K and 132 K in two runs at
+  normal priority; new code 218 K at above-normal priority.
+  Finding: on this shared PC the rollout is limited mostly by Windows scheduling, not by
+  work. Other jobs keep every core busy at normal priority, so each wake-up of the rollout's
+  threads waits for a time slice. In one back-to-back test at that load, old and new code
+  both reached ~47 K at normal priority; at above-normal priority, old 121 K, new 219 K.
+  New flag: `python -m mahjong.rl.ppo_cnn ... --priority above_normal`.
+  **Question for Brian:** may Task 18's long PPO runs use `--priority above_normal`? It
+  takes CPU from other jobs (labelling, other streams' solvers) only while the rollout
+  works (the encoding burst, 7.6 of ~25 ms per step). Default: yes for Task 18's runs; other jobs keep normal.
+  The 60-minute throughput run from `models/cnn-distill.pt` still waits for Task 15.
 - **Search RNG moved to ChaCha8 (hk-games D28, 2026-10-30).** PIMC samples, `solo`, the
   tournament walls and bootstrap now use `ChaCha8Rng`, and random-bot draws use u32 ranges,
   so the app's WebAssembly `expert` matches the server. Effect here: every tournament now

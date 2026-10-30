@@ -49,6 +49,7 @@ CLI::
     python -m mahjong.rl.ppo_cnn --init <pt or none> (--minutes M | --hours H)
         --out runs/ppo/<run> [--seed S] [--resume] [--no-paired-reward]
         [--no-target-head] [--envs N] [--device cuda|cpu] [--baseline init|ev]
+        [--priority normal|above_normal]
 """
 
 from __future__ import annotations
@@ -110,6 +111,31 @@ def no_power_throttling() -> None:
         wintypes.DWORD,
     ]
     k32.SetProcessInformation(k32.GetCurrentProcess(), 4, ctypes.byref(st), ctypes.sizeof(st))
+
+
+#: Windows priority classes for ``--priority``.
+PRIORITY_CLASSES = {"normal": 0x0020, "above_normal": 0x8000}
+
+
+def set_priority(name: str) -> bool:
+    """Sets this process's Windows priority class (``normal`` or ``above_normal``);
+    returns whether it was set (always False off Windows).
+
+    Why: the rollout alternates short GPU waits with short bursts on all the
+    Rust threads. When other jobs keep every core busy at the same priority,
+    each wake-up waits for a time slice: on 2026-10-30 a 256-env rollout
+    managed 47 K learner hands per hour at normal priority and 219 K at above
+    normal, with the same code (``docs/plans/2026-10-29-mahjong-bot-build.md``,
+    Task 17). Above normal takes from the other jobs only the CPU the rollout
+    actually uses."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    k32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined,unused-ignore]
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    return bool(k32.SetPriorityClass(k32.GetCurrentProcess(), PRIORITY_CLASSES[name]))
 
 
 def squash(x: npt.ArrayLike) -> npt.NDArray[np.float32]:
@@ -771,8 +797,16 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--eval-walls", type=int, default=200)
     ap.add_argument("--max-iterations", type=int, default=None)
     ap.add_argument("--torch-threads", type=int, default=1)
+    ap.add_argument(
+        "--priority",
+        choices=tuple(PRIORITY_CLASSES),
+        default="normal",
+        help="Windows priority class; above_normal when other jobs load every core",
+    )
     args = ap.parse_args(argv)
     no_power_throttling()
+    if args.priority != "normal":
+        set_priority(args.priority)
 
     state_path = args.out / "state.json"
     if args.minutes is not None:

@@ -14,6 +14,7 @@
 use mahjong_tiles::{Suit, Tile, TileCounts};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 /// Which meld shapes a target hand may use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -31,20 +32,22 @@ pub enum Structure {
 /// formed alongside, or -1 if that `(p, m)` is impossible. For fixed `p` and
 /// `m`, more partials are never worse, so this frontier is all that matters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Frontier([[i8; 5]; 2]);
+pub(crate) struct Frontier([[i8; 5]; 2]);
 
 impl Frontier {
     const EMPTY: Frontier = Frontier([[-1; 5]; 2]);
-    /// The frontier of no tiles at all.
-    const ZERO: Frontier = Frontier([[0, -1, -1, -1, -1], [-1; 5]]);
+    /// The frontier of no tiles at all (the identity of [`Frontier::combine`]).
+    pub(crate) const ZERO: Frontier = Frontier([[0, -1, -1, -1, -1], [-1; 5]]);
 
     fn insert(&mut self, m: u8, t: u8, p: u8) {
         let cell = &mut self.0[p as usize][m.min(4) as usize];
         *cell = (*cell).max(t.min(4) as i8);
     }
 
-    /// Every way to take one option from each group.
-    fn combine(&self, other: &Frontier) -> Frontier {
+    /// Every way to take one option from each group. Associative and
+    /// commutative (sums capped at 4, then the maximum), so groups can be
+    /// combined in any order.
+    pub(crate) fn combine(&self, other: &Frontier) -> Frontier {
         let mut out = Frontier::EMPTY;
         for p1 in 0..2 {
             for m1 in 0..5 {
@@ -66,18 +69,46 @@ impl Frontier {
     }
 }
 
+/// A cheap hasher for the cache's packed `u32` keys. The default SipHash took
+/// most of the time of a cache hit, and the faan-aware measures look up the
+/// cache hundreds of times per encoded position.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    fn write_u32(&mut self, k: u32) {
+        self.write_u64(k as u64);
+    }
+    fn write_u64(&mut self, k: u64) {
+        // Fibonacci hashing; hashbrown takes its bucket from the top bits and its
+        // tag from the top 7, so mix them well.
+        self.0 = (self.0 ^ k).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
 thread_local! {
-    static CACHE: RefCell<HashMap<(u32, bool, Structure), Frontier>> = RefCell::new(HashMap::new());
+    /// Key: the base-5 count code × 6 + honours × 3 + structure.
+    static CACHE: RefCell<HashMap<u32, Frontier, BuildHasherDefault<KeyHasher>>> =
+        RefCell::new(HashMap::default());
 }
 
 /// The frontier for one group: a suit (`honours = false`, 9 counts) or the seven
 /// honours (`honours = true`, which cannot form chows).
-fn group_frontier(counts: &[u8], honours: bool, structure: Structure) -> Frontier {
-    let key = counts.iter().rev().fold(0u32, |k, &c| k * 5 + c as u32);
-    if key == 0 {
+pub(crate) fn group_frontier(counts: &[u8], honours: bool, structure: Structure) -> Frontier {
+    let code = counts.iter().rev().fold(0u32, |k, &c| k * 5 + c as u32);
+    if code == 0 {
         return Frontier::ZERO;
     }
-    if let Some(f) = CACHE.with(|c| c.borrow().get(&(key, honours, structure)).copied()) {
+    let key = code * 6 + honours as u32 * 3 + structure as u32;
+    if let Some(f) = CACHE.with(|c| c.borrow().get(&key).copied()) {
         return f;
     }
     let mut out = Frontier::EMPTY;
@@ -93,7 +124,7 @@ fn group_frontier(counts: &[u8], honours: bool, structure: Structure) -> Frontie
         structure != Structure::AllChows,
         &mut out,
     );
-    CACHE.with(|cache| cache.borrow_mut().insert((key, honours, structure), out));
+    CACHE.with(|cache| cache.borrow_mut().insert(key, out));
     out
 }
 
@@ -163,6 +194,11 @@ pub fn standard_shanten(concealed: &TileCounts, melds: usize, structure: Structu
             structure,
         ));
     }
+    shanten_of(&f, melds)
+}
+
+/// Standard-form shanten from the combined frontier of all four groups.
+pub(crate) fn shanten_of(f: &Frontier, melds: usize) -> i8 {
     let need = 4 - melds.min(4) as i8;
     let mut best = i8::MAX;
     for p in 0..2 {

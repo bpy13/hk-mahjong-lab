@@ -678,6 +678,20 @@ paired by wall, with a bootstrap 95 % interval.
     so the §9 row "throughput 10× below" applies (open item). Not built: the 24-seating
     evaluation with the teacher (it evaluates 4 seatings vs `value`). Not ticked: the 60-minute
     throughput run from `models/cnn-distill.pt` waits for Task 15.
+  - Status (2026-10-30, encoding speed-up): `features::encode` 653 → 76 µs per position on one
+    thread (`examples/encode_speed.rs`), output bit-identical (golden hashes over 1,003 and
+    36,213 positions stored from the old code; `HkVecEnv` outputs hash-equal old vs new over
+    150,711 rows). Changes: `faan_shanten` shares the suit frontiers between its targets and
+    allocates nothing; the shanten cache uses a cheap hasher; `encode` skips acceptance tiles
+    that provably cannot count; `observe()` encodes into one buffer. Profile of a 256-env paired
+    rollout (random network, GPU): per step, `observe` 27 → 7.6 ms, GPU forward ~17 ms, step
+    < 1 ms. Throughput, same machine load (other jobs on every core), back to back, 60–150 s:
+    normal priority 47.8 K (old) vs 47.3 K (new) learner hands per hour — both limited by
+    wake-up latency, not CPU; above-normal priority 121 K (old) vs **219 K** (new). Added
+    `--priority above_normal` (default normal; open item). The 3-minute CLI smoke
+    (`--init none --minutes 3`): old code 46,264 learner hands per hour; new code 73,926 and
+    131,589 (two runs at normal priority, load varied), **217,749** at above-normal priority.
+    Still not ticked: the 60-minute run from `models/cnn-distill.pt` waits for Task 15.
 
 - [ ] **Task 18: Main PPO run, second seed, two ablations** (GPU, long)
   - Files: create `runs/ppo/main/`, `runs/ppo/seed2/`, `runs/ppo/ablate-5a/`,
