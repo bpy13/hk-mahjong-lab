@@ -464,7 +464,7 @@ paired by wall, with a bootstrap 95 % interval.
     vs `value` −0.99 [−2.02, +0.07], vs `defensive` +0.11 [−0.98, +1.22]. AC5 not met (floor off:
     above −1.9 but the interval does not clear it). Not ticked; `docs/ev-bot.md` §10.2.
 
-- [ ] **Task 11: EV bot as the PIMC anchor and rollout policy**
+- [x] **Task 11: EV bot as the PIMC anchor and rollout policy**
   - Files: modify `crates/search/src/pimc.rs` (`Rollout::with(own: Bot, opponents: Bot)`;
     the baseline action may come from `ev`), `crates/search/src/agent.rs`
     (`pimc:...,anchor=ev,rollout=ev`), `docs/solver.md` §4.
@@ -486,6 +486,12 @@ paired by wall, with a bootstrap 95 % interval.
     runs\matches\pimc64-ev.progress, runs\matches\task11\run.log -Tail 5`. Resume: rerun the
     same `Invoke-CimMethod ... run.ps1` command (finished chunks are skipped). Draft section:
     `docs/study-results/phase4-build.md` §1. Not ticked until the result is in.
+  - Status (2026-10-30, result): **anchor `value` wins.** 4,000 hands each vs `value`:
+    `anchor=ev,rollout=ev` −0.30 ± 1.22, `anchor=ev,rollout=fast` −0.80 ± 1.18, Task 7's
+    `anchor=value` +1.24 ± 1.21. Paired by chunk the differences are −1.54 ± 1.33 and
+    −2.03 ± 1.42 (both exclude 0). The `ev` anchor cuts deal-ins (14.4 % vs 17.8 %) but wins
+    far less (18.9 % vs 24.6 %). Task 13 labels with Task 7's spec (already running).
+    Study results §1; summaries in `docs/study-results/data/`. Ticked.
 
 ## Phase 3 – Brian's 400 hands: tooling (opus)
 

@@ -1,0 +1,26 @@
+{
+ "reference": "pimc64-belief",
+ "reference_mean": 1.236,
+ "matches": [
+  {
+   "match": "pimc64-ev",
+   "spec": "pimc:samples=64,candidates=4,belief=models/belief.mjnn,weights=1,anchor=ev,rollout=ev",
+   "mean": -0.30200000000000005,
+   "ci95": 1.2184410270045902,
+   "deal_in_rate": 0.14375,
+   "win_rate": 0.189,
+   "minus_reference": -1.538,
+   "minus_reference_ci95": 1.714937032444049
+  },
+  {
+   "match": "pimc64-ev-anchor",
+   "spec": "pimc:samples=64,candidates=4,belief=models/belief.mjnn,weights=1,anchor=ev,rollout=fast",
+   "mean": -0.798,
+   "ci95": 1.1802919181287315,
+   "deal_in_rate": 0.14375,
+   "win_rate": 0.19075,
+   "minus_reference": -2.034,
+   "minus_reference_ci95": 1.688046060082485
+  }
+ ]
+}

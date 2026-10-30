@@ -23,22 +23,34 @@ searcher's own moves in the rollouts? The winner labels Phase 4's training data 
 | Task 11 | `anchor=ev,rollout=ev` | `runs/matches/pimc64-ev.json` |
 | Task 11, anchor only | `anchor=ev,rollout=fast` | `runs/matches/pimc64-ev-anchor.json` |
 
-Intervals: each chunk's interval combined over chunks (Task 7's job's merge); the
-difference between two matches uses an interval that treats them as independent, which
-is conservative because they share walls (`runs/matches/task11/compare.json`).
+Intervals: each chunk's interval combined over chunks (Task 7's job's merge). The
+difference between two matches is given two ways: treating them as independent
+(`runs/matches/task11/compare.json`, conservative), and paired by chunk (the same 50
+walls and seatings in each of the 20 chunks; t-interval over the 20 chunk differences).
 
-**Results.** Pending: the job `runs/matches/task11/` starts after Task 7's job ends.
+**Results.** Job `runs/matches/task11/` (2026-10-30 03:00–09:41, 18 threads; about
+20 min per chunk with `ev` rollouts, about 2 min per chunk with `fast` rollouts). Summaries: `data/pimc64-ev.json`,
+`data/pimc64-ev-anchor.json`, `data/task11-compare.json`.
 
-| Agent | Points / hand | Win | Deal-in | Minus Task 7 reference |
-|---|---|---|---|---|
-| Belief-PIMC-64, anchor `value` (Task 7) | +1.24 ± 1.21 | 24.6 % | 17.8 % | 0 |
-| Belief-PIMC-64, anchor `ev`, rollout `ev` | pending | | | pending |
-| Belief-PIMC-64, anchor `ev`, rollout `fast` | pending | | | pending |
+| Agent | Points / hand | Bootstrap 95 % | Win | Self-draw | Deal-in | Mean faan | Draws | Minus Task 7 (independent) | Minus Task 7 (paired by chunk) |
+|---|---|---|---|---|---|---|---|---|---|
+| Belief-PIMC-64, anchor `value`, rollout `fast` (Task 7) | +1.24 ± 1.21 | [+0.40, +2.07] | 24.6 % | 5.4 % | 17.8 % | 4.86 | 6.5 % | 0 | 0 |
+| Belief-PIMC-64, anchor `ev`, rollout `ev` | −0.30 ± 1.22 | [−1.43, +0.82] | 18.9 % | 3.9 % | 14.4 % | 5.12 | 9.4 % | −1.54 ± 1.71 | −1.54 ± 1.33 |
+| Belief-PIMC-64, anchor `ev`, rollout `fast` | −0.80 ± 1.18 | [−1.91, +0.31] | 19.1 % | 4.0 % | 14.4 % | 5.12 | 9.2 % | −2.03 ± 1.69 | −2.03 ± 1.42 |
 
 **Decision rule (plan).** Whichever anchor scores higher becomes the Phase 4 labeller. If
-the interval of the difference includes 0, this section says so; what to pick then is an
-open question for Brian (`docs/open-items.md`), because anchor `ev` with `ev` rollouts
-costs about 7 times as much machine time per label.
+the interval of the difference includes 0, this section says so.
+
+**Verdict.** Anchor `value` wins. Both `ev`-anchored searchers score below Task 7's
+reference, by 1.5 and 2.0 points per hand. Paired by chunk, both intervals exclude 0; the
+conservative independent interval also excludes 0 for both. The `ev` anchor plays like
+the `ev` bot: about 3.4 points fewer deal-ins, but about 6 points fewer wins, more drawn
+hands (9.4 % vs 6.5 %) and fewer self-draws. Bigger hands (mean faan 5.12 vs 4.86) do not
+pay for the lost wins. `ev` rollouts help a little over `fast` rollouts with the `ev`
+anchor (+0.50 per hand, not separated). The search keeps the anchor's move unless another
+move beats it by two standard errors, so a weaker anchor makes a weaker searcher. Task 13
+labels with Task 7's spec (`anchor=value,rollout=fast`), which its job already chose
+(`runs/labels-job/teacher-used.txt`).
 
 ## 2. Belief-driven determinization (plan Task 7, AC4)
 

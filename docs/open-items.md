@@ -14,15 +14,10 @@ with their defaults.
 - **EV bot provisional strength** (heuristic belief, 4,000 hands each): floor on −7.44 vs 3 ×
   value, −5.23 vs 3 × defensive; `floor=none` −2.46 and −0.37. Neither meets AC5 yet. The real
   belief model (Task 5) comes next; the matches will be rerun with it.
-- **Task 11: which `ev` the PIMC anchor uses.** `pimc:...,anchor=ev,rollout=ev` builds the
-  `ev` bot with `floor=none`, the stronger setting in Task 10's real-belief matches (−0.99 vs
-  −7.23 per hand vs `value`); the plain `ev` spec keeps the doc's floor. `ev_floor=target`
-  switches it back. Default until Brian answers: `floor=none` for the anchor.
-- **Task 11: the pick if the intervals overlap.** The plan says the higher-scoring anchor labels
-  Phase 4 (Task 13). Anchor `ev` with `ev` rollouts costs about 7 times as much per hand (7.6 s
-  vs 1.0 s on 4 threads), which would stretch Task 13's ≈ 2.3 days. Default: follow the plan
-  (the higher mean), and say in `docs/study-results/phase4-build.md` §1 if the difference's
-  interval includes 0.
+- **Task 11: decided by the result (2026-10-30).** Anchor `value` beats anchor `ev` by 1.5
+  (`ev` rollouts) and 2.0 (`fast` rollouts) points per hand; both intervals exclude 0
+  (study results §1). The `floor=none` and "intervals overlap" questions no longer matter
+  for the labeller. Task 13 labels with Task 7's spec.
 
 - **Task 7: AC4 missed.** Belief-PIMC-64 scores +1.24 ± 1.21 per hand vs `value` (bar
   +3); weights add −0.02 points but cut deal-ins from 18.8 % to 17.8 %. The run goes on
@@ -33,9 +28,8 @@ with their defaults.
   move beats it by two standard errors). Distillation will learn mostly `value`'s play.
   Default: label as planned; Task 15 weights rows by the search margin. Alternative:
   lower `z` (e.g. `z=1`) for labelling, which needs a new label run.
-- **Task 13: the teacher pick.** `runs/labels-job/teacher.txt` says `auto` (the higher
-  mean). If Task 11's `anchor=ev,rollout=ev` wins, labelling takes about 4–8 days
-  instead of 15–25 h. To force Task 7's spec, write it into that file before the job starts.
+- **Task 13: the teacher pick.** Settled: the job uses Task 7's spec
+  (`runs/labels-job/teacher-used.txt`), which Task 11's result confirms.
 
 ## Pending work
 - Task 5 belief model (425a7d2): count NLL beats both baselines (0.551 vs 0.634 and 0.662);
