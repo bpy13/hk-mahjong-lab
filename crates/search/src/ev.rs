@@ -16,13 +16,15 @@
 //! discard-win chance `x_o` from its `outcome` head; without it,
 //! [`HeuristicBelief`] reads the fitted danger tables and uses
 //! `x_o = r_disc × sd_o` (`docs/ev-bot.md` §8). Every number the bot uses is kept in [`EvTerms`] so hints
-//! can show it; the chosen action's reason keys are in [`EvDecision::reasons`].
+//! can show it; the chosen action's reason keys are in [`EvDecision::reasons`],
+//! and every candidate's in [`EvTerms::reasons`] ([`crate::reasons`]).
 //!
 //! The search is plain arithmetic per candidate: no threads, no randomness.
 
 use crate::bots::{after_claim, rank_discards, Metric};
 use crate::danger::Opponent;
 use crate::danger_tables::{THREAT, WAIT};
+use crate::reasons::{Reason, ReasonArgs, ReasonKey};
 use crate::target_value::{lookup, tiles_left_bucket, TargetKey, TargetKind};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, UNREACHABLE};
@@ -299,6 +301,10 @@ pub struct EvTerms {
     pub x: [f64; 4],
     pub pay: [f64; 4],
     pub pay_sd: [f64; 4],
+    /// The reason keys of this candidate as if it were the chosen action,
+    /// against the other candidates of the same decision (filled by
+    /// [`EvBot::decide`]; read with [`EvTerms::reasons`]).
+    reasons: Vec<Reason>,
 }
 
 impl EvTerms {
@@ -306,15 +312,36 @@ impl EvTerms {
     pub fn deal_in_total(&self) -> f64 {
         self.deal_in_now.iter().sum()
     }
+
+    /// The `reason.ev.*` keys of this candidate (`docs/ev-bot.md` §7), as if it
+    /// were the chosen action, against the other candidates of its decision:
+    /// `reason.ev.stops_big_hand`, `reason.ev.offence`, one
+    /// `reason.ev.deal_in_now` per warned seat (largest `p` first),
+    /// `reason.ev.liability`, then `reason.ev.margin` (always; negative for a
+    /// candidate that is not the best). For the chosen action these are
+    /// [`EvDecision::reasons`].
+    pub fn reasons(&self) -> Vec<Reason> {
+        self.reasons.clone()
+    }
 }
 
-/// A reason key with its arguments (`docs/ev-bot.md` §7). Engines return keys,
-/// never text (D42).
+/// A reason key with its arguments (`docs/ev-bot.md` §7) as plain strings and
+/// numbers, for callers that do not use [`Reason`]. Engines return keys, never
+/// text (D42).
 #[derive(Clone, Debug, PartialEq)]
 pub struct EvReason {
     pub key: &'static str,
     /// Named numbers; `seat` and `shares` are whole numbers.
     pub args: Vec<(&'static str, f64)>,
+}
+
+impl From<&Reason> for EvReason {
+    fn from(r: &Reason) -> EvReason {
+        EvReason {
+            key: r.key_str(),
+            args: r.args.named(),
+        }
+    }
 }
 
 /// The bot's decision with everything behind it.
@@ -624,6 +651,7 @@ impl Table {
             x: self.x,
             pay: self.pay,
             pay_sd: self.pay_sd,
+            reasons: Vec::new(),
         }
     }
 
@@ -801,7 +829,17 @@ impl EvBot {
             chosen
         };
         cands.sort_by(|a, b| b.ev.total_cmp(&a.ev).then(a.action.cmp(&b.action)));
-        let reasons = reasons(&table, cfg, action, &cands);
+        let per_candidate: Vec<Vec<Reason>> = cands
+            .iter()
+            .map(|c| reasons(&table, cfg, c, &cands, action))
+            .collect();
+        for (c, r) in cands.iter_mut().zip(per_candidate) {
+            c.reasons = r;
+        }
+        let reasons = cands
+            .iter()
+            .find(|c| c.action == action)
+            .map_or_else(Vec::new, |c| c.reasons.iter().map(EvReason::from).collect());
         EvDecision {
             action,
             candidates: cands.into_iter().map(|c| (c.action, c)).collect(),
@@ -810,11 +848,18 @@ impl EvBot {
     }
 }
 
-/// The reason keys for the chosen action (`docs/ev-bot.md` §7).
-fn reasons(table: &Table, cfg: &EvConfig, chosen: Action, cands: &[EvTerms]) -> Vec<EvReason> {
-    let Some(star) = cands.iter().find(|c| c.action == chosen) else {
-        return Vec::new();
-    };
+/// The reason keys of candidate `star` as if it were chosen (`docs/ev-bot.md`
+/// §7), against every candidate of the decision (`cands`, `star` included);
+/// `decided` is the action the bot chose.
+fn reasons(
+    table: &Table,
+    cfg: &EvConfig,
+    star: &EvTerms,
+    cands: &[EvTerms],
+    decided: Action,
+) -> Vec<Reason> {
+    let chosen = star.action;
+    let seat = |o: usize| Some(o as u8);
     let mut out = Vec::new();
     // a_safe: the candidate with the smallest DealInNow.
     let safe = cands
@@ -823,30 +868,32 @@ fn reasons(table: &Table, cfg: &EvConfig, chosen: Action, cands: &[EvTerms]) -> 
         .expect("the chosen action is a candidate");
     let stops = star.deal_in_total() - safe.deal_in_total() >= 1.0 && star.defence < safe.defence;
     if stops {
-        let seat = table
+        let big = table
             .opponents()
             .max_by(|&a, &b| {
                 let threat = |o: usize| table.sd[o] * table.pay_sd[o] * table.l_sd[o];
                 threat(a).total_cmp(&threat(b))
             })
             .expect("three opponents");
-        out.push(EvReason {
-            key: "reason.ev.stops_big_hand",
-            args: vec![
-                ("seat", seat as f64),
-                ("p_self_draw", table.sd[seat]),
-                ("points", table.pay_sd[seat]),
-            ],
-        });
+        out.push(Reason::new(
+            ReasonKey::EvStopsBigHand,
+            ReasonArgs {
+                seat: seat(big),
+                p_self_draw: Some(table.sd[big]),
+                points: Some(table.pay_sd[big]),
+                ..ReasonArgs::default()
+            },
+        ));
     }
     if star.offence > 0.0 && !stops {
-        out.push(EvReason {
-            key: "reason.ev.offence",
-            args: vec![
-                ("p_win", star.cont * star.kappa * star.p_win),
-                ("points", star.pay_me * star.shares_me),
-            ],
-        });
+        out.push(Reason::new(
+            ReasonKey::EvOffence,
+            ReasonArgs {
+                p_win: Some(star.cont * star.kappa * star.p_win),
+                points: Some(star.pay_me * star.shares_me),
+                ..ReasonArgs::default()
+            },
+        ));
     }
     let mut warn: Vec<usize> = table
         .opponents()
@@ -854,15 +901,17 @@ fn reasons(table: &Table, cfg: &EvConfig, chosen: Action, cands: &[EvTerms]) -> 
         .collect();
     warn.sort_by(|&a, &b| star.p_now[b].total_cmp(&star.p_now[a]));
     for o in warn {
-        out.push(EvReason {
-            key: "reason.ev.deal_in_now",
-            args: vec![
-                ("seat", o as f64),
-                ("p", star.p_now[o]),
-                ("points", table.pay[o]),
-                ("shares", table.l_disc[o]),
-            ],
-        });
+        out.push(Reason::new(
+            ReasonKey::EvDealInNow,
+            ReasonArgs {
+                seat: seat(o),
+                p: Some(star.p_now[o]),
+                points: Some(table.pay[o]),
+                // L_disc(o) is 0, 1 or 3.
+                shares: Some(table.l_disc[o] as u8),
+                ..ReasonArgs::default()
+            },
+        ));
     }
     for o in table.opponents() {
         let multiplied = table.l_disc[o] == 3.0
@@ -874,23 +923,41 @@ fn reasons(table: &Table, cfg: &EvConfig, chosen: Action, cands: &[EvTerms]) -> 
                 .iter()
                 .any(|c| c.action != chosen && c.liability_by_seat[o] >= 1.0);
         if multiplied || avoided {
-            out.push(EvReason {
-                key: "reason.ev.liability",
-                args: vec![("seat", o as f64)],
-            });
+            out.push(Reason::new(
+                ReasonKey::EvLiability,
+                ReasonArgs {
+                    seat: seat(o),
+                    ..ReasonArgs::default()
+                },
+            ));
         }
     }
-    // Margin against the best alternative outside the chosen action's tie
-    // (§5 example 1); 0 when every alternative ties.
-    let margin = cands
+    // Margin against the best alternative outside this candidate's tie (§5
+    // example 1); 0 when every alternative ties. For the decision's action it
+    // is measured against the alternatives below it (≥ 0, as §7 states); a
+    // candidate that was not chosen and has a better one beyond the tie margin
+    // gets a negative margin (its loss to the best).
+    let best_above = cands
         .iter()
-        .filter(|c| c.action != chosen && c.ev < star.ev - cfg.tie_margin)
-        .map(|c| star.ev - c.ev)
-        .fold(f64::INFINITY, f64::min);
-    out.push(EvReason {
-        key: "reason.ev.margin",
-        args: vec![("points", if margin.is_finite() { margin } else { 0.0 })],
-    });
+        .filter(|c| c.action != chosen && c.ev > star.ev + cfg.tie_margin)
+        .map(|c| c.ev)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let margin = if chosen != decided && best_above.is_finite() {
+        star.ev - best_above
+    } else {
+        cands
+            .iter()
+            .filter(|c| c.action != chosen && c.ev < star.ev - cfg.tie_margin)
+            .map(|c| star.ev - c.ev)
+            .fold(f64::INFINITY, f64::min)
+    };
+    out.push(Reason::new(
+        ReasonKey::EvMargin,
+        ReasonArgs {
+            points: Some(if margin.is_finite() { margin } else { 0.0 }),
+            ..ReasonArgs::default()
+        },
+    ));
     out
 }
 
