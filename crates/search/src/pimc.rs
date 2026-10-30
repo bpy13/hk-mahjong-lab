@@ -49,8 +49,18 @@
 //! is a weighted one. Standard errors use the effective sample size
 //! `(Σw)² / Σw²`. Weights are computed after all samples are in, in sample
 //! order, so the result is the same on one thread as on many.
+//!
+//! **Leaf value** (plan Task 16, `netpimc:...,leaf=value,depth=6`).
+//! [`pimc_with_leaf`] stops each rollout after `depth` discards (any seat's) and
+//! scores the position with a network's four-seat value head instead of playing
+//! to the end ([`LeafValue`]). The value head predicts each seat's final points,
+//! log-scaled as in training (`sign(x) · ln(1 + |x| / 8)`); the leaf undoes the
+//! scaling. A rollout that reaches the end of the hand before the leaf is scored
+//! by its real result. Win, deal-in and draw rates count only the rollouts that
+//! ended before their leaf, so they are lower bounds under `leaf=value`.
 
 use crate::bots::{best_discard, Bot, Fast, Metric, Value};
+use crate::net::Mlp;
 use crate::view::SeatView;
 use crate::world::sample_world_from;
 pub use crate::world::WorldSampler;
@@ -60,6 +70,7 @@ use mahjong_tiles::Tile;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use rayon::prelude::*;
+use std::sync::Arc;
 use std::time::Duration;
 // `std::time::Instant` panics in the browser; `web_time` is `Instant` on native.
 use web_time::Instant;
@@ -168,6 +179,70 @@ impl Sample {
             deal_in: r.wins.iter().any(|w| !w.self_drawn && w.paid_by[seat] > 0),
             draw: r.wins.is_empty(),
         }
+    }
+}
+
+/// Scale of the value head's log transform (idea 5d; `labels.value_targets`).
+pub const VALUE_LOG_SCALE: f64 = 8.0;
+
+/// Leaf evaluation for [`pimc_with_leaf`]: after `depth` discards, the
+/// network's `value` output for the searching seat replaces the rest of the
+/// rollout.
+#[derive(Clone, Debug)]
+pub struct LeafValue {
+    pub net: Arc<Mlp>,
+    /// Discards (by any seat) played in the rollout before the leaf.
+    pub depth: usize,
+}
+
+impl LeafValue {
+    /// A leaf evaluator; `Err` if `net` has no four-wide `value` output.
+    pub fn new(net: Arc<Mlp>, depth: usize) -> Result<LeafValue, String> {
+        match net.output("value") {
+            Some(r) if r.len() == 4 => Ok(LeafValue { net, depth }),
+            _ => Err("leaf=value needs a network with a 4-wide `value` output (MJNN v3)".into()),
+        }
+    }
+
+    /// The expected final points of `seat` in `state` (a hand in progress),
+    /// read from the value head of the player to act (relative seats).
+    ///
+    /// # Panics
+    /// Panics if the hand is over.
+    pub fn points(&self, state: &State, seat: usize) -> f64 {
+        let me = state.current_player().expect("hand in progress");
+        let out = self.net.forward_state(state);
+        let range = self.net.output("value").expect("checked in new");
+        let y = out[range.start + (seat + 4 - me) % 4] as f64;
+        y.signum() * VALUE_LOG_SCALE * y.abs().exp_m1()
+    }
+
+    /// Plays `state` with `rollout` until the hand ends or `depth` discards
+    /// have been made, then scores it for `seat`.
+    fn play<P: Policy<State>, R: rand::Rng + ?Sized>(
+        &self,
+        state: &mut State,
+        rollout: &P,
+        rng: &mut R,
+        seat: usize,
+    ) -> Sample {
+        let mut legal = Vec::new();
+        let mut discards = 0;
+        while state.current_player().is_some() {
+            if discards >= self.depth {
+                return Sample {
+                    points: self.points(state, seat),
+                    ..Sample::default()
+                };
+            }
+            state.legal_actions(&mut legal);
+            let a = rollout.choose(state, &legal, rng);
+            if matches!(a, Action::Discard(_)) {
+                discards += 1;
+            }
+            state.apply(a);
+        }
+        Sample::of(state, seat)
     }
 }
 
@@ -370,6 +445,24 @@ pub fn pimc_with_sampler<P: Policy<State>>(
     baseline: Action,
     rollout: &P,
 ) -> Analysis {
+    pimc_with_leaf(state, config, sampler, candidates, baseline, rollout, None)
+}
+
+/// [`pimc_with_sampler`] whose rollouts stop at `leaf`'s depth and take the
+/// network's value there (see the module docs); `None` plays every rollout to
+/// the end, exactly as [`pimc_with_sampler`].
+///
+/// # Panics
+/// Panics if the hand is over or `baseline` is not among `candidates`.
+pub fn pimc_with_leaf<P: Policy<State>>(
+    state: &State,
+    config: &PimcConfig,
+    sampler: &WorldSampler,
+    candidates: Vec<Action>,
+    baseline: Action,
+    rollout: &P,
+    leaf: Option<&LeafValue>,
+) -> Analysis {
     let start = Instant::now();
     let seat = state.current_player().expect("hand in progress");
     let base = candidates
@@ -394,8 +487,13 @@ pub fn pimc_with_sampler<P: Policy<State>>(
                     .map(|&a| {
                         let mut s = world.clone();
                         s.apply(a);
-                        play_out(&mut s, rollout, &mut rng);
-                        Sample::of(&s, seat)
+                        match leaf {
+                            Some(l) => l.play(&mut s, rollout, &mut rng, seat),
+                            None => {
+                                play_out(&mut s, rollout, &mut rng);
+                                Sample::of(&s, seat)
+                            }
+                        }
                     })
                     .collect();
                 (log_w, row)

@@ -47,8 +47,8 @@ pub use ev::{
 };
 pub use net::{Mlp, NetPolicy};
 pub use pimc::{
-    pimc, pimc_anchored, pimc_with, shortlist, shortlist_anchored, ActionStats, Analysis,
-    PimcConfig, Rollout,
+    pimc, pimc_anchored, pimc_with, pimc_with_leaf, shortlist, shortlist_anchored, ActionStats,
+    Analysis, LeafValue, PimcConfig, Rollout,
 };
 pub use solo::{solo, SoloStats};
 pub use tournament::{

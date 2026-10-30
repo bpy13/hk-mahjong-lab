@@ -52,6 +52,22 @@ move beats it by two standard errors, so a weaker anchor makes a weaker searcher
 labels with Task 7's spec (`anchor=value,rollout=fast`), which its job already chose
 (`runs/labels-job/teacher-used.txt`).
 
+## 3. The distilled network and the network inside the search (plan Tasks 15–16)
+
+**Question.** Does a suit-shared CNN copied from the teacher's 1 M labelled decisions
+play as well as the teacher, and does putting it inside PIMC beat the bare network and
+the teacher? Brian's rule (2026-10-30): "use teacher unless distilled model wins
+significantly": a challenger replaces the teacher only if challenger minus teacher has
+a 95 % interval above 0.
+
+**Pending.** The job `experiments/phase4_job.ps1` (`runs/phase4/`) starts when Task 13's
+labels are complete, distils on the GPU (12 epochs), plays the bare int8 network against
+three `value` bots on Task 7's 1,000 walls (`runs/matches/cnn-distill.json`), then the
+24-seating match {bare CNN, CNN + PIMC-48, CNN + PIMC-48 leaf value at depth 6,
+belief-PIMC-64} on 400 walls (`runs/matches/netpimc.json`). It writes the rule's verdict
+to `runs/matches/netpimc-verdict.md`. Slice test so far (540 k rows): held-out agreement
+with the teacher's move 0.910, int8 vs fp32 top-1 0.998.
+
 ## 2. Belief-driven determinization (plan Task 7, AC4)
 
 **Question.** Does PIMC-64 get stronger when each sampled world draws the opponents'

@@ -31,14 +31,18 @@
 //! * `netpimc:path=models/x.mjnn,samples=32,candidates=4,rollout=fast`: network-
 //!   guided search. The network proposes the candidates and is the baseline that
 //!   PIMC must beat; rollouts use the `fast` bot or (`rollout=net`) the network
-//!   in every seat.
+//!   in every seat. `belief=` (and the other PIMC options) draw the
+//!   determinizations as for `pimc`; `leaf=value,depth=6` stops each rollout
+//!   after 6 discards and scores it with the network's value head
+//!   ([`crate::pimc::LeafValue`]; needs an MJNN v3 network; `leaf=rollout`, the
+//!   default, plays to the end).
 
 use crate::belief::BeliefModel;
 use crate::bots::{Bot, Fast, Value};
 use crate::ev::{load_belief, Belief, EvBot, EvConfig, HeuristicBelief};
 use crate::net::{top_actions, Mlp, NetPolicy};
-use crate::pimc::Rollout;
-use crate::pimc::{pimc, pimc_anchored, pimc_sampled, pimc_with_sampler, Analysis, PimcConfig};
+use crate::pimc::{pimc, pimc_anchored, pimc_sampled, pimc_with_leaf, Analysis, PimcConfig};
+use crate::pimc::{LeafValue, Rollout};
 pub use crate::tournament::{duplicate, AgentResult, TournamentResult};
 use crate::world::{default_tilt, WorldSampler, BELIEF_DRAWS};
 use mahjong_games::{Game, Policy};
@@ -74,8 +78,13 @@ pub enum Agent {
         config: PimcConfig,
         net_rollouts: bool,
         sampler: WorldSampler,
+        /// `leaf=value`: rollouts stop at the leaf and take the value head.
+        leaf: Option<LeafValue>,
     },
 }
+
+/// Default `depth=` for `netpimc:...,leaf=value` (plan Task 16).
+pub const DEFAULT_LEAF_DEPTH: usize = 6;
 
 /// Parses `k=v` options; `apply` handles each pair.
 fn options(
@@ -296,6 +305,8 @@ impl Agent {
                 let mut c = PimcSpec::new(32, 4);
                 let mut path = None;
                 let mut net_rollouts = false;
+                let mut leaf_value = false;
+                let mut depth: Option<usize> = None;
                 options(opts, |k, v| {
                     if c.option(k, v)? {
                         return Ok(());
@@ -304,16 +315,37 @@ impl Agent {
                         ("path", _) => path = Some(v.to_string()),
                         ("rollout", "net") => net_rollouts = true,
                         ("rollout", "fast") => net_rollouts = false,
+                        ("leaf", "value") => leaf_value = true,
+                        ("leaf", "rollout") => leaf_value = false,
+                        ("depth", _) => {
+                            depth = Some(
+                                v.parse()
+                                    .map_err(|_| format!("bad number {v:?} for depth"))?,
+                            )
+                        }
                         _ => return Err(format!("unknown netpimc option {k}={v}")),
                     }
                     Ok(())
                 })?;
+                if depth.is_some() && !leaf_value {
+                    return Err("depth= needs leaf=value".to_string());
+                }
                 let (config, sampler) = c.finish()?;
+                let net = load_net(path)?;
+                let leaf = if leaf_value {
+                    Some(LeafValue::new(
+                        Arc::clone(&net.0),
+                        depth.unwrap_or(DEFAULT_LEAF_DEPTH),
+                    )?)
+                } else {
+                    None
+                };
                 Ok(Agent::NetPimc {
-                    net: load_net(path)?,
+                    net,
                     config,
                     net_rollouts,
                     sampler,
+                    leaf,
                 })
             }
             "ev" => {
@@ -398,6 +430,7 @@ impl Agent {
                 config,
                 net_rollouts,
                 sampler,
+                leaf,
             } => {
                 if legal
                     .iter()
@@ -408,16 +441,18 @@ impl Agent {
                 let config = seeded(config, rng);
                 let candidates = top_actions(&net.0, state, config.candidates.max(1));
                 let baseline = candidates[0];
+                let leaf = leaf.as_ref();
                 let a = if *net_rollouts {
-                    pimc_with_sampler(state, &config, sampler, candidates, baseline, net)
+                    pimc_with_leaf(state, &config, sampler, candidates, baseline, net, leaf)
                 } else {
-                    pimc_with_sampler(
+                    pimc_with_leaf(
                         state,
                         &config,
                         sampler,
                         candidates,
                         baseline,
                         &Rollout::for_seat(state.current_player().expect("to act")),
+                        leaf,
                     )
                 };
                 Some((a, config.z))
