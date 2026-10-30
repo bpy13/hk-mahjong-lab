@@ -42,6 +42,18 @@ with their defaults.
   lowest after 2 epochs while move agreement kept rising to 7 epochs. The full run uses 12
   epochs, a compromise. Default: keep; if the leaf-value search loses, a later run can
   train the value head with fewer epochs or more dropout.
+- **Task 17: PPO throughput 34 K hands per hour (bar 100 K).** Measured in a 3-minute GPU
+  smoke from a random network; Rust feature encoding is the limit. Proposal §9 says: smaller
+  CNN, frozen-CNN baseline, accept about 5 M hands. Default: rerun the 60-minute throughput
+  test from `models/cnn-distill.pt` (shorter hands) before Task 18; if still below 100 K,
+  make `features::encode` cheaper first (its faan-aware acceptance per discard), then apply
+  §9.
+- **Search RNG moved to ChaCha8 (hk-games D28, 2026-10-30).** PIMC samples, `solo`, the
+  tournament walls and bootstrap now use `ChaCha8Rng`, and random-bot draws use u32 ranges,
+  so the app's WebAssembly `expert` matches the server. Effect here: every tournament now
+  deals different walls for the same seed than before; earlier results (Tasks 7, 10, 11)
+  stay valid but cannot be replayed bit for bit with today's code. The labeller keeps
+  `SmallRng` (`labels.rs`) so the running label directory stays resumable.
 - **Brian's rule (2026-10-30), how it is applied.** "Use teacher unless distilled model
   wins significantly": the job compares each challenger (bare CNN, CNN + PIMC-48, CNN +
   PIMC-48 leaf value) with belief-PIMC-64 in the same 24-seating match, and a challenger

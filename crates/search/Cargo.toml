@@ -10,6 +10,7 @@ mahjong-games.workspace = true
 mahjong-hk.workspace = true
 mahjong-analysis.workspace = true
 rand.workspace = true
+rand_chacha.workspace = true
 rayon.workspace = true
 web-time.workspace = true
 

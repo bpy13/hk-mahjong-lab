@@ -62,7 +62,8 @@ a 95 % interval above 0.
 
 **Pending.** The job `experiments/phase4_job.ps1` (`runs/phase4/`) starts when Task 13's
 labels are complete, distils on the GPU (12 epochs), plays the bare int8 network against
-three `value` bots on Task 7's 1,000 walls (`runs/matches/cnn-distill.json`), then the
+three `value` bots on 1,000 walls (`runs/matches/cnn-distill.json`; seeds 7000–7019, but
+since the search RNG moved to ChaCha8 these are other walls than Task 7's), then the
 24-seating match {bare CNN, CNN + PIMC-48, CNN + PIMC-48 leaf value at depth 6,
 belief-PIMC-64} on 400 walls (`runs/matches/netpimc.json`). It writes the rule's verdict
 to `runs/matches/netpimc-verdict.md`. Slice test so far (540 k rows): held-out agreement

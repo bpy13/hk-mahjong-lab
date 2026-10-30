@@ -667,6 +667,17 @@ paired by wall, with a bootstrap 95 % interval.
   - Notes: the baseline agent for the paired reward is the teacher (`netpimc` is too slow;
     use the distilled CNN itself frozen, or `ev` — the faster of the two that scores higher
     in Phase 2). Machine time of the throughput run: **1 GPU-h**.
+  - Status (2026-10-30): built (`python/mahjong/rl/ppo_cnn.py`, `python/tests/test_ppo_cnn.py`,
+    `HkVecEnv` gains `paired=`, `baseline=`, `set_min_faan`, `finished(detail=True)` with
+    per-pattern wins, `observed_roles`, `agent_actions`; defaults unchanged, old `ppo.py`
+    works). Test: paired reward exactly 0 for three same-agent setups, critic sums to zero,
+    a 40-second 16-env CPU smoke passes all curriculum stages, checkpoint, `--resume`
+    continues the iteration count. A 3-minute GPU smoke from a random network (256 envs,
+    paired): **33,744 learner hands per hour** (about 67 K simulated); the limit is Rust
+    feature encoding (0.93 ms per position on one thread), not the GPU. That is below 100 K,
+    so the §9 row "throughput 10× below" applies (open item). Not built: the 24-seating
+    evaluation with the teacher (it evaluates 4 seatings vs `value`). Not ticked: the 60-minute
+    throughput run from `models/cnn-distill.pt` waits for Task 15.
 
 - [ ] **Task 18: Main PPO run, second seed, two ablations** (GPU, long)
   - Files: create `runs/ppo/main/`, `runs/ppo/seed2/`, `runs/ppo/ablate-5a/`,
@@ -699,7 +710,14 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 6 – The comparison, docs, handover (opus)
 
-- [ ] **Task 20: Reason keys for the two designs, in the engine's vocabulary** `[parallel-ok]`
+- [x] **Task 20: Reason keys for the two designs, in the engine's vocabulary** `[parallel-ok]`
+  - Status (2026-10-30): done. `crates/search/src/reasons.rs` (`ReasonKey`, `ReasonArgs`,
+    `Reason`; `plan_target`, `plan_target_class`, `expected_loss`, `expected_loss_delta` for
+    the network path), `EvTerms::reasons()` for every candidate (returns `Vec<Reason>`, keys
+    with their arguments), `tests/reasons.rs` (8 tests: key pattern, the three EV positions'
+    keys, one thread = pool). `EvDecision::reasons` keeps its type. Keys:
+    `reason.ev.{offence,deal_in_now,stops_big_hand,liability,margin}`, `reason.plan.target`,
+    `reason.risk.expected_loss` (shown when ≥ 0.5 points).
   - Files: modify `crates/search/src/ev.rs` (`EvTerms::reasons() -> Vec<ReasonKey>` with the
     five `reason.ev.*` keys of Task 8), create `crates/search/src/reasons.rs` (a plain enum
     + args struct, no text; `features`-delta reasons for the network path: the plan head's

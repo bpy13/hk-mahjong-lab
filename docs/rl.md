@@ -126,7 +126,7 @@ agreement levelled off near 0.90 after about 7 epochs, while the held-out value 
 rose after epoch 2 (the value target is one noisy hand result shared by about 22 rows).
 
 `experiments/phase4_build.py` then runs `--stage evaluate` (the bare int8 network vs
-three `value` bots on Task 7's 1,000 walls, `runs/matches/cnn-distill.json`) and
+three `value` bots on 1,000 walls, seeds 7000–7019, `runs/matches/cnn-distill.json`) and
 `--stage netpimc` (Task 16: bare network, network + PIMC-48 with full rollouts, network
 + PIMC-48 with the value head at depth 6, and belief-PIMC-64, all 24 seatings;
 `runs/matches/netpimc.json` and `netpimc-verdict.{json,md}`, which apply Brian's rule:

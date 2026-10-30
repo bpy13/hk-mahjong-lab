@@ -23,9 +23,9 @@
 use crate::agent::Agent;
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{HandResult, RuleSet, State};
-use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -122,7 +122,7 @@ pub fn tournament(agents: &[Agent; 4], config: &TournamentConfig) -> Tournament 
             // One generator per wall, used for the shuffle and then by the agents
             // through the seatings in order (as `duplicate` always did).
             let mut rng =
-                SmallRng::seed_from_u64(seed ^ (d as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+                ChaCha8Rng::seed_from_u64(seed ^ (d as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
             let mut wall = State::all_tiles(&rules);
             wall.shuffle(&mut rng);
             let mut out = Vec::with_capacity(seatings.len());
@@ -304,7 +304,7 @@ impl Tournament {
         let walls = self.wall_scores();
         let w = walls.len();
         let b = self.config.bootstrap;
-        let mut rng = SmallRng::seed_from_u64(self.config.seed ^ 0xB007_57A9_0000_0001);
+        let mut rng = ChaCha8Rng::seed_from_u64(self.config.seed ^ 0xB007_57A9_0000_0001);
         let mut agent_draws: Vec<Vec<f64>> = (0..4).map(|_| Vec::with_capacity(b)).collect();
         let pairs_idx: Vec<(usize, usize)> = (0..4)
             .flat_map(|a| (a + 1..4).map(move |c| (a, c)))
@@ -315,7 +315,7 @@ impl Tournament {
             for _ in 0..b {
                 let mut m = [0.0f64; 4];
                 for _ in 0..w {
-                    let s = &walls[rng.gen_range(0..w)];
+                    let s = &walls[rng.gen_range(0..w as u32) as usize];
                     for a in 0..4 {
                         m[a] += s[a];
                     }

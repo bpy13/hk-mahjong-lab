@@ -11,9 +11,9 @@ use crate::view::SeatView;
 use mahjong_analysis::shanten;
 use mahjong_hk::{score_win, WinContext};
 use mahjong_tiles::{Tile, TileCounts};
-use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 
 /// Results for one discard.
@@ -38,7 +38,8 @@ pub fn solo(view: &SeatView, draws: usize, samples: usize, seed: u64) -> Vec<Sol
             let mut faan = 0u64;
             let mut used = 0u64;
             for i in 0..samples {
-                let mut rng = SmallRng::seed_from_u64(seed ^ ((i as u64) << 8) ^ d.index() as u64);
+                let mut rng =
+                    ChaCha8Rng::seed_from_u64(seed ^ ((i as u64) << 8) ^ d.index() as u64);
                 if let Some((f, k)) = one_future(view, d, draws, &mut rng) {
                     wins += 1;
                     faan += f as u64;
@@ -67,7 +68,7 @@ fn one_future(
     view: &SeatView,
     discard: Tile,
     draws: usize,
-    rng: &mut SmallRng,
+    rng: &mut ChaCha8Rng,
 ) -> Option<(u8, usize)> {
     let mut pool: Vec<Tile> = view.unseen.tiles();
     pool.shuffle(rng);

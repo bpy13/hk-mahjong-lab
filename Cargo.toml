@@ -13,6 +13,8 @@ mahjong-hk = { path = "crates/hk" }
 mahjong-analysis = { path = "crates/analysis" }
 mahjong-search = { path = "crates/search" }
 rand = { version = "0.8", features = ["small_rng"] }
+# The same random stream on wasm32 and 64-bit (SmallRng differs; hk-games D28).
+rand_chacha = "0.3"
 proptest = "1.5"
 rayon = "1.10"
 criterion = { version = "0.5", default-features = false }

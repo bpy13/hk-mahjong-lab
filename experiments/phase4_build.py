@@ -7,7 +7,8 @@ Stages (each resumes: finished work is skipped, chunked matches skip finished ch
                  ``models/cnn-distill-fp32.mjnn``, ``models/cnn-distill.mjnn`` (int8) and
                  ``runs/distill/result.json``.
 2. ``evaluate``  the bare int8 network vs three ``value`` bots, 1,000 walls x 4 seatings
-                 (Task 7's walls, seeds 7000-7019): ``runs/matches/cnn-distill.json``
+                 (seeds 7000-7019; since the ChaCha8 change these are not Task 7's
+                 walls): ``runs/matches/cnn-distill.json``
                  (AC7 bars 1 and 2).
 3. ``netpimc``   the 24-seating match {bare CNN, CNN + PIMC-48 (full rollouts), CNN +
                  PIMC-48 (leaf value, depth 6), belief-PIMC-64 (Task 7's teacher)} on

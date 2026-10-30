@@ -99,7 +99,9 @@ pub struct UniformRandom;
 
 impl<G: Game> Policy<G> for UniformRandom {
     fn choose<R: Rng + ?Sized>(&self, _state: &G, legal: &[G::Action], rng: &mut R) -> G::Action {
-        legal[rng.gen_range(0..legal.len())]
+        // A u32 draw: rand 0.8 reads 32 bits for a usize range on wasm32 and 64 on
+        // native, so a usize draw would pick different moves in the app (hk-games D28).
+        legal[rng.gen_range(0..legal.len() as u32) as usize]
     }
 }
 
