@@ -49,6 +49,8 @@ whenever it says "complete", the engine's scorer agrees the hand can be declared
 | `fast` | as `value`, no acceptance counting | when closer | the rollout policy, ~1.7 ms per hand for all four seats |
 | `ev` | the largest expected points: offence (target value table) minus defence (deal-in now, opponents' self-draws, the fold plan, 12-tile liability) | when the claim's EV beats passing by more than `tie_margin` | Brian's B15 design, `docs/ev-bot.md`, `crates/search/src/ev.rs`. Opponents come from a `Belief`; without `belief=` it uses `HeuristicBelief` (the danger tables, §8). `ev:belief=<path>` errors until Task 5's loader exists. Options: `horizon`, `clip`, `tie_margin`, `r_disc`, `four_meld_win`, `feed_clip`, `warn_p`, `fold=safest`, `floor=target\|none`. `ev_terms(state, spec)` in Python returns every term. ~0.4 ms per decision |
 
+Reason keys (`crates/search/src/reasons.rs`, keys and numbers only, no text): the `ev` bot's `reason.ev.offence`, `reason.ev.deal_in_now`, `reason.ev.stops_big_hand`, `reason.ev.liability`, `reason.ev.margin` (`EvTerms::reasons()`, per candidate); the network path's `reason.plan.target` (CNN target-head class: `kind`, `suit`, `structure`, `p`) and `reason.risk.expected_loss` (`points` over the safest discard, `p`).
+
 ## 3. Danger model (`crates/search/src/danger.rs`)
 
 Fitted to simulated games, from public information only. For each opponent a
