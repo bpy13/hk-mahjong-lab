@@ -128,6 +128,55 @@ off it. Advantages are final points minus the value estimate (rewards come only 
 the end of a hand, so no discounting is needed). Clipped objective (ε = 0.2),
 3 epochs per iteration, entropy bonus 0.005.
 
+**PPO for the CNN with the proposal's additions** (`ppo_cnn.py`, build run, plan
+Task 17). Clipped PPO on the suit-shared CNN, inference batched over all games on
+the GPU. Additions (ideas from `docs/research/hard-problems.md`):
+
+* *Paired reward (5a)*, default: `HkVecEnv(paired=True)` plays every wall twice,
+  copy 0 with the learner in seat `i % 4`, copy 1 with the baseline in that seat;
+  the other seats are the learner's network (not trained on). Until the two copies
+  first differ they share every move, so the other seats' sampled moves are common
+  to both (common random numbers). Reward: `sq(points − baseline points)` of that
+  seat. Baseline: the frozen init network, greedy (default), or `--baseline ev`.
+  `--no-paired-reward`: the learner plays all four seats, advantage `sq(points) − V`.
+* *Oracle four-seat critic (5b, 2b)*: the value head also reads the hidden oracle
+  block; four relative seats, summing to zero. The policy never reads the oracle.
+* *Log-scaled payouts (5d)*: `sq(x) = sign(x)·log(1 + |x|/8)` for rewards and values.
+* *Curriculum (1b)*: new deals use min_faan 0, then 1 from 20 % of the run, then 3
+  from 40 % (`HkVecEnv.set_min_faan`; `--no-curriculum` keeps 3).
+* *Target head (1a)*: trained on the target class of the hand its seat finally won
+  with (`finished(detail=True)` gives each winner's class); `--no-target-head`.
+* *Per-pattern KL anchor (1c)*: KL(teacher ‖ student) toward the init network on
+  decisions where their target argmax differ, weight 0.05 × a factor per pattern
+  group (plan kind × structure). The factor grows ×1.25 per iteration (up to ×16)
+  while the learner's win share with that pattern is below 80 % of the teacher's at
+  the same min_faan, else decays to ×1. With `--init none` the anchor is off.
+
+```powershell
+python -m mahjong.rl.ppo_cnn --init models/cnn-distill.pt --hours 48 --out runs/ppo/main
+python -m mahjong.rl.ppo_cnn --init none --minutes 3 --out runs/ppo/smoke --device cuda
+```
+
+Other flags: `--seed`, `--envs` (256), `--baseline init|ev`, `--hands-per-iter`
+(1024), `--eval-minutes` (120), `--eval-walls` (200), `--ckpt-minutes` (30),
+`--anchor-weight`, `--torch-threads` (1: more PyTorch CPU threads fight the Rust
+environments' threads and slow both). Output in `--out`:
+
+* `ckpt-<iteration>.pt` every 30 minutes and at the end (network and optimizer; the
+  last three are kept), `state.json` (iteration, hands, elapsed time and budget,
+  curriculum stage, anchor factors, pattern counts, the checkpoint name);
+* `teacher.pt` (the frozen start), `final.pt` and `final.mjnn` (fp32) at the end;
+* `log.json`: one entry per iteration (hands, hands per hour, losses, draw rate,
+  mean paired difference, learner pattern shares) and, every `--eval-minutes`, an
+  `eval` entry: `--eval-walls` walls × 4 seatings against three `value` bots in
+  Rust (points, win, deal-in and draw rates, pattern shares).
+
+`--resume` continues from `state.json`'s checkpoint: same iteration count, hands,
+elapsed time and curriculum; `--minutes`/`--hours` may be left out (the saved
+budget is used) or given to change it. Hands in progress at the stop are lost.
+Hands per hour count learner games (in paired mode each is played twice). Feature
+encoding in Rust (`observe`) is the bottleneck, not the GPU.
+
 **Network + search** (`netpimc` agent). The network proposes the candidates
 and its top choice is the baseline that PIMC must beat by two standard errors of
 the paired difference (as in Phase 1). Rollouts are played either by the `fast`

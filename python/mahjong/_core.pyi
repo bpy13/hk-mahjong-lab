@@ -5,7 +5,7 @@ A tile is an ``int`` index (docs/rules/hk.md §1): ``1m``–``9m`` = 0–8,
 ``F1``–``F4`` = 34–37, ``S1``–``S4`` = 38–41.
 """
 
-from typing import Any
+from typing import Any, Literal, overload
 
 __version__: str
 
@@ -151,11 +151,45 @@ def teacher_data(
     """Teacher self-play decisions: features, oracle, masks, actions, returns, hand index."""
 
 class HkVecEnv:
-    """Many hands stepped in lockstep for learning."""
+    """Many hands stepped in lockstep for learning.
+
+    ``opponents=None``: the learner plays every seat; otherwise it plays seat
+    ``i % 4`` of game ``i`` against the agent spec. ``paired=True`` (idea 5a) plays
+    every wall twice, the second copy with ``baseline`` (an agent spec, or Python
+    when None: role 1 in ``observed_roles``) in the learner's seat; with
+    ``opponents=None`` the other seats of both copies are played from Python
+    (role 2, not trained on).
+    """
 
     def __init__(
-        self, n: int, seed: int = 0, opponents: str | None = None, **rules: object
+        self,
+        n: int,
+        seed: int = 0,
+        opponents: str | None = None,
+        paired: bool = False,
+        baseline: str | None = None,
+        **rules: object,
     ) -> None: ...
-    def observe(self) -> tuple[bytes, bytes, bytes, list[int], list[int]]: ...
+    @property
+    def min_faan(self) -> int: ...
+    @property
+    def paired(self) -> bool: ...
+    def set_min_faan(self, min_faan: int) -> None:
+        """Minimum faan of hands dealt from now on (the curriculum)."""
+    def observe(self) -> tuple[bytes, bytes, bytes, list[int], list[int]]:
+        """``(features, oracle, masks, env_ids, seats)`` of games waiting on Python."""
+    def observed_roles(self) -> tuple[bytes, bytes]:
+        """``(sides, roles)`` of the last observe, one byte per decision: copy 0/1; role
+        0 learner, 1 baseline, 2 untrained seat. Call it before ``step``."""
+    def agent_actions(self, spec: str, seed: int = 0) -> list[int]:
+        """The moves agent ``spec`` would choose in each observed game."""
     def step(self, actions: list[int]) -> None: ...
+    @overload
     def finished(self) -> list[tuple[int, list[int], int]]: ...
+    @overload
+    def finished(self, detail: Literal[False]) -> list[tuple[int, list[int], int]]: ...
+    @overload
+    def finished(self, detail: Literal[True]) -> list[dict[str, Any]]:
+        """Per finished game: ``env``, ``seed``, ``min_faan``, ``deltas``, ``learner``,
+        ``wins`` [(seat, target_class, faan, pattern_bits)], and in paired mode
+        ``paired``, ``baseline_deltas``, ``baseline_wins``."""
