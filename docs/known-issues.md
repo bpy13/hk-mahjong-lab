@@ -4,6 +4,12 @@ Limits and traps found so far, newest first within each section.
 
 ## Windows build and environment
 
+- **PPO rollouts stall at normal priority when other jobs fill every core.** The rollout
+  wakes its Rust threads for a short burst after each GPU call; at equal priority each
+  wake-up waits for a time slice. On 2026-10-30 the same code gave 47 K learner hands per
+  hour at normal priority and 219 K at above normal, and a 5× cheaper encoding made no
+  difference at normal priority. Measure throughput at both priorities
+  (`ppo_cnn --priority above_normal`), and compare builds back to back.
 - **The env's own cargo cannot link.** `environment.yml` installs conda-forge `rust`
   (`envs\mahjong\Library\bin\cargo.exe`, GNU toolchain). On Windows its link step fails with
   `dlltool.exe` not found. Fix: put rustup's MSVC toolchain first on `PATH`

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from mahjong._core import HkVecEnv
 from mahjong.rl.cnn import ORACLE_LEN, STATE_LEN, CnnConfig, SuitCNN
-from mahjong.rl.ppo_cnn import force_wins, load_init, main, squash, stage_of
+from mahjong.rl.ppo_cnn import force_wins, load_init, main, set_priority, squash, stage_of
 
 # PyTorch's OpenMP threads and the environments' rayon threads slow each other
 # down badly on a shared CPU (see ppo_cnn.Trainer).
@@ -122,6 +122,16 @@ def test_helpers() -> None:
     assert stage_of(0.3, True) == (1, 1)
     assert stage_of(0.5, True) == (2, 3)
     assert stage_of(0.1, False) == (2, 3)
+
+
+def test_set_priority() -> None:
+    import sys
+
+    on_windows = sys.platform == "win32"
+    try:
+        assert set_priority("above_normal") is on_windows
+    finally:
+        assert set_priority("normal") is on_windows
 
 
 def test_smoke_run_checkpoints_and_resume(tmp_path: Path) -> None:

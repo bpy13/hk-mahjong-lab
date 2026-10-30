@@ -18,10 +18,10 @@
 
 use crate::danger::Danger;
 use crate::view::SeatView;
-use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
+use mahjong_analysis::{faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
 use mahjong_hk::{Event, State};
-use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
+use mahjong_tiles::{Suit, Tile, TileCounts, NUM_KINDS};
 
 /// Number of 34-wide tile planes.
 pub const PLANES: usize = 26;
@@ -36,6 +36,60 @@ const INITIAL_WALL: f32 = 91.0;
 
 fn plane(out: &mut [f32], p: usize) -> &mut [f32] {
     &mut out[p * NUM_KINDS..(p + 1) * NUM_KINDS]
+}
+
+/// Whether a copy of `t` added to `hand` would sit alone: no copy of `t` held
+/// and, for a suited tile, no tile within two places of it in its suit. Such a
+/// tile joins no meld, pair or partial meld, so no group's shape counts change.
+fn isolated(hand: &TileCounts, t: Tile) -> bool {
+    if hand[t] > 0 {
+        return false;
+    }
+    let i = t.index() as usize;
+    if t.is_honour() {
+        return true;
+    }
+    let (start, pos) = (i / 9 * 9, i % 9);
+    (pos.saturating_sub(2)..=(pos + 2).min(8)).all(|p| hand.0[start + p] == 0)
+}
+
+/// The suit with the most tiles, as `analysis::targets` picks its flush suit
+/// (`max_by_key`: the last of equals).
+fn best_suit(all: &TileCounts) -> Suit {
+    Suit::ALL
+        .into_iter()
+        .max_by_key(|&s| all.suit_counts(s).iter().map(|&c| c as u32).sum::<u32>())
+        .expect("three suits")
+}
+
+/// [`mahjong_analysis::acceptance`] for a hand whose measure is already known
+/// (`base = metric(hand)`), skipping the tiles for which `unchanged(t)` proves
+/// that adding `t` does not lower the measure below `base`. Same count, fewer
+/// evaluations: the faan-aware acceptance was 85 % of [`encode`]'s time.
+/// Returns the count and the tiles that lower the measure (bit = tile index).
+fn acceptance_given(
+    hand: &TileCounts,
+    unseen: &TileCounts,
+    base: i8,
+    metric: impl Fn(&TileCounts) -> i8,
+    unchanged: impl Fn(Tile) -> bool,
+) -> (u32, u64) {
+    debug_assert_eq!(base, metric(hand));
+    let mut c = *hand;
+    let mut n = 0;
+    let mut lowering = 0u64;
+    for t in Tile::all_kinds() {
+        if unseen[t] == 0 || c[t] >= 4 || unchanged(t) {
+            continue;
+        }
+        c.add(t);
+        if metric(&c) < base {
+            n += unseen[t] as u32;
+            lowering |= 1 << t.index();
+        }
+        c.remove(t);
+    }
+    (n, lowering)
 }
 
 /// Encodes the decision of the player to act into `out` (length [`STATE_LEN`]).
@@ -116,10 +170,16 @@ pub fn encode(state: &State, out: &mut [f32]) {
         }
     }
     // Shanten, acceptance and target faan after each discard (turn decisions).
+    // The acceptance counts skip the tiles that provably leave the measure
+    // unchanged (see `acceptance_given`); the golden-hash tests check that the
+    // output is the same as with `analysis::acceptance`.
     let n_melds = view.melds.len();
     let scale = |s: i8| ((s as f32 + 1.0) / 9.0).clamp(0.0, 1.0);
     let in_turn = state.phase_name() == "turn";
     let mut faan_after = [i8::MAX; NUM_KINDS];
+    // Per discard: plain shanten after it and the tiles that would lower it.
+    let mut plain_after = [i8::MAX; NUM_KINDS];
+    let mut plain_lowering = [0u64; NUM_KINDS];
     for t in Tile::all_kinds() {
         let i = t.index() as usize;
         if !in_turn || view.concealed[t] == 0 {
@@ -129,9 +189,18 @@ pub fn encode(state: &State, out: &mut [f32]) {
         }
         let mut h = view.concealed;
         h.remove(t);
-        plane(out, 21)[i] = scale(shanten(&h, n_melds));
-        let acc = acceptance(&h, &view.unseen, |x| shanten(x, n_melds));
+        let base = shanten(&h, n_melds);
+        plane(out, 21)[i] = scale(base);
+        let (acc, lowering) = acceptance_given(
+            &h,
+            &view.unseen,
+            base,
+            |x| shanten(x, n_melds),
+            |x| isolated(&h, x) && !(n_melds == 0 && x.is_terminal_or_honour()),
+        );
         plane(out, 23)[i] = (acc as f32 / 60.0).min(1.0);
+        plain_after[i] = base;
+        plain_lowering[i] = lowering;
         let fs = faan_shanten(
             &HandView {
                 concealed: &h,
@@ -149,6 +218,12 @@ pub fn encode(state: &State, out: &mut [f32]) {
     }
     let best = faan_after.iter().copied().min().unwrap_or(i8::MAX);
     if in_turn && best < UNREACHABLE {
+        // What the faan-aware measure's list of plans reads besides the shapes:
+        // the suit with the most tiles (melds included) and the honour count.
+        let mut melded = TileCounts::new();
+        for m in &view.melds {
+            m.add_to(&mut melded);
+        }
         for t in Tile::all_kinds().filter(|t| faan_after[t.index() as usize] == best) {
             let mut h = view.concealed;
             h.remove(t);
@@ -156,9 +231,46 @@ pub fn encode(state: &State, out: &mut [f32]) {
                 concealed: &h,
                 ..view.hand_view()
             };
-            let acc = acceptance(&h, &view.unseen, |x| {
-                faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten
-            });
+            let mut all = h;
+            for k in Tile::all_kinds() {
+                all.0[k.index() as usize] += melded[k];
+            }
+            let suit_now = best_suit(&all);
+            let honours_now: u32 = (27..34).map(|i| all.0[i] as u32).sum();
+            // The faan-aware shanten is never below the plain one (each plan
+            // only drops tiles, restricts shapes or fixes pungs, and each tile
+            // short of a planned pung costs one exchange). So when the two are
+            // equal now, only a tile that lowers the plain shanten can lower
+            // the faan-aware one.
+            let i = t.index() as usize;
+            let only = if best == plain_after[i] {
+                plain_lowering[i]
+            } else {
+                u64::MAX
+            };
+            let (acc, _) = acceptance_given(
+                &h,
+                &view.unseen,
+                best,
+                |x| faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten,
+                |x| {
+                    if only & (1 << x.index()) == 0 {
+                        return true;
+                    }
+                    // An isolated tile changes no group's shapes; it must also
+                    // leave the plans unchanged: thirteen orphans (no melds), the
+                    // flush suit, and the honours plan (from 7 honours). A value
+                    // honour going from 0 to 1 copy adds no pung plan (needs 2).
+                    isolated(&h, x)
+                        && !(n_melds == 0 && x.is_terminal_or_honour())
+                        && !(x.is_honour() && honours_now == 6)
+                        && (x.is_honour() || {
+                            let mut more = all;
+                            more.add(x);
+                            best_suit(&more) == suit_now
+                        })
+                },
+            );
             plane(out, 24)[t.index() as usize] = (acc as f32 / 60.0).min(1.0);
         }
     }
@@ -282,6 +394,69 @@ mod tests {
     use mahjong_hk::RuleSet;
     use rand::rngs::SmallRng;
     use rand::{Rng, SeedableRng};
+
+    /// FNV-1a over the bit patterns of [`encode`], [`encode_planes`] and
+    /// [`encode_oracle`] at every decision of `hands` hands (varied rules, a
+    /// mix of the `fast` bot and random moves). Returns `(positions, hash)`.
+    fn golden_hash(hands: usize, seed: u64) -> (usize, u64) {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let bot = Bot::by_name("fast").unwrap();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |xs: &[f32]| {
+            for x in xs {
+                for b in x.to_bits().to_le_bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(0x100_0000_01b3);
+                }
+            }
+        };
+        let (mut f, mut o) = (vec![0.0; STATE_LEN], vec![0.0; ORACLE_LEN]);
+        let (mut suits, mut rest) = (vec![0.0; SUIT_BLOCK_LEN], vec![0.0; REST_LEN]);
+        let mut positions = 0;
+        for h in 0..hands {
+            let rules = RuleSet {
+                min_faan: [0, 1, 3, 3, 5][h % 5],
+                flowers: h % 3 != 0,
+                prevailing_wind: (h / 5) % 4,
+                ..RuleSet::default()
+            };
+            let mut s = State::new_deal(rules, &mut rng);
+            while !s.is_terminal() {
+                encode(&s, &mut f);
+                encode_planes(&f, &mut suits, &mut rest);
+                encode_oracle(&s, &mut o);
+                eat(&f);
+                eat(&suits);
+                eat(&rest);
+                eat(&o);
+                positions += 1;
+                let legal = s.legal_actions_vec();
+                let a = if rng.gen_range(0..5) == 0 {
+                    legal[rng.gen_range(0..legal.len())]
+                } else {
+                    bot.choose(&s, &legal, &mut rng)
+                };
+                s.apply(a);
+            }
+        }
+        (positions, hash)
+    }
+
+    /// The encoding must not change when it is made faster: these hashes come
+    /// from the original code (commit 86e303b). Change them only on purpose,
+    /// together with every model trained on the old encoding.
+    #[test]
+    fn encoding_matches_the_golden_hash() {
+        assert_eq!(golden_hash(12, 7), (1003, 12087291700939618118));
+    }
+
+    /// The same on many more positions (release build: `cargo test --release -p
+    /// mahjong-search golden -- --ignored`).
+    #[test]
+    #[ignore]
+    fn encoding_matches_the_golden_hash_on_many_positions() {
+        assert_eq!(golden_hash(400, 11), (36213, 15051755790659174273));
+    }
 
     #[test]
     fn hidden_tiles_do_not_change_the_encoding() {
