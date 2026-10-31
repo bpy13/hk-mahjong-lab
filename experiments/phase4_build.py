@@ -22,7 +22,10 @@ Stages (each resumes: finished work is skipped, chunked matches skip finished ch
 4. ``ppo-eval``  plan Task 18's AC8 matches, after the PPO runs (not part of ``all``):
                  ``runs/matches/ppo-eval.json`` and ``.md``; exports ``models/cnn-ppo.mjnn``.
 
-    python experiments/phase4_build.py --stage distill|evaluate|netpimc|ppo-eval|all [--quick]
+5. ``round3``    plan Task 19's match with the PPO network (not part of ``all``).
+
+    python experiments/phase4_build.py --stage distill|evaluate|netpimc|ppo-eval|round3|all
+        [--quick]
 
 Progress: ``runs/phase4/progress.txt`` (one line, rewritten) and ``runs/phase4/run.log``.
 Intervals of merged chunked matches: each chunk's standard error combined over chunks
@@ -614,13 +617,56 @@ def stage_ppo_eval(quick: bool, h2h_walls: int) -> dict[str, Any]:
     return report
 
 
+def stage_round3(quick: bool, walls: int, search: str) -> dict[str, Any]:
+    """Plan Task 19's match: {PPO net, PPO net + PIMC-48, belief-PIMC-128, ``value``} in 24
+    seatings. ``search`` is ``leaf`` (the plan: leaf value, depth 6) or ``rollout``. Writes
+    ``runs/matches/round3-<search>.md`` and whether the search beats the bare network; the
+    relabelling and re-distillation that may follow are separate runs."""
+    net = ppo_network("main", quick)
+    if net is None:
+        raise SystemExit("round3: runs/ppo/main/final.pt is missing")
+    samples, big = (4, 4) if quick else (48, 128)
+    leaf = ",leaf=value,depth=6" if search == "leaf" else ""
+    specs = [
+        f"net:path={net}",
+        f"netpimc:path={net},samples={samples},candidates=4,belief={BELIEF},weights=1{leaf}",
+        f"pimc:samples={big},candidates=4,belief={BELIEF},weights=1",
+        "value",
+    ]
+    name = f"round3-{search}" + ("-quick" if quick else "")
+    if quick:
+        walls = 1
+    per = 1 if quick else 50
+    seed = {"leaf": 7800, "rollout": 7900}[search]
+    rep = run_match(name, specs, walls, per, seed, 24)
+    gain = pooled(rep, [1], [0])
+    verdict_text = [f"{name}: {rep['deals']} walls x 24 seatings ({rep['hands']} hands).", ""]
+    for label, a in zip(
+        ("PPO net", "PPO + search", "PIMC-128", "value"), rep["agents"], strict=True
+    ):
+        verdict_text.append(
+            f"- {label}: {a['mean']:+.2f} [{a['boot_lo']:+.2f}, {a['boot_hi']:+.2f}], win "
+            f"{a['win_rate']:.1%}, deal-in {a['deal_in_rate']:.1%}"
+        )
+    verdict_text.append(
+        f"- Search minus bare network: {gain['mean']:+.2f} [{gain['lo']:+.2f}, {gain['hi']:+.2f}]"
+        f"; beats it: {gain['lo'] > 0}"
+    )
+    write_atomic(MATCHES / f"{name}.md", "\n".join(verdict_text) + "\n")
+    return {"report": rep, "search_minus_bare": gain}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument(
-        "--stage", choices=["distill", "evaluate", "netpimc", "ppo-eval", "all"], default="all"
+        "--stage",
+        choices=["distill", "evaluate", "netpimc", "ppo-eval", "round3", "all"],
+        default="all",
     )
+    ap.add_argument("--round3-search", choices=["leaf", "rollout"], default="leaf")
+    ap.add_argument("--round3-walls", type=int, default=1000)
     ap.add_argument("--quick", action="store_true", help="minutes-long smoke run on 2 chunks")
     ap.add_argument(
         "--cnn", default=None, help="network for evaluate/netpimc (default models/cnn-distill.mjnn)"
@@ -645,6 +691,8 @@ def main(argv: list[str] | None = None) -> int:
         stage_netpimc(a.quick, cnn, a.netpimc_walls, a.netpimc_chunk)
     if a.stage == "ppo-eval":
         stage_ppo_eval(a.quick, a.h2h_walls)
+    if a.stage == "round3":
+        stage_round3(a.quick, a.round3_walls, a.round3_search)
     progress("all stages done")
     log("all stages done")
     return 0

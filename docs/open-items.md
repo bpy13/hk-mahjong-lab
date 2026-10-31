@@ -52,7 +52,8 @@ with their defaults.
   **Question for Brian:** may Task 18's long PPO runs use `--priority above_normal`? It
   takes CPU from other jobs (labelling, other streams' solvers) only while the rollout
   works (the encoding burst, 7.6 of ~25 ms per step). Default (changed 2026-11-01, working
-  agreement): normal priority until you say otherwise.
+  agreement): normal priority until you say otherwise. The 60-minute run reached 370 K hands
+  per hour at normal priority (Task 17 ticked), so above-normal is not needed yet.
 - **Search RNG moved to ChaCha8 (hk-games D28, 2026-10-30).** PIMC samples, `solo`, the
   tournament walls and bootstrap now use `ChaCha8Rng`, and random-bot draws use u32 ranges,
   so the app's WebAssembly `expert` matches the server. Effect here: every tournament now

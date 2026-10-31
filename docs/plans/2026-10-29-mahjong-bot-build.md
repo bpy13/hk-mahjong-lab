@@ -655,7 +655,7 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 5 – PPO self-play past the teacher (opus; GPU)
 
-- [ ] **Task 17: `train-core` PPO with the proposal's additions**
+- [x] **Task 17: `train-core` PPO with the proposal's additions**
   - Files: create `python/mahjong/rl/ppo_cnn.py`, `python/tests/test_ppo_cnn.py`; modify
     `crates/pybind/src/rl.rs` (`HkVecEnv`: (a) `paired=True` plays every wall twice with
     common random numbers, once by the learner and once by the baseline agent in the same
@@ -707,6 +707,16 @@ paired by wall, with a bootstrap 95 % interval.
     (`--init none --minutes 3`): old code 46,264 learner hands per hour; new code 73,926 and
     131,589 (two runs at normal priority, load varied), **217,749** at above-normal priority.
     Still not ticked: the 60-minute run from `models/cnn-distill.pt` waits for Task 15.
+  - Status (2026-11-01, 60-minute run): **370,093 learner hands per hour** at normal priority
+    from `models/cnn-distill.pt` (374,276 hands, 365 iterations, `runs/ppo/throughput/`; proposal
+    §7 expects 300 K–1 M; each wall is played twice). 8 rayon threads; one 13 cards solver and
+    from 06:05 a big2 job (8 workers, GPU) shared the PC. By stage: about 490 K at `min_faan`
+    0–1, about 300 K at `min_faan` 3. Greedy network vs `value`, 800 hands: +0.88 ± 2.73 at 30
+    min, +0.34 ± 2.77 at 60 min (started +0.77 ± 1.17): no collapse. Sampled self-play draws at
+    `min_faan` 3: 9.9 % on average. Paired reward at `min_faan` 3: −1.23 per hand, because the
+    learner samples its moves and the baseline plays greedily. The evaluation now also plays
+    against three frozen start networks (4 seatings, seconds), in place of the 24-seating one
+    with the search teacher, which would take hours every 2 h. Ticked.
 
 - [ ] **Task 18: Main PPO run, second seed, two ablations** (GPU, long)
   - Files: create `runs/ppo/main/`, `runs/ppo/seed2/`, `runs/ppo/ablate-5a/`,
@@ -727,6 +737,17 @@ paired by wall, with a bootstrap 95 % interval.
     Evaluation matches with search seats: **≈ 8 h CPU each**, in the background while the
     next GPU run trains. If pattern collapse shows (shares drift > 30 %, draws > 10 %): raise
     the anchor weight ×2 and shorten the min_faan-0 stage to 10 %, once; record it.
+  - Status (2026-11-01): queued as one detached job, `experiments/task18_job.ps1` (frozen in
+    `runs/task18/pkg/`, commit 2600d00, leaf fix included): main 48 h, seed 2 24 h, the two
+    ablations 6 h each, then `phase4_build.py --stage ppo-eval` (built; network-only matches
+    first; 1,000 walls of head-to-head against belief-PIMC-128 last, about 40 h on 14 threads,
+    report rewritten after each chunk in `runs/matches/ppo-eval.md`). Normal priority, 8 rayon
+    threads, CPUs 4–19. It waits while the GPU holds over 4 GB (big2's seed training, up to
+    3 h from 06:05). Check: `Get-Content runs\task18\progress.txt, runs\ppo\main\progress.txt;
+    Get-Content runs\task18\run.log -Tail 5`. Resume after a restart: `Invoke-CimMethod
+    -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'conhost.exe
+    --headless powershell.exe -NoProfile -File "<repo>\experiments\task18_job.ps1"';
+    CurrentDirectory = '<repo>' }`. The `ppo-eval` stage writes `models/cnn-ppo.mjnn`.
 
 - [ ] **Task 19: Round 3: the PPO network inside the search; re-distil if the search moved**
   - Files: modify `experiments/phase4_build.py` (`--stage round3`); `models/cnn-final.mjnn`.
@@ -736,6 +757,9 @@ paired by wall, with a bootstrap 95 % interval.
     a fresh distillation (Task 15, **2 GPU-h**) is evaluated the same way; the better of the
     two networks is `models/cnn-final.mjnn`. Machine time: ≈ 10 h CPU (+ 1.2 CPU-days and
     2 GPU-h if round 3 happens).
+  - Status (2026-11-01): the match is coded, `phase4_build.py --stage round3
+    [--round3-search leaf|rollout]`, smoke-tested with `--quick`. It waits for Task 18's main
+    network. Open item: play both search variants. Relabelling and re-distillation not coded.
 
 ## Phase 6 – The comparison, docs, handover (opus)
 
