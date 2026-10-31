@@ -522,7 +522,7 @@ paired by wall, with a bootstrap 95 % interval.
 
 ## Phase 4 – Labels, the network, expert iteration (opus; model design fable)
 
-- [ ] **Task 13: Label 1 M decisions with the best teacher** (long job)
+- [x] **Task 13: Label 1 M decisions with the best teacher** (long job)
   - Files: create `crates/search/examples/label.rs` (plays mixed-field hands; at every
     decision with a choice runs the Task 11 winner — belief-PIMC-64 with the better anchor —
     and writes features, legal mask, the search's per-candidate means and diffs, the chosen
@@ -553,8 +553,10 @@ paired by wall, with a bootstrap 95 % interval.
     Get-Content runs\labels-job\run.log -Tail 5`. Resume: rerun the `Invoke-CimMethod ...
     experiments\task13_label.ps1` command (kept teacher in `teacher-used.txt`). Dry run:
     `powershell -File experiments\task13_label.ps1 -DryRun`. Not ticked until 50 chunks exist.
+  - Status (2026-11-01): done. `runs\labels` holds 50 chunks and 1,000,000 rows, labelled by
+    Task 7's spec. Ticked.
 
-- [ ] **Task 14: Suit-shared 1-D CNN with policy, target and four-seat value heads** (fable)
+- [x] **Task 14: Suit-shared 1-D CNN with policy, target and four-seat value heads** (fable)
   - Files: create `python/mahjong/rl/cnn.py` (model, suit-swap augmentation, int8 export),
     `python/tests/test_cnn.py`; modify `crates/search/src/net.rs` (MJNN v3: 1-D conv layers
     shared across suits, dense honour branch, named heads; int8 weights with per-channel
@@ -584,8 +586,10 @@ paired by wall, with a bootstrap 95 % interval.
     PyTorch within 1e-4 and int8 top-1 agreement 99.8 % on 1,000 held-out positions (random
     weights). Suit-swap equivariance is exact by construction and tested. Not ticked: the
     plan's bars are met on untrained weights; training waits for Task 13's labels (Task 15).
+  - Status (2026-11-01): the trained network meets them too: int8 top-1 agreement 99.6 % on
+    1,000 held-out positions, int8 file 2.22 MB. Ticked.
 
-- [ ] **Task 15: Distil the labels** (GPU)
+- [x] **Task 15: Distil the labels** (GPU)
   - Files: create `python/mahjong/rl/distill_cnn.py`; modify `python/mahjong/rl/evaluate.py`
     (24-seating option); create `experiments/phase4_build.py` (stages resume like
     `phase3_rl.py`: distil → evaluate → netpimc evaluate).
@@ -610,8 +614,12 @@ paired by wall, with a bootstrap 95 % interval.
     The full distillation and the 4,000-hand `evaluate` match run in the queued job
     `experiments/phase4_job.ps1` once Task 13 has 1 M rows. Not ticked until the job's
     numbers are in.
+  - Status (2026-11-01): done. 21.7 min on the GPU; held-out top-1 0.924 (bar 0.80); int8 vs
+    fp32 top-1 0.996 (bar 0.98); vs `value` over 4,000 hands +0.77 ± 1.17 (bar ≥ 0,
+    half-width ≤ 2). `models/cnn-distill.{pt,mjnn}`, `cnn-distill-fp32.mjnn`. Study results
+    §3. Ticked.
 
-- [ ] **Task 16: The network inside PIMC: candidates, rollouts, leaf value**
+- [x] **Task 16: The network inside PIMC: candidates, rollouts, leaf value**
   - Files: modify `crates/search/src/agent.rs` (`netpimc` gains `belief=`, `leaf=value|
     rollout`, `depth=N` for a short rollout then the value head), `crates/search/src/pimc.rs`
     (leaf evaluation hook: after `depth` turns, score the state with the network's four-seat
@@ -637,6 +645,13 @@ paired by wall, with a bootstrap 95 % interval.
     **400 walls × 24 seatings** (9,600 hands, ≈ 16 h), seeds 7100–7119, and writes
     `runs/matches/netpimc.json`, `netpimc-verdict.{json,md}` (Brian's rule and AC7 bar 3) and
     a `netpimc-partial-verdict.md` after every chunk. Not ticked until the match is in.
+  - Status (2026-11-01): done on 400 walls (the queued default). CNN + PIMC-48 minus teacher
+    +0.02 [−1.28, +1.31]: the teacher stays (Brian's rule). CNN + PIMC-48 minus bare CNN +1.31
+    [+0.04, +2.58]: AC7 bar 3 met. Leaf value −4.16: a bug, now fixed: the leaf was usually
+    another seat's turn, so the value could not see the searching seat's hand (study results
+    §3). Fixed leaf vs `value` +0.88 ± 3.04 on 800 hands; the 24-seating match was not rerun.
+    The Notes' round-2 condition (≥ +1, CI excluding 0) holds literally, but round 2 has not
+    started: its searcher does not beat the teacher (open item). Ticked.
 
 ## Phase 5 – PPO self-play past the teacher (opus; GPU)
 

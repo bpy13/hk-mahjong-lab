@@ -1,0 +1,97 @@
+{
+ "rule": "use teacher unless distilled model wins significantly (Brian, 2026-10-30): a challenger replaces the search teacher only if challenger minus teacher has a 95 % interval (wall-paired bootstrap, chunk-combined) above 0",
+ "hands": 9600,
+ "walls": 400,
+ "agents": [
+  {
+   "name": "cnn",
+   "spec": "net:path=models/cnn-distill.mjnn",
+   "mean": 0.5191666666666667,
+   "boot_lo": -0.2472768017494833,
+   "boot_hi": 1.2856101350828166
+  },
+  {
+   "name": "cnn+pimc48",
+   "spec": "netpimc:path=models/cnn-distill.mjnn,samples=48,candidates=4,belief=models/belief.mjnn,weights=1",
+   "mean": 1.8266666666666667,
+   "boot_lo": 1.0317539137671914,
+   "boot_hi": 2.621579419566142
+  },
+  {
+   "name": "cnn+pimc48-leaf6",
+   "spec": "netpimc:path=models/cnn-distill.mjnn,samples=48,candidates=4,belief=models/belief.mjnn,weights=1,leaf=value,depth=6",
+   "mean": -4.156666666666666,
+   "boot_lo": -4.872555658488102,
+   "boot_hi": -3.440777674845231
+  },
+  {
+   "name": "teacher",
+   "spec": "pimc:samples=64,candidates=4,belief=models/belief.mjnn,weights=1",
+   "mean": 1.8108333333333333,
+   "boot_lo": 1.0429583796823858,
+   "boot_hi": 2.5787082869842806
+  }
+ ],
+ "challengers": [
+  {
+   "challenger": "cnn",
+   "minus_teacher": {
+    "mean": -1.2916666666666667,
+    "ci95": 1.3220302575475893,
+    "boot_lo": -2.570553851118664,
+    "boot_hi": -0.012779482214669846
+   },
+   "replaces_teacher": false
+  },
+  {
+   "challenger": "cnn+pimc48",
+   "minus_teacher": {
+    "mean": 0.015833333333333227,
+    "ci95": 1.3351312869058436,
+    "boot_lo": -1.2767418847659637,
+    "boot_hi": 1.30840855143263
+   },
+   "replaces_teacher": false
+  },
+  {
+   "challenger": "cnn+pimc48-leaf6",
+   "minus_teacher": {
+    "mean": -5.9675,
+    "ci95": 1.2241849534181668,
+    "boot_lo": -7.15251706797366,
+    "boot_hi": -4.7824829320263404
+   },
+   "replaces_teacher": false
+  }
+ ],
+ "decision": "teacher",
+ "ac7_bar3_search_beats_bare": [
+  {
+   "search": "cnn+pimc48",
+   "minus_bare": {
+    "mean": 1.3075,
+    "ci95": 1.3168592629958649,
+    "boot_lo": 0.03967117458406255,
+    "boot_hi": 2.5753288254159377
+   },
+   "beats_bare": true
+  },
+  {
+   "search": "cnn+pimc48-leaf6",
+   "minus_bare": {
+    "mean": -4.675833333333333,
+    "ci95": 1.2205267578419523,
+    "boot_lo": -5.867098854393465,
+    "boot_hi": -3.484567812273202
+   },
+   "beats_bare": false
+  }
+ ],
+ "ac7_bar3_met": true,
+ "distill": {
+  "held_out_top1": 0.9239,
+  "int8_top1_agreement_with_fp32": 0.996,
+  "parameters": 2187569,
+  "int8_bytes": 2220688
+ }
+}

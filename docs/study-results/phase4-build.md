@@ -60,14 +60,78 @@ the teacher? Brian's rule (2026-10-30): "use teacher unless distilled model wins
 significantly": a challenger replaces the teacher only if challenger minus teacher has
 a 95 % interval above 0.
 
-**Pending.** The job `experiments/phase4_job.ps1` (`runs/phase4/`) starts when Task 13's
-labels are complete, distils on the GPU (12 epochs), plays the bare int8 network against
-three `value` bots on 1,000 walls (`runs/matches/cnn-distill.json`; seeds 7000–7019, but
-since the search RNG moved to ChaCha8 these are other walls than Task 7's), then the
-24-seating match {bare CNN, CNN + PIMC-48, CNN + PIMC-48 leaf value at depth 6,
-belief-PIMC-64} on 400 walls (`runs/matches/netpimc.json`). It writes the rule's verdict
-to `runs/matches/netpimc-verdict.md`. Slice test so far (540 k rows): held-out agreement
-with the teacher's move 0.910, int8 vs fp32 top-1 0.998.
+**Verdict.** The teacher stays. No challenger beats it significantly. CNN + PIMC-48 matches
+it exactly (+0.02 per hand). It took 1.1 s per hand against the teacher's 2.8 s in Task 16's
+timing test (39 %, 8 threads, slice network). AC7 is met. The leaf-value row below shows a
+bug, not the idea: it was fixed afterwards.
+
+**Job.** `experiments/phase4_job.ps1` (`runs/phase4/`, 2026-10-31 00:08 to 2026-11-01
+03:57, 8 threads). A Windows Update restart stopped it for 19 h 32 min after chunk 10 of
+20; the rerun skipped the finished work. Summaries: `data/cnn-distill.json`,
+`data/distill-result.json`, `data/netpimc.json`, `data/netpimc-verdict.json`.
+
+**Distillation (Task 15).** 980,000 training rows, 20,000 held out, 12 epochs, 21.7 min on
+the GPU. 2,187,569 parameters; int8 file 2.22 MB.
+
+| Measure | Result | Bar | Met? |
+|---|---|---|---|
+| Held-out top-1 agreement with the teacher's move | 0.924 | ≥ 0.80 (Task 15) | yes |
+| Held-out target accuracy | 0.989 | | |
+| Int8 top-1 agreement with fp32 | 0.996 | ≥ 0.98 (AC7) | yes |
+| Bare int8 network vs three `value` bots, 4,000 hands | +0.77 ± 1.17, bootstrap [−0.23, +1.77] | ≥ 0, half-width ≤ 2 (AC7) | yes |
+
+Against `value` the bare network wins 24.4 % and deals in 19.3 %. Seeds 7000–7019, but
+these are other walls than Task 7's, because the search RNG moved to ChaCha8 in between.
+
+**The 24-seating match (Task 16).** 400 walls × 24 seatings, 9,600 hands, seeds 7100–7119.
+All four agents sit at every table, so these numbers are not points against `value`.
+
+| Agent | Points / hand, bootstrap 95 % | Win | Self-draw | Deal-in | Mean faan |
+|---|---|---|---|---|---|
+| Bare CNN | +0.52 [−0.25, +1.29] | 25.7 % | 5.8 % | 17.9 % | 4.77 |
+| CNN + PIMC-48 | +1.83 [+1.03, +2.62] | 25.8 % | 5.9 % | 17.5 % | 4.93 |
+| CNN + PIMC-48, leaf value depth 6 (first version, bug) | −4.16 [−4.87, −3.44] | 16.2 % | 3.7 % | 20.3 % | 4.84 |
+| Teacher, belief-PIMC-64 | +1.81 [+1.04, +2.58] | 26.2 % | 5.8 % | 16.9 % | 4.89 |
+
+Hands drawn: 7.7 %.
+
+| Difference, paired by wall | 95 % interval | Decision |
+|---|---|---|
+| Bare CNN minus teacher | −1.29 [−2.57, −0.01] | does not replace it |
+| CNN + PIMC-48 minus teacher | +0.02 [−1.28, +1.31] | does not replace it |
+| Leaf value minus teacher | −5.97 [−7.15, −4.78] | does not replace it |
+| CNN + PIMC-48 minus bare CNN | +1.31 [+0.04, +2.58] | AC7 bar 3 met |
+| Leaf value minus bare CNN | −4.68 [−5.87, −3.48] | no |
+
+**400 walls were enough.** The plan asked for 1,000 walls, and open items allowed an
+extension if the interval straddled 0 by a small margin. It does not: CNN + PIMC-48 sits
+at +0.02 in the middle of a ±1.3 interval. More walls would narrow the interval around
+about 0, not lift it above 0. So no extension.
+
+**Why the leaf-value search lost: a bug.** The network sees only the hand of the player to
+act. The first version stopped each rollout after exactly 6 discards, whoever was to act.
+That was another seat's turn in 86.8 % of leaves (`examples/leaf_check.rs`, 2,000 positions
+from hands played by `value`). There the value head cannot see the searching seat's hand,
+so it cannot judge what a candidate does to that hand. The match shows this: wins fell
+from about 26 % to 16 %.
+
+The fix stops at the searching seat's first turn after 6 discards (`LeafValue::run_to_leaf`,
+test `every_leaf_is_the_searching_seats_own_turn`). Value-head overfitting is not the
+cause: held-out value error was 1.225 at its best (epoch 7) and 1.255 at the end, 2.4 %
+worse.
+
+| Check | First version | Fixed |
+|---|---|---|
+| Leaves on the searching seat's own turn | 13.2 % | 100 % |
+| Correlation of the leaf value with 32 `fast` playouts from that leaf | 0.07 | 0.23 |
+| Vs three `value` bots, 800 hands, same walls, seeds 7200–7204 | −5.12 ± 2.36 | +0.88 ± 3.04 |
+| Win rate in that match | 14.8 % | 23.6 % |
+
+The fix gains +6.00 ± 3.85 (intervals treated as independent; `data/leaf-recheck.json`,
+`experiments/leaf_recheck.py`). The fixed search is not shown to beat the bare network
+(+0.77 ± 1.17). A correlation of 0.23 is still weak, and each leaf costs a forward pass, so
+full rollouts stay the better search for now. The 24-seating match was not rerun
+(`docs/open-items.md`).
 
 ## 2. Belief-driven determinization (plan Task 7, AC4)
 
