@@ -4,6 +4,7 @@
 
 # Python
 __pycache__/
+python/mahjong/_core.pdb
 *.py[cod]
 *.egg-info/
 *.so
