@@ -56,9 +56,11 @@
 //! the server for the same seed (hk-games D28, 2026-10-30).
 //!
 //! **Leaf value** (plan Task 16, `netpimc:...,leaf=value,depth=6`).
-//! [`pimc_with_leaf`] stops each rollout after `depth` discards (any seat's) and
-//! scores the position with a network's four-seat value head instead of playing
-//! to the end ([`LeafValue`]). The value head predicts each seat's final points,
+//! [`pimc_with_leaf`] stops each rollout at the searching seat's first turn after
+//! `depth` discards (any seat's) and scores the position with a network's
+//! four-seat value head instead of playing to the end ([`LeafValue`]; the network
+//! sees only the hand of the player to act, so the leaf must be that seat's own
+//! turn). The value head predicts each seat's final points,
 //! log-scaled as in training (`sign(x) · ln(1 + |x| / 8)`); the leaf undoes the
 //! scaling. A rollout that reaches the end of the hand before the leaf is scored
 //! by its real result. Win, deal-in and draw rates count only the rollouts that
@@ -190,9 +192,9 @@ impl Sample {
 /// Scale of the value head's log transform (idea 5d; `labels.value_targets`).
 pub const VALUE_LOG_SCALE: f64 = 8.0;
 
-/// Leaf evaluation for [`pimc_with_leaf`]: after `depth` discards, the
-/// network's `value` output for the searching seat replaces the rest of the
-/// rollout.
+/// Leaf evaluation for [`pimc_with_leaf`]: at the searching seat's first turn
+/// after `depth` discards, the network's `value` output for that seat replaces
+/// the rest of the rollout.
 #[derive(Clone, Debug)]
 pub struct LeafValue {
     pub net: Arc<Mlp>,
@@ -222,23 +224,27 @@ impl LeafValue {
         y.signum() * VALUE_LOG_SCALE * y.abs().exp_m1()
     }
 
-    /// Plays `state` with `rollout` until the hand ends or `depth` discards
-    /// have been made, then scores it for `seat`.
-    fn play<P: Policy<State>, R: rand::Rng + ?Sized>(
+    /// Plays `state` with `rollout` to the leaf: the first time `seat` is to act
+    /// after at least `depth` discards. Returns `false` if the hand ended first.
+    ///
+    /// Why `seat` must be the one to act: the network sees only the hand of the
+    /// player to act. Read from another seat's view, the value cannot see
+    /// `seat`'s hand, so it cannot tell `seat`'s candidates apart by what they
+    /// do to that hand (the first version stopped at exactly `depth` discards,
+    /// which is almost always another seat's turn, and scored −4.2 per hand;
+    /// `docs/study-results/phase4-build.md` §3).
+    pub fn run_to_leaf<P: Policy<State>, R: rand::Rng + ?Sized>(
         &self,
         state: &mut State,
         rollout: &P,
         rng: &mut R,
         seat: usize,
-    ) -> Sample {
+    ) -> bool {
         let mut legal = Vec::new();
         let mut discards = 0;
-        while state.current_player().is_some() {
-            if discards >= self.depth {
-                return Sample {
-                    points: self.points(state, seat),
-                    ..Sample::default()
-                };
+        while let Some(player) = state.current_player() {
+            if discards >= self.depth && player == seat {
+                return true;
             }
             state.legal_actions(&mut legal);
             let a = rollout.choose(state, &legal, rng);
@@ -247,7 +253,25 @@ impl LeafValue {
             }
             state.apply(a);
         }
-        Sample::of(state, seat)
+        false
+    }
+
+    /// Plays `state` with `rollout` to the leaf and scores it for `seat`.
+    fn play<P: Policy<State>, R: rand::Rng + ?Sized>(
+        &self,
+        state: &mut State,
+        rollout: &P,
+        rng: &mut R,
+        seat: usize,
+    ) -> Sample {
+        if self.run_to_leaf(state, rollout, rng, seat) {
+            Sample {
+                points: self.points(state, seat),
+                ..Sample::default()
+            }
+        } else {
+            Sample::of(state, seat)
+        }
     }
 }
 

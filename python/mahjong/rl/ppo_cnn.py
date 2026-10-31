@@ -41,8 +41,9 @@ optimizer) with ``<out>/state.json`` (hands, iteration, elapsed time, curriculum
 stage, anchor factors, pattern statistics, the checkpoint holding the optimizer);
 ``--resume`` continues from the newest checkpoint. Every ``--eval-minutes`` (default
 120) the network is exported and plays ``--eval-walls`` walls (4 seatings) against
-three ``value`` bots in Rust; points, rates, draw rate and pattern shares go to
-``<out>/log.json`` together with one entry per iteration.
+three ``value`` bots and against three frozen init networks in Rust; points, rates,
+draw rate and pattern shares go to ``<out>/log.json`` together with one entry per
+iteration, and ``<out>/progress.txt`` holds one line on where the run is.
 
 CLI::
 
@@ -357,6 +358,7 @@ class Trainer:
             # network, or with --init none this very random initialisation.
             self.teacher = copy.deepcopy(self.net)
             self.teacher.save(teacher_path)
+            export(self.teacher, self.out / "teacher.mjnn")
         else:
             self.teacher = SuitCNN.load(teacher_path)
             self.net = SuitCNN(self.teacher.cfg)
@@ -372,7 +374,10 @@ class Trainer:
         if state is not None:
             self._restore(state)
         if (self.out / "log.json").exists() and state is not None:
-            self.history = json.loads((self.out / "log.json").read_text())
+            # After a crash the log can be ahead of the checkpoint: those iterations
+            # are played again, so their entries go.
+            log = json.loads((self.out / "log.json").read_text())
+            self.history = [e for e in log if e["iter"] <= self.iteration]
 
         env_seed = cfg.seed * 7919 + self.iteration
         if cfg.paired:
@@ -454,6 +459,16 @@ class Trainer:
         tmp = self.out / "log.json.tmp"
         tmp.write_text(json.dumps(self.history, indent=1))
         os.replace(tmp, self.out / "log.json")
+        if self.history:
+            e = self.history[-1]
+            line = (
+                f"iteration {e['iter']}, {e['hands']:,} hands, {e['minutes'] / 60:.2f} of "
+                f"{self.cfg.seconds / 3600:.2f} h, {e['hands_per_hour']:,} hands/h, "
+                f"min_faan {e['min_faan']}, draws {e['draw_rate']:.3f}\n"
+            )
+            tmp = self.out / "progress.txt.tmp"
+            tmp.write_text(line)
+            os.replace(tmp, self.out / "progress.txt")
 
     # --- Playing ----------------------------------------------------------------
 
@@ -670,7 +685,12 @@ class Trainer:
             [f"net:path={path}", "value", "value", "value"], self.cfg.eval_walls, 99, seatings=4
         )
         a = res["agents"][0]
+        # Against the frozen start (the distilled network); no search seats, so seconds.
+        t = str(self.out / "teacher.mjnn")
+        rt = tournament([f"net:path={path}"] + [f"net:path={t}"] * 3, self.cfg.eval_walls, 99, 4)
+        at = rt["agents"][0]
         return {
+            "vs_teacher": {"mean": at["mean"], "ci95": at["ci95"], "draw_rate": rt["draw_rate"]},
             "vs": "value",
             "walls": self.cfg.eval_walls,
             "hands": a["hands"],

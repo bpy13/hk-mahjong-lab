@@ -224,9 +224,11 @@ Strength: `runs/matches/pimc64-ev.json` (anchor and rollout `ev`) and
 Spec `netpimc:path=models/cnn-distill.mjnn,samples=48,candidates=4,belief=models/belief.mjnn[,rollout=fast|net][,leaf=rollout|value,depth=6]`.
 The network's top `candidates` moves are the candidates and its first choice is the
 baseline; `belief=` (and `weights=`, `draws=`, `tilt=`) draw the determinizations as
-for `pimc`. With `leaf=value` each rollout stops after `depth` discards (by any seat;
-default 6) and the network's value head scores the position for the searching seat
-(`LeafValue`, `pimc_with_leaf` in Rust): the head predicts each seat's final points
+for `pimc`. With `leaf=value` each rollout stops at the searching seat's first turn after
+`depth` discards (by any seat; default 6) and the network's value head scores the position
+for that seat (`LeafValue`, `pimc_with_leaf` in Rust). The leaf must be that seat's own
+turn: the network sees only the hand of the player to act, so from another seat's view it
+cannot see the searching seat's hand. The head predicts each seat's final points
 log-scaled, `sign(x) · ln(1 + |x| / 8)`, from the point of view of the player to act,
 and the leaf undoes the scaling. Rollouts that end before the leaf use the real result;
 win, deal-in and draw rates count only those, so they are lower bounds under

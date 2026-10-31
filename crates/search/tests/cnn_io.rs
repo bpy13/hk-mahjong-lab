@@ -370,6 +370,29 @@ fn leaf_value_undoes_the_log_scale_for_the_searching_seat() {
     assert!(LeafValue::new(policy_only, 6).is_err());
 }
 
+/// The network sees only the hand of the player to act, so a leaf must be the
+/// searching seat's own turn: from any other seat's view the value is blind to
+/// the searching seat's hand.
+#[test]
+fn every_leaf_is_the_searching_seats_own_turn() {
+    let net = Arc::new(Mlp::from_bytes(&file(false, "suitcnn-1", |_| {})).unwrap());
+    let leaf = LeafValue::new(Arc::clone(&net), 6).unwrap();
+    let mut rng = SmallRng::seed_from_u64(21);
+    let mut reached = 0;
+    for s in live_states(40, 7) {
+        let seat = s.current_player().unwrap();
+        let rollout = Rollout::for_seat(seat);
+        let mut w = s.clone();
+        if leaf.run_to_leaf(&mut w, &rollout, &mut rng, seat) {
+            assert_eq!(w.current_player(), Some(seat));
+            reached += 1;
+        } else {
+            assert!(w.is_terminal());
+        }
+    }
+    assert!(reached > 0, "no rollout reached a leaf");
+}
+
 #[test]
 fn a_leaf_deeper_than_the_hand_is_a_full_rollout() {
     let net = Arc::new(Mlp::from_bytes(&file(false, "suitcnn-1", |_| {})).unwrap());

@@ -19,7 +19,10 @@ Stages (each resumes: finished work is skipped, chunked matches skip finished ch
                  interval of challenger minus teacher), and AC7 bar 3 (a search variant
                  beats the bare network with an interval excluding 0).
 
-    python experiments/phase4_build.py --stage distill|evaluate|netpimc|all [--quick]
+4. ``ppo-eval``  plan Task 18's AC8 matches, after the PPO runs (not part of ``all``):
+                 ``runs/matches/ppo-eval.json`` and ``.md``; exports ``models/cnn-ppo.mjnn``.
+
+    python experiments/phase4_build.py --stage distill|evaluate|netpimc|ppo-eval|all [--quick]
 
 Progress: ``runs/phase4/progress.txt`` (one line, rewritten) and ``runs/phase4/run.log``.
 Intervals of merged chunked matches: each chunk's standard error combined over chunks
@@ -32,6 +35,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -439,11 +443,184 @@ def stage_netpimc(quick: bool, cnn: str, walls: int, per_chunk: int) -> dict[str
     return v
 
 
+def ppo_network(run: str, quick: bool) -> str | None:
+    """The int8 file of a PPO run's final network (exported here), as a spec path, or
+    ``None`` if the run has not finished. ``--quick`` plays the distilled network."""
+    if quick:
+        return CNN
+    from mahjong.rl.cnn import SuitCNN, export
+
+    final = RUNS / "ppo" / run / "final.pt"
+    if not final.exists():
+        return None
+    path = RUNS / "ppo" / run / "final-int8.mjnn"
+    if not path.exists():
+        export(SuitCNN.load(final), path, int8=True)
+    if run == "main" and not (MODELS / "cnn-ppo.mjnn").exists():
+        shutil.copyfile(path, MODELS / "cnn-ppo.mjnn")
+        shutil.copyfile(final, MODELS / "cnn-ppo.pt")
+    return f"runs/ppo/{run}/final-int8.mjnn"
+
+
+def pooled(rep: dict[str, Any], side_a: list[int], side_b: list[int]) -> dict[str, float]:
+    """Side a minus side b, the mean over all pairs of agents across the sides. Each
+    half-width is the mean of the pairs' half-widths: the pairs share walls, so the
+    average of the differences cannot have a wider interval than that."""
+    means, halves = [], []
+    for i in side_a:
+        for j in side_b:
+            p = next(p for p in rep["pairs"] if {p["a"], p["b"]} == {i, j})
+            means.append(p["mean"] if p["a"] == i else -p["mean"])
+            halves.append((p["boot_hi"] - p["boot_lo"]) / 2)
+    mean, half = sum(means) / len(means), sum(halves) / len(halves)
+    return {"mean": mean, "lo": mean - half, "hi": mean + half}
+
+
+def side_row(rep: dict[str, Any], agents: list[int]) -> dict[str, Any]:
+    """Points and rates of one side of a match, pooled over its agents."""
+    rows = [rep["agents"][i] for i in agents]
+    hands = sum(r["hands"] for r in rows)
+    wins = sum(r["wins"] for r in rows)
+    pattern_wins: dict[str, int] = {}
+    for r in rows:
+        for k, v in r["pattern_wins"].items():
+            pattern_wins[k] = pattern_wins.get(k, 0) + v
+    return {
+        "mean": sum(r["hands"] * r["mean"] for r in rows) / hands,
+        "win_rate": wins / hands,
+        "deal_in_rate": sum(r["deal_ins"] for r in rows) / hands,
+        "mean_faan": sum(r["win_faan"] for r in rows) / wins if wins else 0.0,
+        "pattern_shares": {k: v / wins for k, v in pattern_wins.items()} if wins else {},
+    }
+
+
+def share_drift(a: dict[str, float], b: dict[str, float], min_share: float = 0.02) -> list[str]:
+    """Patterns (at least ``min_share`` of ``b``'s wins) whose share in ``a`` differs from
+    ``b``'s by more than 30 % (AC8)."""
+    return sorted(k for k, v in b.items() if v >= min_share and abs(a.get(k, 0.0) / v - 1) > 0.3)
+
+
+def ppo_report_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "Plan Task 18: the AC8 matches (bare int8 networks; missing rows are not played yet).",
+        "",
+    ]
+    if "vs_value" in report:
+        v = report["vs_value"]
+        lines.append(
+            f"- Main network vs three `value` bots ({v['hands']} hands): {v['mean']:+.2f} ± "
+            f"{v['ci95']:.2f}, bootstrap [{v['boot_lo']:+.2f}, {v['boot_hi']:+.2f}], win "
+            f"{v['win_rate']:.1%}, deal-in {v['deal_in_rate']:.1%}, draws {v['draw_rate']:.1%} "
+            "(bar: ≥ +5, interval excluding 0)."
+        )
+    for key, what in (
+        ("ablate_5a", "without the paired reward"),
+        ("ablate_1a", "without the target head"),
+    ):
+        if key in report:
+            v = report[key]
+            lines.append(
+                f"- Ablation {what}, vs three `value` bots ({v['hands']} hands): {v['mean']:+.2f} "
+                f"± {v['ci95']:.2f}."
+            )
+    if "cross_2v2" in report:
+        c = report["cross_2v2"]
+        lines.append(
+            f"- Seeds 2 + 2 (24 seatings): main minus seed 2 {c['mean']:+.2f} "
+            f"[{c['lo']:+.2f}, {c['hi']:+.2f}]."
+        )
+    for key, what in (
+        ("cross_1v3_seed2", "seed 2 alone vs three main"),
+        ("cross_1v3_main", "main alone vs three seed 2"),
+    ):
+        if key in report:
+            v = report[key]
+            lines.append(f"- 1 + 3, {what}: {v['mean']:+.2f} ± {v['ci95']:.2f}.")
+    if "vs_pimc128" in report:
+        h = report["vs_pimc128"]
+        lines.append(
+            f"- Main minus belief-PIMC-128, head to head ({h['hands']} hands, {h['walls']} walls, "
+            f"24 seatings): {h['mean']:+.2f} [{h['lo']:+.2f}, {h['hi']:+.2f}] (bar: above 0). "
+            f"Win shares more than 30 % from PIMC's: {', '.join(h['drift']) or 'none'}."
+        )
+    return "\n".join(lines) + "\n"
+
+
+def stage_ppo_eval(quick: bool, h2h_walls: int) -> dict[str, Any]:
+    """The AC8 matches of plan Task 18. Network-only matches first (minutes); the search
+    match last, because it takes days and reports after every chunk."""
+    main, seed2 = ppo_network("main", quick), ppo_network("seed2", quick)
+    a5, a1 = ppo_network("ablate-5a", quick), ppo_network("ablate-1a", quick)
+    if main is None:
+        raise SystemExit("ppo-eval: runs/ppo/main/final.pt is missing")
+    walls, per = (2, 1) if quick else (1000, 50)
+    tag = "-quick" if quick else ""
+    report: dict[str, Any] = {}
+
+    def save() -> None:
+        write_atomic(MATCHES / f"ppo-eval{tag}.json", json.dumps(report, indent=1))
+        write_atomic(MATCHES / f"ppo-eval{tag}.md", ppo_report_markdown(report))
+
+    def one_seat(rep: dict[str, Any]) -> dict[str, Any]:
+        keys = ("hands", "mean", "ci95", "boot_lo", "boot_hi", "win_rate", "deal_in_rate")
+        return {
+            **{k: rep["agents"][0][k] for k in keys},
+            "draw_rate": rep["draw_rate"],
+            "mean_faan": rep["agents"][0]["mean_faan"],
+            "pattern_shares": rep["agents"][0]["pattern_shares"],
+        }
+
+    def bare(path: str) -> str:
+        return f"net:path={path}"
+
+    field = ["value", "value", "value"]
+    rep = run_match(f"ppo-vs-value{tag}", [bare(main), *field], walls, per, 7300, 4)
+    report["vs_value"] = one_seat(rep)
+    save()
+    # The ablations play the first 400 walls of the main network's match (same seeds).
+    for key, net in (("ablate_5a", a5), ("ablate_1a", a1)):
+        if net is not None:
+            name = f"ppo-{key.replace('_', '-')}{tag}"
+            rep = run_match(name, [bare(net), *field], walls * 2 // 5, per, 7300, 4)
+            report[key] = one_seat(rep)
+            save()
+    if seed2 is not None:
+        a, b = bare(main), bare(seed2)
+        rep = run_match(f"ppo-cross-2v2{tag}", [a, b, a, b], walls, per, 7400, 24)
+        report["cross_2v2"] = pooled(rep, [0, 2], [1, 3])
+        rep = run_match(f"ppo-cross-seed2{tag}", [b, a, a, a], walls, per, 7500, 4)
+        report["cross_1v3_seed2"] = one_seat(rep)
+        rep = run_match(f"ppo-cross-main{tag}", [a, b, b, b], walls, per, 7600, 4)
+        report["cross_1v3_main"] = one_seat(rep)
+        save()
+    samples = 4 if quick else 128
+    pimc = f"pimc:samples={samples},candidates=4,belief={BELIEF},weights=1"
+    specs = [bare(main), pimc, bare(main), pimc]
+
+    def head_to_head(r: dict[str, Any]) -> None:
+        net_side, search_side = side_row(r, [0, 2]), side_row(r, [1, 3])
+        report["vs_pimc128"] = {
+            **pooled(r, [0, 2], [1, 3]),
+            "hands": r["hands"],
+            "walls": r["deals"],
+            "network": net_side,
+            "pimc": search_side,
+            "drift": share_drift(net_side["pattern_shares"], search_side["pattern_shares"]),
+        }
+        save()
+
+    walls2 = 2 if quick else h2h_walls
+    run_match(f"ppo-vs-pimc128{tag}", specs, walls2, per, 7700, 24, on_chunk=head_to_head)
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--stage", choices=["distill", "evaluate", "netpimc", "all"], default="all")
+    ap.add_argument(
+        "--stage", choices=["distill", "evaluate", "netpimc", "ppo-eval", "all"], default="all"
+    )
     ap.add_argument("--quick", action="store_true", help="minutes-long smoke run on 2 chunks")
     ap.add_argument(
         "--cnn", default=None, help="network for evaluate/netpimc (default models/cnn-distill.mjnn)"
@@ -452,6 +629,8 @@ def main(argv: list[str] | None = None) -> int:
     # 8 threads (measured 2026-10-30), so about 16 h; the plan's 1,000 walls would take ~40 h.
     ap.add_argument("--netpimc-walls", type=int, default=400)
     ap.add_argument("--netpimc-chunk", type=int, default=20)
+    # Plan: 1,000 walls. Chunks of 50; the report is rewritten after each chunk.
+    ap.add_argument("--h2h-walls", type=int, default=1000)
     a = ap.parse_args(argv)
     no_power_throttling()
     os.chdir(REPO)
@@ -464,6 +643,8 @@ def main(argv: list[str] | None = None) -> int:
         stage_evaluate(a.quick, cnn)
     if a.stage in ("netpimc", "all"):
         stage_netpimc(a.quick, cnn, a.netpimc_walls, a.netpimc_chunk)
+    if a.stage == "ppo-eval":
+        stage_ppo_eval(a.quick, a.h2h_walls)
     progress("all stages done")
     log("all stages done")
     return 0

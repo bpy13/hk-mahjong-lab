@@ -152,9 +152,13 @@ def test_smoke_run_checkpoints_and_resume(tmp_path: Path) -> None:
     assert (out / state["checkpoint"]).exists()
     assert state["stage"] == 2 and state["min_faan"] == 3
     assert {e["min_faan"] for e in log} >= {0, 3}
-    assert any("eval" in e for e in log)
+    assert any("eval" in e and "mean" in e["eval"]["vs_teacher"] for e in log)
     assert all(np.isfinite(e["policy_loss"]) and np.isfinite(e["value_loss"]) for e in log)
     assert (out / "final.mjnn").exists() and (out / "teacher.pt").exists()
+    assert f"iteration {n}," in (out / "progress.txt").read_text()
+
+    # A log ahead of the checkpoint (a crash after the last checkpoint) is cut back.
+    (out / "log.json").write_text(json.dumps([*log, {**log[-1], "iter": n + 7}]))
 
     # --resume continues the iteration count from the newest checkpoint.
     main(
