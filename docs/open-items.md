@@ -121,6 +121,8 @@ with their defaults.
 - **The danger tables call a tile safe when the player holds its last unseen copy.** Only the
   defending `fast` bot works around it (Task 2); `defensive` and `ev` still have the flaw.
   Default: the race bot counts live copies itself; fix the tables when they are refitted.
-- **Task 4's match is stuck behind the queue's quiet lane** (jobs 29–31 wait while quiet job 28,
-  a holdem benchmark, waits for Dou Dizhu's 72-hour gpu job 27). Raised with Brian 2026-11-09.
+- **Requeue the poker benchmark after all hk-games tasks** (Brian, 2026-11-09). Job 28 was
+  cancelled before it started (no progress lost) to unblock jobs 29–32. Requeue it unchanged:
+  `hkq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
+  with script arguments `-TsOnly` (check `hkq.ps1` usage for how it passes them).
 - `fast` is about 10–15 % slower per hand after Tasks 1–2 (noisy timings).
