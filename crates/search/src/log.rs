@@ -231,7 +231,7 @@ pub fn capture(state: &State, hand: u32, step: u16, agent_ids: [u8; 4]) -> Pendi
     features::encode(state, &mut feats);
     let mut history: [Vec<Tile>; 4] = Default::default();
     for e in state.events() {
-        if let Event::Discard { seat, tile } = *e {
+        if let Event::Discard { seat, tile, .. } = *e {
             history[rel(seat as usize)].push(tile);
         }
     }

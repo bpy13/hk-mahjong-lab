@@ -528,8 +528,12 @@ pub fn event_to_json(e: &Event) -> Value {
         Event::Bonus { seat, tile } => {
             json!({ "type": "event.bonus", "player": seat, "tile": tile_id(tile) })
         }
-        Event::Discard { seat, tile } => {
-            json!({ "type": "event.discard", "player": seat, "tile": tile_id(tile) })
+        Event::Discard {
+            seat,
+            tile,
+            from_hand,
+        } => {
+            json!({ "type": "event.discard", "player": seat, "tile": tile_id(tile), "from_hand": from_hand })
         }
         Event::Claim { seat, from, meld } => {
             json!({ "type": "event.claim", "player": seat, "from": from, "meld": meld_to_json(&meld) })

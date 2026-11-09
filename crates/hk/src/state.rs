@@ -121,8 +121,13 @@ pub enum Event {
     Draw { seat: u8, replacement: bool },
     /// `seat` set aside a bonus tile.
     Bonus { seat: u8, tile: Tile },
-    /// `seat` discarded `tile`.
-    Discard { seat: u8, tile: Tile },
+    /// `seat` discarded `tile`: from the hand 入章 (`from_hand`), or the tile it
+    /// had just drawn 摸打 (§4.5).
+    Discard {
+        seat: u8,
+        tile: Tile,
+        from_hand: bool,
+    },
     /// `seat` claimed `from`'s discard into an exposed meld.
     Claim { seat: u8, from: u8, meld: Meld },
     /// `seat` declared a concealed kong.
@@ -170,6 +175,18 @@ impl fmt::Debug for MeldList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
+}
+
+/// One discard as every seat saw it ([`State::river_entries`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RiverEntry {
+    /// The discarding seat.
+    pub seat: usize,
+    pub tile: Tile,
+    /// Taken into another seat's meld.
+    pub claimed: bool,
+    /// A tile from the hand 入章 (true), or the tile just drawn 摸打 (false), §4.5.
+    pub from_hand: bool,
 }
 
 /// One winner's record.
@@ -558,13 +575,31 @@ impl State {
     /// Each seat's discards still lying in the river (claimed ones excluded), in
     /// order, with the discarding seat. Public.
     pub fn river(&self) -> Vec<(usize, Tile, bool)> {
-        let mut out: Vec<(usize, Tile, bool)> = Vec::new();
+        self.river_entries()
+            .into_iter()
+            .map(|r| (r.seat, r.tile, r.claimed))
+            .collect()
+    }
+
+    /// Every discard in order, claimed ones included, with whether it came from
+    /// the hand or was the tile just drawn (§4.5). Public.
+    pub fn river_entries(&self) -> Vec<RiverEntry> {
+        let mut out: Vec<RiverEntry> = Vec::new();
         for e in &self.events {
             match *e {
-                Event::Discard { seat, tile } => out.push((seat as usize, tile, false)),
+                Event::Discard {
+                    seat,
+                    tile,
+                    from_hand,
+                } => out.push(RiverEntry {
+                    seat: seat as usize,
+                    tile,
+                    claimed: false,
+                    from_hand,
+                }),
                 Event::Claim { .. } => {
                     if let Some(last) = out.last_mut() {
-                        last.2 = true;
+                        last.claimed = true;
                     }
                 }
                 _ => {}
@@ -1123,9 +1158,14 @@ impl State {
             }
             Action::Discard(t) => {
                 self.hands[seat].remove(t);
+                // §4.5: 摸打 when the tile thrown is the one just drawn this turn
+                // (counts cannot tell copies apart, so throwing a tile of the
+                // drawn kind counts as 摸打); otherwise 入章.
+                let from_hand = !(self.drew && self.last_drawn == Some(t));
                 self.events.push(Event::Discard {
                     seat: seat as u8,
                     tile: t,
+                    from_hand,
                 });
                 self.discards += 1;
                 self.dealer_first_turn = false;
@@ -1175,7 +1215,7 @@ impl State {
         let mut end = self.events.len();
         if let (Some(w), Some(last)) = (self.window, self.events.last()) {
             let open = match *last {
-                Event::Discard { seat: p, tile } => {
+                Event::Discard { seat: p, tile, .. } => {
                     self.phase == Phase::Claim && (p, tile) == (w.from, w.tile)
                 }
                 Event::ConcealedKong { seat: p, tile } | Event::AddedKong { seat: p, tile } => {
@@ -1198,7 +1238,7 @@ impl State {
                 {
                     break;
                 }
-                Event::Discard { seat: p, tile } => {
+                Event::Discard { seat: p, tile, .. } => {
                     let earthly = Some(i) == first_discard && p as usize == DEALER;
                     Some((tile, false, false, earthly))
                 }

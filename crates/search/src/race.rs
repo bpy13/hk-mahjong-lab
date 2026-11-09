@@ -422,7 +422,7 @@ impl Table {
             q: bot.config.q,
         };
         for e in state.events() {
-            if let Event::Discard { seat, tile } = *e {
+            if let Event::Discard { seat, tile, .. } = *e {
                 t.discarded[seat as usize][tile.index() as usize] = true;
             }
         }

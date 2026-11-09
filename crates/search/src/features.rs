@@ -123,7 +123,7 @@ pub fn encode(state: &State, out: &mut [f32]) {
     // Discards per seat and recency.
     let mut recent: [Vec<Tile>; 4] = Default::default();
     for e in state.events() {
-        if let Event::Discard { seat, tile } = *e {
+        if let Event::Discard { seat, tile, .. } = *e {
             let r = rel(seat as usize);
             plane(out, 8 + r)[tile.index() as usize] += 0.25;
             recent[r].push(tile);

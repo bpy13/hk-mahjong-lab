@@ -169,7 +169,7 @@ Only what `seat` may see. Other hands appear only once the hand is over.
   "melds": [[ { "kind": "meld.pung", "tile": "E", "tiles": ["E", "E", "E"], "concealed": false, "from": 3 } ], [], [], []],
   "bonus": [["F1"], [], ["S2", "S3"], []],
   "concealed_counts": [14, 13, 13, 13],
-  "river": [ { "player": 0, "tile": "9s", "claimed": false }, "..." ],
+  "river": [ { "player": 0, "tile": "9s", "claimed": false, "from_hand": true }, "..." ],
   "claim": null, "liable": [null, null, null, null],
   "legal": [ Action, "..." ],
   "history": [ { "player": 0, "action": Action }, "..." ],
@@ -183,7 +183,10 @@ Only what `seat` may see. Other hands appear only once the hand is over.
   cannot win on them from another player yet (rules §4.4, the variant `passed_win_lock`,
   on by default). Only the seat's own lock; other seats' locks are hidden.
 - `river`: every discard still lying on the table, in order; `claimed` marks one taken into a
-  meld (it stays listed so the app can fade it, as the lab UI does).
+  meld (it stays listed so the app can fade it, as the lab UI does). `from_hand` is false
+  when the seat threw the tile it had just drawn (摸打) and true for a tile from the hand
+  (入章), including every discard after a claim (rules §4.5). Every seat sees it, as at a
+  real table. `event.discard` carries the same `from_hand`.
 - `claim`: `{tile, from}` while a claim or rob window is open.
 - `liable`: for each seat, the seat liable for it under the 12-tile rule (§8.3), or `null`.
 - `legal` is filled only when it is this seat's turn.

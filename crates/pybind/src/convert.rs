@@ -98,10 +98,15 @@ pub(crate) fn event_dict<'py>(py: Python<'py>, e: &Event) -> PyResult<Bound<'py,
             d.set_item("seat", seat)?;
             d.set_item("tile", idx(tile))?;
         }
-        Event::Discard { seat, tile } => {
+        Event::Discard {
+            seat,
+            tile,
+            from_hand,
+        } => {
             d.set_item("type", "discard")?;
             d.set_item("seat", seat)?;
             d.set_item("tile", idx(tile))?;
+            d.set_item("from_hand", from_hand)?;
         }
         Event::Claim { seat, from, meld } => {
             d.set_item("type", "claim")?;
@@ -206,12 +211,15 @@ pub(crate) fn observation<'py>(
     d.set_item("melds", melds)?;
     d.set_item("bonus", bonus)?;
     d.set_item("concealed_counts", counts)?;
-    let river: Vec<(usize, u32, bool)> = s
-        .river()
-        .into_iter()
-        .map(|(p, t, c)| (p, idx(t), c))
+    let entries = s.river_entries();
+    let river: Vec<(usize, u32, bool)> = entries
+        .iter()
+        .map(|r| (r.seat, idx(r.tile), r.claimed))
         .collect();
     d.set_item("river", river)?;
+    // Parallel to `river`: from the hand 入章 (true) or the tile just drawn 摸打.
+    let from_hand: Vec<bool> = entries.iter().map(|r| r.from_hand).collect();
+    d.set_item("river_from_hand", from_hand)?;
     d.set_item("claim", s.claim_tile().map(|(t, from)| (idx(t), from)))?;
     d.set_item(
         "liable",

@@ -145,7 +145,7 @@ pub fn encode_discards(state: &State, out: &mut [f32]) {
     let me = state.current_player().expect("hand in progress");
     let mut history: [Vec<u8>; 4] = Default::default();
     for e in state.events() {
-        if let Event::Discard { seat, tile } = *e {
+        if let Event::Discard { seat, tile, .. } = *e {
             history[(seat as usize + 4 - me) % 4].push(tile.index());
         }
     }
@@ -525,7 +525,7 @@ mod tests {
         encode_discards(&s, &mut x);
         let mut seen: [Vec<u8>; 4] = Default::default();
         for e in s.events() {
-            if let Event::Discard { seat, tile } = *e {
+            if let Event::Discard { seat, tile, .. } = *e {
                 seen[(seat as usize + 4 - me) % 4].push(tile.index());
             }
         }

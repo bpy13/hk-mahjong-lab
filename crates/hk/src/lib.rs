@@ -19,4 +19,6 @@ pub use faan::{score_win, Pattern, Score, WinContext};
 pub use meld::{Meld, MeldKind};
 pub use position::{PositionError, PositionPhase, PositionSpec};
 pub use rules::{MultipleWinners, Payout, RuleSet};
-pub use state::{Action, Event, HandResult, State, WinRecord, DEALER, NUM_ACTION_CODES};
+pub use state::{
+    Action, Event, HandResult, RiverEntry, State, WinRecord, DEALER, NUM_ACTION_CODES,
+};

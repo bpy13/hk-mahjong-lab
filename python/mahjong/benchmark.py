@@ -306,6 +306,7 @@ def position_snapshot(state: HkState) -> dict[str, Any]:
         "bonus": obs["bonus"],
         "liable": obs["liable"],
         "passed_wins": state.passed_wins(),
+        "river_from_hand": obs["river_from_hand"],
     }
 
 

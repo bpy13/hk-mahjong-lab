@@ -80,6 +80,26 @@ def test_claim_window() -> None:
     assert sorted(s.legal_actions()) == [103, 105]  # pass, pung
 
 
+def test_passed_win_lock_and_discard_record_round_trip() -> None:
+    """Rules §4.4–§4.5 through the Python arguments and the exported snapshot."""
+    from mahjong.benchmark import position_from_json, position_snapshot
+
+    s = HkState.from_position(
+        **position(passed_wins=[[], [], [], [tile("N")]], river_from_hand=[True, False])
+    )
+    assert s.passed_wins() == [[], [], [], [tile("N")]]
+    assert s.observation(2)["river_from_hand"] == [True, False]
+    assert s.observation(3)["passed_win_lock"] == [tile("N")]
+    assert s.observation(2)["passed_win_lock"] == []
+    again = position_from_json(position_snapshot(s), {"flowers": False})
+    assert again.passed_wins() == s.passed_wins()
+    assert again.observation(0)["river_from_hand"] == [True, False]
+    with pytest.raises(ValueError):
+        HkState.from_position(
+            **position(passed_wins=[[], [], [], [tile("N")]], passed_win_lock=False)
+        )
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

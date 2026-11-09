@@ -30,6 +30,7 @@ fn view(hand: &str) -> SeatView {
         bonus: 0,
         unseen,
         rules: RuleSet::default(),
+        river: Vec::new(),
     }
 }
 

@@ -60,6 +60,7 @@ class HkState:
         liable: list[int | None] | None = None,
         kong_chain: int = 0,
         passed_wins: list[list[int]] | None = None,
+        river_from_hand: list[bool] | None = None,
         **rules: object,
     ) -> HkState:
         """Build a mid-hand state without a wall (``State::from_position``).
@@ -68,7 +69,9 @@ class HkState:
         ``(seat, tile, claimed)`` in discard order; ``phase`` is ``"turn"``,
         ``"claim"`` or ``"rob"`` (the last two name ``claim_tile`` and
         ``claim_from``); ``passed_wins`` lists each seat's passed-win lock
-        (rules §4.4). Raises ``ValueError`` on a malformed position.
+        (rules §4.4); ``river_from_hand`` (parallel to ``river``) marks each
+        discard from the hand (True) or the tile just drawn (False, rules §4.5).
+        Raises ``ValueError`` on a malformed position.
         """
     def current_player(self) -> int | None: ...
     def phase(self) -> str: ...

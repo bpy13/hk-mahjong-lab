@@ -118,6 +118,18 @@ Each of the other three players may declare at most one claim on the discard:
 7. Nobody else sees a pass (declarations are hidden, §4.1.1), so each player knows
    only their own lock.
 
+### 4.5 The discard record 摸打 / 入章
+
+Every player sees whether each discard was the tile just drawn (**摸打**, thrown
+straight from the draw) or a tile from the hand (**入章**, the drawn tile kept). The
+engine records this on every discard:
+
+1. A discard of the tile drawn this turn (the turn's draw or a kong replacement) is
+   摸打. The engine counts tiles by kind, so throwing a tile of the same kind as the
+   drawn one also counts as 摸打.
+2. Every other discard is 入章, including the discard after a claimed pung or chow
+   and the dealer's first discard.
+
 ## 5. Kongs and bonus tiles
 
 ### 5.1 Concealed kong 暗槓

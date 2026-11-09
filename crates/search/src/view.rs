@@ -2,7 +2,7 @@
 
 use mahjong_analysis::HandView;
 use mahjong_games::Game;
-use mahjong_hk::{Meld, RuleSet, State};
+use mahjong_hk::{Meld, RiverEntry, RuleSet, State};
 use mahjong_tiles::{Tile, TileCounts};
 
 /// The acting seat's private and public information, owned.
@@ -14,6 +14,9 @@ pub struct SeatView {
     pub bonus: u8,
     pub unseen: TileCounts,
     pub rules: RuleSet,
+    /// Every discard on the table, in order, with whether each came from the
+    /// hand 入章 or was the tile just drawn 摸打 (rules §4.5). Public.
+    pub river: Vec<RiverEntry>,
 }
 
 impl SeatView {
@@ -31,6 +34,7 @@ impl SeatView {
             bonus: state.bonus(seat),
             unseen: state.unseen(seat),
             rules: *state.rules(),
+            river: state.river_entries(),
         }
     }
 

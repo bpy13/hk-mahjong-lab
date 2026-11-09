@@ -49,6 +49,10 @@ pub struct PositionSpec {
     /// Every discard in order: `(seat, tile, claimed)`. A claimed discard is now
     /// part of an exposed meld, so it is counted there, not in the river.
     pub river: Vec<(usize, Tile, bool)>,
+    /// For each river entry, whether it came from the hand 入章 (true) or was the
+    /// tile just drawn 摸打 (false), §4.5. Empty means every discard came from
+    /// the hand (older positions did not record it).
+    pub river_from_hand: Vec<bool>,
     /// Tiles left in the wall (bonus tiles included).
     pub wall_remaining: usize,
     /// The seat whose decision it is: the player on turn, or the seat
@@ -101,6 +105,8 @@ pub enum PositionError {
     BadLastDrawn,
     /// A liability entry that the 12-tile rule cannot produce.
     BadLiability(usize),
+    /// `river_from_hand` is neither empty nor one entry per river discard.
+    RiverFromHandLength { river: usize, given: usize },
     /// A passed-win lock that cannot exist (the reason says why).
     BadPassedWin { seat: usize, reason: &'static str },
     /// The player to move has no decision to make here.
@@ -137,6 +143,10 @@ impl fmt::Display for PositionError {
                 f.write_str("last_drawn must be a tile in the mover's hand, in the turn phase")
             }
             PositionError::BadLiability(s) => write!(f, "liability for seat {s} is impossible"),
+            PositionError::RiverFromHandLength { river, given } => write!(
+                f,
+                "river_from_hand has {given} entries for {river} discards (give none or one each)"
+            ),
             PositionError::BadPassedWin { seat, reason } => {
                 write!(f, "passed-win lock of seat {seat}: {reason}")
             }
@@ -342,12 +352,20 @@ pub(crate) fn check(rules: &RuleSet, spec: &PositionSpec) -> Result<Checked, Pos
     // Claimed discards pair up with the exposed melds; the log follows the river.
     let claimed: Vec<usize> = (0..spec.river.len()).filter(|&i| spec.river[i].2).collect();
     let claims = match_claims(spec, &claimed).ok_or(PositionError::ClaimsDoNotMatchMelds)?;
+    let given = spec.river_from_hand.len();
+    if given != 0 && given != spec.river.len() {
+        return Err(PositionError::RiverFromHandLength {
+            river: spec.river.len(),
+            given,
+        });
+    }
     let mut events = Vec::with_capacity(spec.river.len() + claims.len() + 16);
     let mut next_claim = claims.iter();
-    for &(seat, tile, was_claimed) in &spec.river {
+    for (i, &(seat, tile, was_claimed)) in spec.river.iter().enumerate() {
         events.push(Event::Discard {
             seat: seat as u8,
             tile,
+            from_hand: spec.river_from_hand.get(i).copied().unwrap_or(true),
         });
         if was_claimed {
             let &(claimer, meld) = next_claim.next().expect("one pairing per claim");
@@ -483,6 +501,7 @@ impl State {
                     .collect()
             }),
             river: self.river(),
+            river_from_hand: self.river_entries().iter().map(|r| r.from_hand).collect(),
             wall_remaining: self.wall_remaining(),
             to_move,
             phase,

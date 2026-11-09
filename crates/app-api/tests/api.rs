@@ -821,3 +821,49 @@ fn same_seed_replays_identically_through_the_json_api() {
         "different seeds deal different hands"
     );
 }
+
+/// Rules §4.4–§4.5: the passed-win variant and lock, and 摸打 / 入章 on every discard.
+#[test]
+fn views_carry_the_discard_record_and_the_own_passed_win_lock() {
+    let (_cpu, mut api) = shared();
+    let m = ok(&api.meta());
+    assert_eq!(m["variants"]["passed_win_lock"], json!(["on", "off"]));
+    let id = new_game(&mut api, 5);
+    let (mut drawn, mut kept) = (0, 0);
+    for _ in 0..60 {
+        let view = ok(&api.view(&id, 0));
+        if view["over"].as_bool().unwrap() {
+            break;
+        }
+        assert_eq!(view["rules"]["passed_win_lock"], "on");
+        assert!(view["passed_win_lock"].is_array());
+        // Every seat sees the same river, record included.
+        assert_eq!(view["river"], ok(&api.view(&id, 2))["river"]);
+        let action = ok(&api.bot_action(&id, "easy", 200));
+        let r = ok(&api.apply(&id, &action.to_string()));
+        for e in r["events"].as_array().unwrap() {
+            if e["type"] == "event.discard" {
+                match e["from_hand"].as_bool().expect("from_hand is a bool") {
+                    true => kept += 1,
+                    false => drawn += 1,
+                }
+            }
+        }
+    }
+    assert!(drawn > 0 && kept > 0, "摸打 {drawn}, 入章 {kept}");
+    let river = ok(&api.view(&id, 1))["river"].clone();
+    let flags: Vec<bool> = river
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["from_hand"].as_bool().unwrap())
+        .collect();
+    assert_eq!(flags.iter().filter(|&&f| !f).count(), drawn);
+    // A restored hand replays to the same record.
+    let snap = ok(&api.snapshot(&id));
+    let copy = ok(&api.restore(&snap.to_string()))["game_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(ok(&api.view(&copy, 1))["river"], river);
+}

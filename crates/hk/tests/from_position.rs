@@ -159,6 +159,8 @@ fn turn_position() -> (RuleSet, PositionSpec) {
         kong_chain: 0,
         liable: [None; 4],
         passed_wins: Default::default(),
+        // Seat 1 threw the W it had just drawn (摸打).
+        river_from_hand: vec![true, false],
     };
     (rules, spec)
 }
@@ -170,6 +172,7 @@ fn claim_position() -> (RuleSet, PositionSpec) {
     spec.hands[0] = tiles("123m 456m 789m RR 3s E");
     spec.hands[2] = tiles("123s 456s 789s R 66m 5s");
     spec.river.push((2, t("R"), false));
+    spec.river_from_hand.push(true);
     spec.phase = PositionPhase::Claim {
         tile: t("R"),
         from: 2,
@@ -187,7 +190,14 @@ fn a_turn_position_builds_and_round_trips() {
     assert_eq!(s.wall_remaining(), 82);
     assert_eq!(s.river(), spec.river);
     assert!(s.legal_actions_vec().contains(&Action::Discard(t("5s"))));
-    assert_eq!(s.to_position(), Some(spec));
+    let from_hand: Vec<bool> = s.river_entries().iter().map(|r| r.from_hand).collect();
+    assert_eq!(from_hand, [true, false]);
+    assert_eq!(s.to_position(), Some(spec.clone()));
+    // A position without the record (older specs) reads every discard as 入章.
+    let mut old = spec;
+    old.river_from_hand.clear();
+    let s = State::from_position(rules, &old).unwrap();
+    assert!(s.river_entries().iter().all(|r| r.from_hand));
 }
 
 #[test]
@@ -266,6 +276,9 @@ fn malformed_positions_are_errors_not_panics() {
     let (_, mut p) = claim_position();
     p.to_move = 2;
     cases.push(("the discarder claims its own tile", p));
+    let mut p = base.clone();
+    p.river_from_hand.pop();
+    cases.push(("river_from_hand shorter than the river", p));
 
     for (name, spec) in cases {
         let r = std::panic::catch_unwind(|| State::from_position(rules, &spec));

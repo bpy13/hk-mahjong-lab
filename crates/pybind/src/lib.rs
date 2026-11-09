@@ -110,14 +110,16 @@ impl PyState {
     /// order. `phase` is `"turn"`, `"claim"` or `"rob"`; a claim or rob names
     /// `claim_tile` and `claim_from`. `to_move` is the seat whose decision it
     /// is. `passed_wins` lists, per seat, the tiles it passed a win on since its
-    /// turn last started (the passed-win lock, rules §4.4; default none). The
-    /// undrawn wall holds the tiles not accounted for, in index order:
-    /// determinize before playing on. Raises `ValueError` on a malformed
-    /// position.
+    /// turn last started (the passed-win lock, rules §4.4; default none).
+    /// `river_from_hand`, parallel to `river`, says whether each discard came
+    /// from the hand (入章) or was the tile just drawn (摸打, rules §4.5);
+    /// default: all from the hand. The undrawn wall holds the tiles not
+    /// accounted for, in index order: determinize before playing on. Raises
+    /// `ValueError` on a malformed position.
     #[staticmethod]
     #[pyo3(signature = (hands, melds, river, wall_remaining, to_move, phase="turn",
         claim_tile=None, claim_from=None, last_drawn=None, bonus=None, liable=None,
-        kong_chain=0, passed_wins=None, **rules))]
+        kong_chain=0, passed_wins=None, river_from_hand=None, **rules))]
     #[allow(clippy::too_many_arguments)]
     fn from_position(
         hands: Vec<Vec<u32>>,
@@ -133,10 +135,11 @@ impl PyState {
         liable: Option<Vec<Option<usize>>>,
         kong_chain: u8,
         passed_wins: Option<Vec<Vec<u32>>>,
+        river_from_hand: Option<Vec<bool>>,
         rules: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
         let rules = rules_from(rules)?;
-        let spec = position_spec(
+        let mut spec = position_spec(
             hands,
             melds,
             river,
@@ -150,6 +153,7 @@ impl PyState {
             kong_chain,
             passed_wins.unwrap_or_else(|| vec![Vec::new(); 4]),
         )?;
+        spec.river_from_hand = river_from_hand.unwrap_or_default();
         State::from_position(rules, &spec)
             .map(|inner| PyState { inner })
             .map_err(value_error)
@@ -381,6 +385,7 @@ fn position_spec(
         melds: per_seat("melds", meld_lists)?,
         bonus: per_seat("bonus", bonus)?,
         river,
+        river_from_hand: Vec::new(),
         wall_remaining,
         to_move,
         phase,

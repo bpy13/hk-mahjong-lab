@@ -200,7 +200,7 @@ version on deals).
     kong rob until its next turn (draw or own claim); other seats can still win; pung and
     chow are unaffected; `RuleSet::passed_win_lock` false restores today's play; the
     position spec round-trips the lock; `cargo test --workspace --release` passes.
-- [ ] **Task 13: 摸打 / 入章 in the record** (opus)
+- [x] **Task 13: 摸打 / 入章 in the record** (opus)
   - Files: `crates/hk/src/state.rs` (discard history), app-api view JSON, `SeatView`.
   - Done when: each discard in the view carries `from_hand: bool`; test.
 - [ ] **Task 14: Passed-tile safety in the race bot and the defending `fast` bot** (fable:

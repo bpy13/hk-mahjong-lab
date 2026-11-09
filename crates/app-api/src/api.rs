@@ -716,7 +716,7 @@ fn seat_view(game_id: &str, g: &GameEntry, seat: usize) -> Value {
         "melds": (0..4).map(|p| s.melds(p).iter().map(meld_to_json).collect::<Vec<_>>()).collect::<Vec<_>>(),
         "bonus": (0..4).map(|p| bonus_to_json(s.bonus(p))).collect::<Vec<_>>(),
         "concealed_counts": (0..4).map(|p| s.concealed_count(p)).collect::<Vec<_>>(),
-        "river": s.river().into_iter().map(|(p, t, claimed)| json!({ "player": p, "tile": tile_id(t), "claimed": claimed })).collect::<Vec<_>>(),
+        "river": s.river_entries().into_iter().map(|r| json!({ "player": r.seat, "tile": tile_id(r.tile), "claimed": r.claimed, "from_hand": r.from_hand })).collect::<Vec<_>>(),
         "claim": s.claim_tile().map(|(t, from)| json!({ "tile": tile_id(t), "from": from })),
         "liable": (0..4).map(|p| s.liable_for(p)).collect::<Vec<_>>(),
         "legal": legal,

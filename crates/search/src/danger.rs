@@ -90,7 +90,7 @@ impl Opponent {
         let progress = (1.0 - state.wall_remaining() as f64 / initial_wall).clamp(0.0, 0.999);
         let mut discarded = [false; NUM_KINDS];
         for e in state.events() {
-            if let Event::Discard { seat, tile } = *e {
+            if let Event::Discard { seat, tile, .. } = *e {
                 if seat as usize == o {
                     discarded[tile.index() as usize] = true;
                 }
@@ -510,6 +510,7 @@ mod tests {
             kong_chain: 0,
             liable: [None; 4],
             passed_wins: Default::default(),
+            river_from_hand: Vec::new(),
         };
         State::from_position(RuleSet::default(), &spec).expect("a valid position")
     }

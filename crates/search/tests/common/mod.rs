@@ -149,6 +149,7 @@ pub fn build(s: Setup) -> State {
         kong_chain: 0,
         liable: s.liable,
         passed_wins: Default::default(),
+        river_from_hand: Vec::new(),
     };
     State::from_position(RuleSet::default(), &spec).expect("a valid position")
 }
