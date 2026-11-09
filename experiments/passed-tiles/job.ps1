@@ -31,11 +31,11 @@ if (-not $SkipBuild) {
 # 2. One tournament; skipped when its output exists.
 function Match($name, [string[]]$agents, [int]$deals, [string[]]$extra = @()) {
     $file = Join-Path $out "passed-$name.json"
-    if (Test-Path $file) { Stamp "$name: done already"; return }
-    Stamp "$name: start"
+    if (Test-Path $file) { Stamp "${name}: done already"; return }
+    Stamp "${name}: start"
     & $python -c "from mahjong.cli.main import app; app()" hk tournament @agents --deals $deals --seed 2026 --out $file @extra
-    if ($LASTEXITCODE -ne 0) { Stamp "$name: FAILED ($LASTEXITCODE)"; exit $LASTEXITCODE }
-    Stamp "$name: done"
+    if ($LASTEXITCODE -ne 0) { Stamp "${name}: FAILED ($LASTEXITCODE)"; exit $LASTEXITCODE }
+    Stamp "${name}: done"
 }
 
 $b = 'race:belief=models/belief.mjnn'

@@ -1,6 +1,6 @@
 # Race bot: passed-tile safety and risk read (plan 2026-11-09, Phase 6, Task 16)
 
-Status: job queued, results not in yet.
+Status: job 34 failed at once (PowerShell parse error: `"$name:"`); fixed and requeued as job 35 on 2026-11-10; results not in yet.
 
 What the job measures (`experiments/passed-tiles/job.ps1`, cpu lane, after job 32):
 
