@@ -2,7 +2,7 @@
 //!
 //! Every decision of a self-play hand writes one **row**, seen from the player to
 //! act (the observer): the observer's public features ([`features::encode`]),
-//! each seat's last [`DISCARD_HISTORY`] discards, and the **hidden truth** about
+//! its passed-tile record ([`features::encode_passed`], since layout 2), each seat's last [`DISCARD_HISTORY`] discards, and the **hidden truth** about
 //! the three opponents (relative seats 1 = next, 2 = across, 3 = previous): their
 //! concealed tiles, whether they are waiting with a legal win, on which tiles, how
 //! much a win on a discard would pay them now, and how the hand really ended for
@@ -14,7 +14,7 @@
 //! `meta.json` that repeats the layout, so readers (the Python package's
 //! `mahjong.belief.logs`) build their record type from the file, not from code.
 
-use crate::features::{self, STATE_LEN};
+use crate::features::{self, PASSED_LEN, STATE_LEN};
 use mahjong_games::Game;
 use mahjong_hk::{score_win, Event, HandResult, State, WinContext};
 use mahjong_tiles::{Tile, NUM_KINDS};
@@ -28,7 +28,7 @@ pub const DISCARD_HISTORY: usize = 8;
 /// Marks an empty slot in the discard history and "nobody" in seat fields.
 pub const NONE: u8 = 255;
 /// Layout version written to `meta.json`; bump when [`FIELDS`] changes.
-pub const LAYOUT_VERSION: u32 = 1;
+pub const LAYOUT_VERSION: u32 = 2;
 
 /// One field of a row: a name, a NumPy-style little-endian type and a shape.
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +70,9 @@ pub const FIELDS: &[Field] = &[
     f("agents", "u1", &[4]),
     // The observer's public features (features::encode), as float16.
     f("features", "f2", &[STATE_LEN]),
+    // The passed-tile record and 摸打 / 入章 (features::encode_passed), as float16
+    // (layout version 2, plan 2026-11-09 Task 18).
+    f("passed", "f2", &[PASSED_LEN]),
     // Tile index of each relative seat's discards, most recent first; 255 = none.
     f("discards", "u1", &[4, DISCARD_HISTORY]),
     // Hidden truth per opponent: concealed tile counts.
@@ -213,6 +216,7 @@ pub struct PendingRow {
     phase: u8,
     wall_remaining: u8,
     agents: [u8; 4],
+    /// The `features` and `passed` fields, in that order.
     features: Vec<f32>,
     discards: [[u8; DISCARD_HISTORY]; 4],
     opp: [Truth; 3],
@@ -227,8 +231,11 @@ pub struct PendingRow {
 pub fn capture(state: &State, hand: u32, step: u16, agent_ids: [u8; 4]) -> PendingRow {
     let me = state.current_player().expect("hand in progress");
     let rel = |seat: usize| (seat + 4 - me) % 4;
-    let mut feats = vec![0.0f32; STATE_LEN];
-    features::encode(state, &mut feats);
+    // `features` then `passed`, adjacent in the row.
+    let mut feats = vec![0.0f32; STATE_LEN + PASSED_LEN];
+    let (f, p) = feats.split_at_mut(STATE_LEN);
+    features::encode(state, f);
+    features::encode_passed(state, p);
     let mut history: [Vec<Tile>; 4] = Default::default();
     for e in state.events() {
         if let Event::Discard { seat, tile, .. } = *e {

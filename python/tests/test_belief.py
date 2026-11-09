@@ -15,6 +15,7 @@ from mahjong.belief.model import (
     MAX_COPIES,
     N_OPP,
     OUTPUT_LEN,
+    PASSED_LEN,
     Batch,
     BeliefConfig,
     BeliefNet,
@@ -154,6 +155,24 @@ def test_export_v2_round_trip(tmp_path: Path) -> None:
             x = np.maximum(x, 0)
     torch_out = net(net.inputs(b.features, b.discards)).detach().numpy()
     assert np.allclose(x, torch_out, atol=1e-4)
+
+
+def test_passed_block_feeds_and_exports(tmp_path: Path) -> None:
+    """With ``passed=True`` the passed-tile block follows the other inputs, in the
+    network and in the exported file (plan 2026-11-09 Task 18)."""
+    net = BeliefNet(BeliefConfig(hidden=(8,), discards=True, passed=True))
+    b = fake_batch(3, seed=2)
+    passed = torch.rand(3, PASSED_LEN).half()
+    x = net.inputs(b.features, b.discards, passed)
+    assert x.shape == (3, STATE_LEN + DISCARD_LEN + PASSED_LEN)
+    assert torch.equal(x[:, STATE_LEN + DISCARD_LEN :], passed.float())
+    with pytest.raises(ValueError):
+        net.inputs(b.features, b.discards)
+    net.export(tmp_path / "p.mjnn")
+    ins = read_mjnn(tmp_path / "p.mjnn")[0]
+    assert ins[-1] == ("passed", STATE_LEN + DISCARD_LEN, PASSED_LEN)
+    net.save(tmp_path / "p.pt")
+    assert BeliefNet.load(tmp_path / "p.pt").cfg.passed
 
 
 def test_loss_falls_when_fitting_a_fixed_batch() -> None:

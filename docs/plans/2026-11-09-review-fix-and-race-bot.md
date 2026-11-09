@@ -238,6 +238,10 @@ version on deals).
   - Done when: each retrained model passes its existing checks (belief calibration, danger
     calibration, the distilled network against the teacher); the app's review and drills use
     the new models only if they are not weaker in a duplicate match.
+  - Status (2026-11-10): code and data half done (open-items, "Task 18, code and data
+    half"): `faan_shanten` fix, `features::encode_passed` in the logs and the belief model's
+    `--passed`; self-play logs queued (`experiments\task18-data\selfplay.ps1`); labels script
+    ready, waiting for the retrained belief model. Training, refits and matches remain.
 - Phase 4's loop (job 33) waits for this phase: its logger and features add the passed-tile
   record and the risk-taking read, and it is requeued after Task 16.
 

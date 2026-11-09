@@ -114,11 +114,30 @@ with their defaults.
 
 ## From the review-fix and race-bot run (plan 2026-11-09)
 - **`faan_shanten` calls four pin pungs plus a lone Green "ready for a full flush"**; the true
-  distance is one step more. A fix passes the analysis tests but changes the feature encoding,
-  so every model would need retraining. Not applied; patch kept outside the repo
-  (coordinator's scratchpad, `analysis-leftover-fix.patch`). Likely also why `ev` swaps the live
-  4p for honour singles after Brian's pung (not traced). Default: fix it in Phase 4, when the
-  race bot's network is trained anyway.
+  distance is one step more. **Applied 2026-11-10 (Task 18)** with the passed-tile block; the
+  encoding's fast acceptance count needed a matching fix (an isolated tile can now lower the
+  measure), checked against the plain count on 600 hands. Whether `ev` still swaps the live 4p
+  for honour singles after Brian's pung is not traced.
+- **Task 18, code and data half (2026-11-10).** Done: the `faan_shanten` fix; a new public
+  input block `passed` (`features::encode_passed`, 488 values: passed tiles per opponent with
+  their 入章 since, 入章 discards per seat, own passed-win lock, 摸打 / 入章 of each seat's last
+  three discards); the self-play, race and label logs carry it (layouts 2, 103, 2); the
+  belief model reads it with `--passed`. Old networks still load: `passed` is a separate
+  named input, not more `features` planes. Left for the training half:
+  (1) the suit-shared CNN (`cnn.rs`, `rl/cnn.py`; the distilled network and PPO) reads only
+  `features`, so it does not see the passed block yet; extend it before distilling;
+  (2) the danger tables and `PASSED_FACTOR` refit on the new logs (`fit_danger`, `fit_passed`);
+  (3) `features::encode` speed after the fix is not measured (no benchmark while jobs ran).
+- **Task 18: label with the old belief model now, or wait for the retrained one?**
+  **What it is:** the teacher that writes the distillation labels (64-sample search) and the
+  three other seats read a belief model, a network that guesses opponents' hidden tiles.
+  **Example:** the job `experiments\task18-data\labels.ps1 -Belief 'models/belief.mjnn'`
+  would start today with the old model; with the retrained model it waits for its GPU
+  training, which queues behind Dou Dizhu (about 2026-11-12).
+  **Why it matters:** the job takes about 14 hours of CPU. Labels from the old model teach the
+  network moves chosen without the passed-tile record; a relabel later costs the 14 hours again.
+  **Options:** (a) wait for the retrained belief model, then queue the labels; (b) label now
+  with the old model. **Default: (a)**; the script is ready and not queued.
 - **The danger tables call a tile safe when the player holds its last unseen copy.** Only the
   defending `fast` bot works around it (Task 2); `defensive` and `ev` still have the flaw.
   Default: the race bot counts live copies itself; fix the tables when they are refitted.

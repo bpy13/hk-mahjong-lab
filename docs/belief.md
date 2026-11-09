@@ -12,6 +12,7 @@ tests `python/tests/test_belief.py` and `cargo test -p mahjong-search net::`.
 |---|---|---|
 | public features | 933 | `features::encode` (the observer's view: own hand, melds, discards per seat with the last three weighted, unseen counts, heuristic danger, shanten after each discard, scalars) |
 | discard order (**off**, §5) | 3 × 8 × 34 = 816 | each opponent's last eight discards one-hot, most recent first (`net.rs::encode_discards`; the log's `discards` field for relative seats 1–3). Trained with `--discards`; the committed model does not use it |
+| passed tiles (plan 2026-11-09 Task 18) | 14 × 34 + 12 = 488 | `features::encode_passed`: per opponent, the tiles it let pass (before and after its next turn) and its 入章 since; each seat's 入章 discards; the observer's own passed-win lock; each seat's last three discards as 摸打 or 入章. The log's `passed` field (layout 2, from 2026-11-10). Trained with `--passed`; the committed model does not use it |
 
 Nothing hidden enters: the Rust test `net::tests::hidden_tiles_do_not_change_v2_outputs`
 (40 mid-hand positions, each re-dealt behind the observer's back, also run on the

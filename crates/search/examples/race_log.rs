@@ -71,8 +71,9 @@ const RACE_FIELDS: &[Field] = &[
     field("race_rounds", "u1", &[]),
     field("race_pwin", "f2", &[4]),
 ];
-/// Layout version of a race log (the belief log is version 1).
-const RACE_LAYOUT_VERSION: u32 = 102;
+/// Layout version of a race log: 103 = the belief log's layout 2 (with `passed`)
+/// followed by the race labels (102 was over layout 1).
+const RACE_LAYOUT_VERSION: u32 = 103;
 const NONE: u8 = 255;
 const DEFAULT_FIXED: &[&str] = &["value", "defensive", "fast", "efficiency", "closed"];
 

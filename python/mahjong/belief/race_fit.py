@@ -249,7 +249,7 @@ def _predict(net: BeliefNet, log: LogDir, bs: int = 4096) -> tuple[np.ndarray, n
         for rows in log.chunks():
             for i in range(0, len(rows), bs):
                 b = batch_from_rows(rows[i : i + bs])
-                p = net.predict(net(net.inputs(b.features, b.discards)), b.unseen)
+                p = net.predict(net(net.inputs(b.features, b.discards, b.passed)), b.unseen)
                 states.append(p["state"].numpy())
                 modes.append(p["mode"].numpy())
     return np.concatenate(states), np.concatenate(modes)

@@ -20,7 +20,7 @@
 //! after the last complete chunk with the same rows a single run would write.
 
 use crate::agent::Agent;
-use crate::features::{self, ORACLE_LEN, STATE_LEN};
+use crate::features::{self, ORACLE_LEN, PASSED_LEN, STATE_LEN};
 use crate::log::{f16_bits, layout_bytes, Field};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, Structure, SuitPlan, Target};
@@ -33,7 +33,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 
 /// Layout version written to `meta.json`; bump when [`FIELDS`] changes.
-pub const LABEL_LAYOUT_VERSION: u32 = 1;
+pub const LABEL_LAYOUT_VERSION: u32 = 2;
 /// Candidate slots per row (PIMC-64 with 4 discard candidates evaluates at most
 /// 4 discards, the special actions and the anchor's move).
 pub const MAX_CANDIDATES: usize = 12;
@@ -61,6 +61,9 @@ pub const FIELDS: &[Field] = &[
     // block (features::encode_oracle), as float16.
     f("features", "f2", &[STATE_LEN]),
     f("oracle", "f2", &[ORACLE_LEN]),
+    // The passed-tile record and 摸打 / 入章 (features::encode_passed), as float16
+    // (layout version 2, plan 2026-11-09 Task 18).
+    f("passed", "f2", &[PASSED_LEN]),
     // 1 for each legal action code.
     f("legal", "u1", &[NUM_ACTION_CODES]),
     // The search: candidates (action code, 65535 = empty slot), samples per
@@ -154,6 +157,7 @@ pub struct LabelRow {
     pub wall_remaining: u8,
     pub features: Vec<f32>,
     pub oracle: Vec<f32>,
+    pub passed: Vec<f32>,
     pub legal: Vec<u8>,
     /// (code, n, mean, ci95, diff, diff_se, win rate, deal-in rate).
     pub candidates: Vec<(u16, u16, [f32; 6])>,
@@ -194,7 +198,7 @@ impl LabelRow {
         out.push(self.seat);
         out.push(self.phase);
         out.push(self.wall_remaining);
-        for &x in self.features.iter().chain(&self.oracle) {
+        for &x in self.features.iter().chain(&self.oracle).chain(&self.passed) {
             out.extend_from_slice(&f16_bits(x).to_le_bytes());
         }
         out.extend_from_slice(&self.legal);
@@ -302,6 +306,8 @@ impl Labeller {
         features::encode(s, &mut feats);
         let mut oracle = vec![0.0f32; ORACLE_LEN];
         features::encode_oracle(s, &mut oracle);
+        let mut passed = vec![0.0f32; PASSED_LEN];
+        features::encode_passed(s, &mut passed);
         let mut mask = vec![0u8; NUM_ACTION_CODES];
         for a in legal {
             mask[a.code() as usize] = 1;
@@ -346,6 +352,7 @@ impl Labeller {
             wall_remaining: s.wall_remaining().min(255) as u8,
             features: feats,
             oracle,
+            passed,
             legal: mask,
             candidates,
             baseline,
@@ -472,7 +479,7 @@ mod tests {
         assert_eq!(out.len(), 6 * label_row_bytes());
         assert!(hands >= 1);
         // n_candidates sits right after the legal mask.
-        let off = 4 + 2 + 2 + 3 + 2 * (STATE_LEN + ORACLE_LEN) + NUM_ACTION_CODES;
+        let off = 4 + 2 + 2 + 3 + 2 * (STATE_LEN + ORACLE_LEN + PASSED_LEN) + NUM_ACTION_CODES;
         for r in 0..6 {
             let n = out[r * label_row_bytes() + off];
             assert!(n >= 1 && n as usize <= MAX_CANDIDATES, "row {r}: {n}");

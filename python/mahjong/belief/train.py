@@ -3,7 +3,7 @@
 ::
 
     python -m mahjong.belief.train --logs runs/logs/train --out models/belief.pt --epochs 5
-        [--holdout runs/logs/holdout] [--discards] [--resume] [--ckpt-dir runs/belief]
+        [--holdout runs/logs/holdout] [--discards] [--passed] [--resume] [--ckpt-dir runs/belief]
         [--log runs/belief/train.log] [--race] [--init models/belief.pt]
 
 ``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
@@ -63,7 +63,7 @@ def evaluate_loss(net: BeliefNet, batch: Batch, device: torch.device, bs: int) -
     with torch.no_grad():
         for i in range(0, len(batch), bs):
             b = batch.index(torch.arange(i, min(i + bs, len(batch)))).to(device)
-            out = net(net.inputs(b.features, b.discards))
+            out = net(net.inputs(b.features, b.discards, b.passed))
             parts = losses(net, out, b)
             for k, v in parts.items():
                 sums[k] = sums.get(k, 0.0) + float(v) * len(b)
@@ -87,7 +87,9 @@ def train(args: argparse.Namespace) -> BeliefNet:
     device = torch.device(args.device)
     log = LogDir(args.logs)
     holdout = LogDir(args.holdout) if args.holdout and Path(args.holdout).exists() else None
-    cfg = BeliefConfig(hidden=tuple(args.hidden), discards=args.discards, race=args.race)
+    cfg = BeliefConfig(
+        hidden=tuple(args.hidden), discards=args.discards, passed=args.passed, race=args.race
+    )
     net = BeliefNet(cfg)
     if args.init:
         warm_start(net, BeliefNet.load(Path(args.init)))
@@ -142,7 +144,7 @@ def train(args: argparse.Namespace) -> BeliefNet:
             perm = torch.randperm(len(group), device=device)
             for i in range(0, len(group) - args.batch + 1, args.batch):
                 b = group.index(perm[i : i + args.batch])
-                out = net(net.inputs(b.features, b.discards))
+                out = net(net.inputs(b.features, b.discards, b.passed))
                 parts = losses(net, out, b)
                 opt.zero_grad(set_to_none=True)
                 parts["total"].backward()  # type: ignore[no-untyped-call]
@@ -198,6 +200,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--discards",
         action="store_true",
         help="also feed the discard-order block (docs/belief.md §5)",
+    )
+    p.add_argument(
+        "--passed",
+        action="store_true",
+        help="also feed the passed-tile block (needs logs of layout 2; plan 2026-11-09 Task 18)",
     )
     p.add_argument(
         "--race",

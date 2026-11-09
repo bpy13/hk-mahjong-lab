@@ -256,7 +256,7 @@ def _forward(
     preds: dict[str, list[torch.Tensor]] = {"tenpai": [], "waits": [], "outcome": [], "counts": []}
     for i in range(0, len(b), bs):
         part = b.index(torch.arange(i, min(i + bs, len(b)))).to(device)
-        out = net(net.inputs(part.features, part.discards))
+        out = net(net.inputs(part.features, part.discards, part.passed))
         p = net.predict(out, part.unseen)
         logp = torch.log_softmax(mask_counts(net.split(out)["counts"], part.unseen), dim=-1)
         nll.append(_mean_nll(logp, part.counts).sum(dim=(1, 2)).cpu())

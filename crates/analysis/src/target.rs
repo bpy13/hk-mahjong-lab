@@ -262,8 +262,22 @@ impl<'v, 'a> PlanShanten<'v, 'a> {
             return None;
         }
         let f = group_frontier(&honours, true, structure).combine(&self.suits_of(plan, structure));
-        Some(shanten_of(&f, melds) + extra)
+        // The tiles the plan keeps (see `shanten_of`: they may leave nothing to pair).
+        let suited: usize = match plan {
+            SuitPlan::Mixed => Suit::ALL
+                .into_iter()
+                .map(|s| suit_total(view.concealed, s))
+                .sum(),
+            SuitPlan::HalfFlush(s) | SuitPlan::FullFlush(s) => suit_total(view.concealed, s),
+            SuitPlan::Honours | SuitPlan::Orphans => 0,
+        };
+        let kept = suited + honours.iter().map(|&c| c as usize).sum::<usize>();
+        Some(shanten_of(&f, melds, kept) + extra)
     }
+}
+
+fn suit_total(c: &TileCounts, suit: Suit) -> usize {
+    c.suit_counts(suit).iter().map(|&n| n as usize).sum()
 }
 
 /// Shanten toward one plan, or `None` if the plan is impossible (the reference
@@ -620,6 +634,23 @@ mod tests {
         // The cases reached every kind of plan and planned scoring pungs.
         assert_eq!(seen_plans.len(), 5, "plans reached: {}", seen_plans.len());
         assert!(pungs_planned > 1000, "{pungs_planned}");
+    }
+
+    #[test]
+    fn a_flush_plan_with_only_forbidden_tiles_left_is_not_ready() {
+        // Four pin pungs and a Green: toward a full flush the Green must be
+        // exchanged for a pin before the hand waits, so the flush is one exchange
+        // away; the hand is ready only as a half flush (on the Green).
+        let pungs: Vec<Meld> = ["1p", "3p", "7p", "8p"]
+            .iter()
+            .map(|t| Meld::exposed(MeldKind::Pung, t.parse().unwrap(), 2))
+            .collect();
+        let s = fs("G", &pungs, &no_flowers());
+        assert_eq!(s.shanten, 0);
+        assert_eq!(s.target.unwrap().plan, SuitPlan::HalfFlush(Suit::Dots));
+        let s = fs("4p", &pungs, &no_flowers());
+        assert_eq!(s.shanten, 0);
+        assert_eq!(s.target.unwrap().plan, SuitPlan::FullFlush(Suit::Dots));
     }
 
     #[test]

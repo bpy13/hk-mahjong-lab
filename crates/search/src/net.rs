@@ -19,7 +19,8 @@
 //!
 //! **Version 2** names its input and output slices. Input names this module can
 //! fill from a [`State`]: `features` ([`crate::features::encode`]), `oracle`
-//! (zeros at play time) and `discards` ([`encode_discards`]: each opponent's last
+//! (zeros at play time), `passed` ([`crate::features::encode_passed`]: the
+//! passed-tile record and 摸打 / 入章) and `discards` ([`encode_discards`]: each opponent's last
 //! eight discards, one-hot). Output names are the model's business (the belief
 //! model's are listed in `docs/belief.md`); a `policy` slice, when present, is
 //! what [`NetPolicy`] reads. A v2 network without a `policy` slice is not a
@@ -32,7 +33,7 @@
 //! `netpimc:` agents take v3 files unchanged.
 
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
-use crate::features::{encode, ORACLE_LEN, STATE_LEN};
+use crate::features::{encode, encode_passed, ORACLE_LEN, PASSED_LEN, STATE_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
 use mahjong_tiles::NUM_KINDS;
@@ -242,6 +243,7 @@ impl Mlp {
                 "features" => STATE_LEN,
                 "oracle" => ORACLE_LEN,
                 "discards" => DISCARD_LEN,
+                "passed" => PASSED_LEN,
                 other => return Err(format!("unknown input slice {other:?}")),
             };
             if s.range.len() != want || s.range.end > first.inp {
@@ -315,7 +317,7 @@ impl Mlp {
     }
 
     /// The input vector for `state`: every named input slice filled from public
-    /// information (`features`, `discards`; `oracle` stays zero).
+    /// information (`features`, `discards`, `passed`; `oracle` stays zero).
     ///
     /// # Panics
     /// Panics if the hand is over.
@@ -325,6 +327,7 @@ impl Mlp {
             match s.name.as_str() {
                 "features" => encode(state, &mut x[s.range.clone()]),
                 "discards" => encode_discards(state, &mut x[s.range.clone()]),
+                "passed" => encode_passed(state, &mut x[s.range.clone()]),
                 _ => {}
             }
         }
@@ -449,7 +452,8 @@ mod tests {
         }
     }
 
-    /// A v2 belief-shaped network: features + discards in, named slices out.
+    /// A v2 belief-shaped network: features + discards + passed in, named slices
+    /// out.
     fn tiny_v2() -> Vec<u8> {
         let mut b = b"MJNN".to_vec();
         b.extend(2u32.to_le_bytes());
@@ -458,10 +462,14 @@ mod tests {
             &[
                 ("features", 0, STATE_LEN),
                 ("discards", STATE_LEN, DISCARD_LEN),
+                ("passed", STATE_LEN + DISCARD_LEN, PASSED_LEN),
             ],
         );
         push_slices(&mut b, &[("tenpai", 0, 3), ("counts", 3, 510)]);
-        push_layers(&mut b, &[(6, STATE_LEN + DISCARD_LEN), (513, 6)]);
+        push_layers(
+            &mut b,
+            &[(6, STATE_LEN + DISCARD_LEN + PASSED_LEN), (513, 6)],
+        );
         b
     }
 
@@ -480,8 +488,14 @@ mod tests {
     fn v2_names_its_slices() {
         let net = Mlp::from_bytes(&tiny_v2()).unwrap();
         assert_eq!(net.version(), 2);
-        assert_eq!(net.input_len(), STATE_LEN + DISCARD_LEN);
+        assert_eq!(net.input_len(), STATE_LEN + DISCARD_LEN + PASSED_LEN);
         assert_eq!(net.output("tenpai"), Some(0..3));
+        // The `passed` slice holds encode_passed's block.
+        let s = (0..50).find_map(|seed| mid_hand(seed, 40)).unwrap();
+        let mut want = vec![0.0; PASSED_LEN];
+        encode_passed(&s, &mut want);
+        assert!(want.iter().any(|&v| v > 0.0));
+        assert_eq!(&net.encode_input(&s)[STATE_LEN + DISCARD_LEN..], &want[..]);
         assert_eq!(net.output("counts"), Some(3..513));
         assert_eq!(net.output("policy"), None);
         // A slice past the last layer, or an input name Rust cannot fill, is an error.

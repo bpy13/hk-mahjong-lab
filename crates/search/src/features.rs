@@ -13,10 +13,18 @@
 //! concealed tiles and the next 16 wall tiles). It is used only in training, for
 //! Suphx-style oracle guiding, and is zero at play time.
 //!
+//! [`encode_passed`] is a separate public block ([`PASSED_LEN`] floats, plan
+//! 2026-11-09 Task 18): the passed-tile record ([`crate::passed::Passed`]), which
+//! discards were 摸打 or 入章, and the actor's own passed-win lock. It is a block of
+//! its own, not more planes in [`encode`], so that networks trained before the
+//! passed-win rule still load; a network reads it through a `passed` input slice
+//! (`crate::net`).
+//!
 //! A test checks that two positions that differ only in hidden tiles encode
 //! identically.
 
 use crate::danger::Danger;
+use crate::passed::Passed;
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
@@ -62,32 +70,54 @@ fn best_suit(all: &TileCounts) -> Suit {
         .expect("three suits")
 }
 
+/// What [`acceptance_given`] may skip for a tile.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shortcut {
+    /// Evaluate the measure.
+    Evaluate,
+    /// Adding the tile provably does not lower the measure.
+    Unchanged,
+    /// Adding the tile changes the measure exactly as adding any other tile of
+    /// the same class (0–3) does: evaluate the first, reuse its answer.
+    SameAs(u8),
+}
+
 /// [`mahjong_analysis::acceptance`] for a hand whose measure is already known
-/// (`base = metric(hand)`), skipping the tiles for which `unchanged(t)` proves
-/// that adding `t` does not lower the measure below `base`. Same count, fewer
-/// evaluations: the faan-aware acceptance was 85 % of [`encode`]'s time.
-/// Returns the count and the tiles that lower the measure (bit = tile index).
+/// (`base = metric(hand)`), skipping the evaluations `shortcut(t)` makes
+/// unnecessary. Same count, fewer evaluations: the faan-aware acceptance was
+/// 85 % of [`encode`]'s time. Returns the count and the tiles that lower the
+/// measure (bit = tile index).
 fn acceptance_given(
     hand: &TileCounts,
     unseen: &TileCounts,
     base: i8,
     metric: impl Fn(&TileCounts) -> i8,
-    unchanged: impl Fn(Tile) -> bool,
+    shortcut: impl Fn(Tile) -> Shortcut,
 ) -> (u32, u64) {
     debug_assert_eq!(base, metric(hand));
     let mut c = *hand;
     let mut n = 0;
     let mut lowering = 0u64;
+    let mut class_lowers: [Option<bool>; 4] = [None; 4];
     for t in Tile::all_kinds() {
-        if unseen[t] == 0 || c[t] >= 4 || unchanged(t) {
+        if unseen[t] == 0 || c[t] >= 4 {
             continue;
         }
-        c.add(t);
-        if metric(&c) < base {
+        let mut eval = || {
+            c.add(t);
+            let lower = metric(&c) < base;
+            c.remove(t);
+            lower
+        };
+        let lower = match shortcut(t) {
+            Shortcut::Unchanged => false,
+            Shortcut::Evaluate => eval(),
+            Shortcut::SameAs(k) => *class_lowers[k as usize].get_or_insert_with(eval),
+        };
+        if lower {
             n += unseen[t] as u32;
             lowering |= 1 << t.index();
         }
-        c.remove(t);
     }
     (n, lowering)
 }
@@ -196,7 +226,13 @@ pub fn encode(state: &State, out: &mut [f32]) {
             &view.unseen,
             base,
             |x| shanten(x, n_melds),
-            |x| isolated(&h, x) && !(n_melds == 0 && x.is_terminal_or_honour()),
+            |x| {
+                if isolated(&h, x) && !(n_melds == 0 && x.is_terminal_or_honour()) {
+                    Shortcut::Unchanged
+                } else {
+                    Shortcut::Evaluate
+                }
+            },
         );
         plane(out, 23)[i] = (acc as f32 / 60.0).min(1.0);
         plain_after[i] = base;
@@ -255,20 +291,29 @@ pub fn encode(state: &State, out: &mut [f32]) {
                 |x| faan_shanten(&HandView { concealed: x, ..hv }, rules).shanten,
                 |x| {
                     if only & (1 << x.index()) == 0 {
-                        return true;
+                        return Shortcut::Unchanged;
                     }
                     // An isolated tile changes no group's shapes; it must also
                     // leave the plans unchanged: thirteen orphans (no melds), the
                     // flush suit, and the honours plan (from 7 honours). A value
                     // honour going from 0 to 1 copy adds no pung plan (needs 2).
-                    isolated(&h, x)
+                    let same_plans = isolated(&h, x)
                         && !(n_melds == 0 && x.is_terminal_or_honour())
                         && !(x.is_honour() && honours_now == 6)
                         && (x.is_honour() || {
                             let mut more = all;
                             more.add(x);
                             best_suit(&more) == suit_now
-                        })
+                        });
+                    // It can still lower the measure: a plan whose kept tiles all
+                    // sit in melds and partials gains the leftover tile its eyes
+                    // need (`analysis::shanten_of`). Which plans keep it depends
+                    // only on its suit (or honour), so one tile per class decides.
+                    match (same_plans, x.suit()) {
+                        (false, _) => Shortcut::Evaluate,
+                        (true, Some(s)) => Shortcut::SameAs(s as u8),
+                        (true, None) => Shortcut::SameAs(3),
+                    }
                 },
             );
             plane(out, 24)[t.index() as usize] = (acc as f32 / 60.0).min(1.0);
@@ -367,6 +412,76 @@ pub fn encode_planes(features: &[f32], suits: &mut [f32], rest: &mut [f32]) {
     rest[PLANES * HONOUR_KINDS..].copy_from_slice(&features[PLANES * NUM_KINDS..]);
 }
 
+/// Tile planes of [`encode_passed`].
+pub const PASSED_PLANES: usize = 14;
+/// Scalars of [`encode_passed`]: the 摸打 / 入章 flags of each seat's last three
+/// discards.
+pub const PASSED_SCALARS: usize = 12;
+/// Length of [`encode_passed`]'s output.
+pub const PASSED_LEN: usize = PASSED_PLANES * NUM_KINDS + PASSED_SCALARS;
+
+/// Encodes the passed-tile record of the player to act into `out` (length
+/// [`PASSED_LEN`]). Seats are relative as in [`encode`]; all of it is public or
+/// the actor's own.
+///
+/// | Planes | Contents |
+/// |---|---|
+/// | 0–2 | per opponent (next, across, previous): tiles it let pass and has not had a turn since (the passed-win lock may hold) |
+/// | 3–5 | per opponent: tiles it let pass, has had a turn since, and no 換章 reset |
+/// | 6–8 | per opponent: its 入章 since it let the tile pass (/ 4, at most 1), for the tiles of planes 0–5 |
+/// | 9–12 | per seat (me first): its 入章 discards (count / 4) |
+/// | 13 | the tiles the actor may not win on now (its own passed-win lock, rules §4.4) |
+///
+/// Scalars: for each seat (me first), its last three discards, most recent first:
+/// 1 for 入章 (a tile from the hand), ½ for 摸打 (the tile just drawn), 0 for none.
+///
+/// # Panics
+/// Panics if the hand is over or `out` has the wrong length.
+pub fn encode_passed(state: &State, out: &mut [f32]) {
+    assert_eq!(out.len(), PASSED_LEN);
+    out.fill(0.0);
+    let me = state.current_player().expect("hand in progress");
+    let rel = |seat: usize| (seat + 4 - me) % 4;
+    let passed = Passed::of(state);
+    for r in 1..4 {
+        let seat = (me + r) % 4;
+        for t in Tile::all_kinds() {
+            let c = passed.cell(seat, t);
+            if !c.passed || c.reset & 1 != 0 {
+                continue;
+            }
+            let i = t.index() as usize;
+            let p = if c.turned { 3 + r - 1 } else { r - 1 };
+            plane(out, p)[i] = 1.0;
+            plane(out, 6 + r - 1)[i] = (c.changes as f32 / 4.0).min(1.0);
+        }
+    }
+    let mut recent: [Vec<bool>; 4] = Default::default();
+    for e in state.events() {
+        if let Event::Discard {
+            seat,
+            tile,
+            from_hand,
+        } = *e
+        {
+            let r = rel(seat as usize);
+            if from_hand {
+                plane(out, 9 + r)[tile.index() as usize] += 0.25;
+            }
+            recent[r].push(from_hand);
+        }
+    }
+    for t in state.passed_win_lock(me) {
+        plane(out, 13)[t.index() as usize] = 1.0;
+    }
+    let s = &mut out[PASSED_PLANES * NUM_KINDS..];
+    for (r, flags) in recent.iter().enumerate() {
+        for (k, &from_hand) in flags.iter().rev().take(3).enumerate() {
+            s[r * 3 + k] = if from_hand { 1.0 } else { 0.5 };
+        }
+    }
+}
+
 /// Encodes what is hidden from the player to act into `out` (length
 /// [`ORACLE_LEN`]): each opponent's concealed tiles (relative seats 1–3, count
 /// / 4) and the next 16 tiles of the wall (count / 4).
@@ -412,6 +527,7 @@ mod tests {
         };
         let (mut f, mut o) = (vec![0.0; STATE_LEN], vec![0.0; ORACLE_LEN]);
         let (mut suits, mut rest) = (vec![0.0; SUIT_BLOCK_LEN], vec![0.0; REST_LEN]);
+        let mut passed = vec![0.0; PASSED_LEN];
         let mut positions = 0;
         for h in 0..hands {
             let rules = RuleSet {
@@ -425,10 +541,12 @@ mod tests {
                 encode(&s, &mut f);
                 encode_planes(&f, &mut suits, &mut rest);
                 encode_oracle(&s, &mut o);
+                encode_passed(&s, &mut passed);
                 eat(&f);
                 eat(&suits);
                 eat(&rest);
                 eat(&o);
+                eat(&passed);
                 positions += 1;
                 let legal = s.legal_actions_vec();
                 let a = if rng.gen_range(0..5) == 0 {
@@ -450,9 +568,15 @@ mod tests {
     /// keeps live waits (plan 2026-11-09 Task 1), so the positions differ. The
     /// encoding itself did not change (`features.rs` and `mahjong-analysis`
     /// untouched); the models stay valid.
+    ///
+    /// 2026-11-10 (plan 2026-11-09 Task 18): new hashes on purpose. The
+    /// `faan_shanten` fix changes planes 22, 24, 25 and the faan scalars (and the
+    /// `fast` bot's play, so the positions), and the hash now also covers
+    /// [`encode_passed`]. Models trained before this read a slightly different
+    /// input; they are retrained in Task 18.
     #[test]
     fn encoding_matches_the_golden_hash() {
-        assert_eq!(golden_hash(12, 7), (918, 10327929394115696147));
+        assert_eq!(golden_hash(12, 7), (981, 1486345915991748437));
     }
 
     /// The same on many more positions (release build: `cargo test --release -p
@@ -460,7 +584,131 @@ mod tests {
     #[test]
     #[ignore]
     fn encoding_matches_the_golden_hash_on_many_positions() {
-        assert_eq!(golden_hash(400, 11), (35840, 17648144063393340893));
+        assert_eq!(golden_hash(400, 11), (36235, 16421221364795889110));
+    }
+
+    /// Checks that the fast acceptance counts (planes 23 and 24) equal the plain
+    /// `analysis::acceptance` count at every turn decision of `hands` hands. The
+    /// golden hashes used to prove this; since the `faan_shanten` fix (plan
+    /// 2026-11-09 Task 18) changed the measure, these tests check the shortcut
+    /// directly. Returns the faan-aware counts checked.
+    fn check_acceptance(hands: usize, seed: u64) -> usize {
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let bot = Bot::by_name("fast").unwrap();
+        let mut f = vec![0.0; STATE_LEN];
+        let mut checked = 0;
+        for h in 0..hands {
+            let rules = RuleSet {
+                min_faan: [0, 1, 3, 3, 5][h % 5],
+                ..RuleSet::default()
+            };
+            let mut s = State::new_deal(rules, &mut rng);
+            while let Some(me) = s.current_player() {
+                if s.phase_name() == "turn" {
+                    encode(&s, &mut f);
+                    let view = SeatView::of(&s, me);
+                    let n = view.melds.len();
+                    let faan = |c: &TileCounts| {
+                        faan_shanten(
+                            &HandView {
+                                concealed: c,
+                                ..view.hand_view()
+                            },
+                            &rules,
+                        )
+                        .shanten
+                    };
+                    let kinds: Vec<Tile> = view.concealed.kinds().collect();
+                    let after = |t: Tile| {
+                        let mut h = view.concealed;
+                        h.remove(t);
+                        h
+                    };
+                    let best = kinds.iter().map(|&t| faan(&after(t))).min().unwrap();
+                    for &t in &kinds {
+                        let h = after(t);
+                        let i = t.index() as usize;
+                        let plain =
+                            mahjong_analysis::acceptance(&h, &view.unseen, |x| shanten(x, n));
+                        assert_eq!(f[23 * NUM_KINDS + i], (plain as f32 / 60.0).min(1.0));
+                        if best < UNREACHABLE && faan(&h) == best {
+                            let fa = mahjong_analysis::acceptance(&h, &view.unseen, faan);
+                            assert_eq!(
+                                f[24 * NUM_KINDS + i],
+                                (fa as f32 / 60.0).min(1.0),
+                                "{t} out of {}",
+                                view.concealed
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        checked
+    }
+
+    #[test]
+    fn fast_acceptance_matches_the_reference() {
+        let checked = check_acceptance(24, 19);
+        assert!(checked > 500, "{checked}");
+    }
+
+    /// The same on many more hands (release build: `cargo test --release -p
+    /// mahjong-search reference -- --ignored`).
+    #[test]
+    #[ignore]
+    fn fast_acceptance_matches_the_reference_on_many_hands() {
+        let checked = check_acceptance(600, 23);
+        assert!(checked > 10_000, "{checked}");
+    }
+
+    /// Right after a discard: the discarder's newest 摸打 / 入章 flag is set, the
+    /// tile is "passed, no turn since" for every other opponent of the actor, and
+    /// plane 13 is the actor's own passed-win lock.
+    #[test]
+    fn passed_block_follows_the_last_discard() {
+        let mut rng = SmallRng::seed_from_u64(3);
+        let bot = Bot::by_name("fast").unwrap();
+        let mut out = vec![0.0; PASSED_LEN];
+        let (mut checked, mut from_hand_seen, mut drawn_seen) = (0, 0, 0);
+        for _ in 0..20 {
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            while let Some(me) = s.current_player() {
+                encode_passed(&s, &mut out);
+                let lock = &out[13 * NUM_KINDS..14 * NUM_KINDS];
+                for t in Tile::all_kinds() {
+                    let want = s.passed_win_locked(me, t) as u8 as f32;
+                    assert_eq!(lock[t.index() as usize], want);
+                }
+                if let Some(&Event::Discard {
+                    seat,
+                    tile,
+                    from_hand,
+                }) = s.events().last()
+                {
+                    let q = (seat as usize + 4 - me) % 4;
+                    let flag = out[PASSED_PLANES * NUM_KINDS + q * 3];
+                    assert_eq!(flag, if from_hand { 1.0 } else { 0.5 });
+                    for r in (1..4).filter(|&r| r != q) {
+                        assert_eq!(plane(&mut out, r - 1)[tile.index() as usize], 1.0);
+                    }
+                    checked += 1;
+                    if from_hand {
+                        from_hand_seen += 1;
+                    } else {
+                        drawn_seen += 1;
+                    }
+                }
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(checked > 100 && from_hand_seen > 0 && drawn_seen > 0);
     }
 
     #[test]
@@ -482,6 +730,12 @@ mod tests {
                 continue;
             }
             let other = s.determinize(s.current_player().unwrap(), &mut rng);
+            let mut pa = vec![0.0; PASSED_LEN];
+            let mut pb = vec![0.0; PASSED_LEN];
+            encode_passed(&s, &mut pa);
+            encode_passed(&other, &mut pb);
+            assert_eq!(pa, pb, "the passed block depends on hidden tiles");
+            assert!(pa.iter().all(|x| (0.0..=1.0).contains(x)));
             let mut a = vec![0.0; STATE_LEN];
             let mut b = vec![0.0; STATE_LEN];
             encode(&s, &mut a);

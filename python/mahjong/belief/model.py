@@ -1,7 +1,9 @@
 """The belief model: what each opponent holds, from public information (plan Task 5).
 
 One MLP reads the observer's 933 public features (plus, with ``discards=True``, each
-opponent's last eight discards one-hot, ``3 × 8 × 34``), and writes, for the three opponents
+opponent's last eight discards one-hot, ``3 × 8 × 34``; with ``passed=True``, the
+passed-tile record and 摸打 / 入章 of ``features::encode_passed``, :data:`PASSED_LEN`
+values, from logs of layout 2), and writes, for the three opponents
 (relative seats 1 = next, 2 = across, 3 = previous), the heads in :data:`HEADS`:
 
 * ``counts``: 34 × 5 logits, a categorical over 0–4 copies of each tile kind;
@@ -19,7 +21,7 @@ With ``race=True`` (the race bot's network, ``docs/race-bot.md`` §6–7) two he
 The output vector is the heads in that order, each holding its three opponents
 contiguously (``counts`` first: opponent, tile, copies). :meth:`BeliefNet.export`
 writes the MJNN v2 file ``crates/search/src/net.rs`` loads, with these names as
-output slices and ``features`` / ``discards`` as input slices. Count logits for
+output slices and ``features`` / ``discards`` / ``passed`` as input slices. Count logits for
 more copies than the observer has unseen are masked to ``-1e9`` by
 :func:`mask_counts` (in training and in :meth:`BeliefNet.predict`); the exported
 network writes the raw logits, so a Rust consumer applies the same mask.
@@ -42,6 +44,8 @@ from mahjong.rl.model import STATE_LEN, write_mjnn
 N_OPP = 3
 HISTORY = 8
 DISCARD_LEN = N_OPP * HISTORY * NUM_KINDS
+#: Length of ``features::encode_passed`` (14 tile planes and 12 scalars).
+PASSED_LEN = 14 * NUM_KINDS + 12
 MAX_COPIES = 5
 FAAN_MIN, FAAN_MAX = 3, 10
 N_FAAN = FAAN_MAX - FAAN_MIN + 1
@@ -81,12 +85,17 @@ class BeliefConfig:
     #: improved the count log-likelihood by 0.1 %, under the plan's 2 % bar
     #: (`docs/belief.md` §5).
     discards: bool = False
+    #: Also feed the passed-tile block (``features::encode_passed``; plan 2026-11-09
+    #: Task 18). Needs logs of layout 2, which carry a ``passed`` field.
+    passed: bool = False
     #: Add the race heads (``state``, ``mode``) after the five belief heads.
     race: bool = False
 
     @property
     def input_len(self) -> int:
-        return STATE_LEN + (DISCARD_LEN if self.discards else 0)
+        return (
+            STATE_LEN + (DISCARD_LEN if self.discards else 0) + (PASSED_LEN if self.passed else 0)
+        )
 
     @property
     def heads(self) -> dict[str, int]:
@@ -118,14 +127,23 @@ class BeliefNet(nn.Module):
     def parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters())
 
-    def inputs(self, features: torch.Tensor, discards: torch.Tensor) -> torch.Tensor:
-        """The input vector: ``features`` (``(n, 933)``, any float type) and the
-        discard indices ``(n, 3, 8)`` (255 = empty) as one-hot, when the config
-        uses them."""
-        x = features.float()
-        if not self.cfg.discards:
-            return x
-        return torch.cat([x, discard_block(discards)], dim=1)
+    def inputs(
+        self,
+        features: torch.Tensor,
+        discards: torch.Tensor,
+        passed: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """The input vector: ``features`` (``(n, 933)``, any float type), then the
+        discard indices ``(n, 3, 8)`` (255 = empty) as one-hot and the passed block
+        ``(n, PASSED_LEN)``, each when the config uses it."""
+        parts = [features.float()]
+        if self.cfg.discards:
+            parts.append(discard_block(discards))
+        if self.cfg.passed:
+            if passed is None:
+                raise ValueError("this network reads the passed block; the log has none")
+            parts.append(passed.float())
+        return parts[0] if len(parts) == 1 else torch.cat(parts, dim=1)
 
     def split(self, out: torch.Tensor) -> dict[str, torch.Tensor]:
         """The output vector as per-head tensors ``(n, 3, ...)``."""
@@ -167,7 +185,10 @@ class BeliefNet(nn.Module):
         c = ckpt["cfg"]
         # Checkpoints from before the race heads have no "race" entry.
         cfg = BeliefConfig(
-            hidden=tuple(c["hidden"]), discards=c["discards"], race=c.get("race", False)
+            hidden=tuple(c["hidden"]),
+            discards=c["discards"],
+            passed=c.get("passed", False),
+            race=c.get("race", False),
         )
         net = BeliefNet(cfg)
         net.load_state_dict(ckpt["state"])
@@ -179,6 +200,8 @@ class BeliefNet(nn.Module):
         inputs = [("features", STATE_LEN)]
         if self.cfg.discards:
             inputs.append(("discards", DISCARD_LEN))
+        if self.cfg.passed:
+            inputs.append(("passed", PASSED_LEN))
         outputs = [(name, N_OPP * per_opp) for name, per_opp in self.cfg.heads.items()]
         write_mjnn(path, linears, inputs=inputs, outputs=outputs)
 
@@ -188,7 +211,11 @@ def warm_start(net: BeliefNet, src: BeliefNet) -> None:
     (same widths required) and the rows of every head both have. A race network
     warm-started from a plain belief model keeps the five heads and starts its race
     heads fresh (``docs/race-bot.md`` §8.1 step 3: warm start from the last generation)."""
-    if net.cfg.hidden != src.cfg.hidden or net.cfg.discards != src.cfg.discards:
+    if (
+        net.cfg.hidden != src.cfg.hidden
+        or net.cfg.discards != src.cfg.discards
+        or net.cfg.passed != src.cfg.passed
+    ):
         raise ValueError(f"cannot warm-start {net.cfg} from {src.cfg}")
     with torch.no_grad():
         net.torso.load_state_dict(src.torso.state_dict())
@@ -235,6 +262,8 @@ class Batch:
     # The race labels (race logs only, ``race_log`` example; None otherwise).
     state: torch.Tensor | None = None  # (n, 3) int64: 0 far, 1 one away, 2 ready, 3 folded
     mode: torch.Tensor | None = None  # (n, 3) int64: 0 push, 1 detour, 2 fold
+    # The passed-tile block (logs of layout 2 only; None otherwise).
+    passed: torch.Tensor | None = None  # (n, PASSED_LEN) float16
 
     def __len__(self) -> int:
         return int(self.features.shape[0])
@@ -264,8 +293,10 @@ def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:
         for key, field in (("state", "opp_state"), ("mode", "opp_mode"))
         if field in names
     }
+    passed = torch.from_numpy(np.ascontiguousarray(rows["passed"])) if "passed" in names else None
     return Batch(
         **race,
+        passed=passed,
         features=features,
         discards=discards,
         unseen=unseen_from_features(features),

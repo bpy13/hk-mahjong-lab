@@ -194,11 +194,21 @@ pub fn standard_shanten(concealed: &TileCounts, melds: usize, structure: Structu
             structure,
         ));
     }
-    shanten_of(&f, melds)
+    shanten_of(&f, melds, concealed.total())
 }
 
-/// Standard-form shanten from the combined frontier of all four groups.
-pub(crate) fn shanten_of(f: &Frontier, melds: usize) -> i8 {
+/// Standard-form shanten from the combined frontier of all four groups, whose
+/// groups hold `tiles` tiles in all.
+///
+/// Without a pair, the classic count assumes a leftover tile to wait on for the
+/// eyes. A faan plan ([`crate::faan_shanten`]) sets aside the tiles it forbids, so
+/// the tiles it keeps may all be used up in melds and partials: then the eyes
+/// need one exchange more. Four pin pungs and a Green toward a full flush are one
+/// exchange from ready, not ready (the review's rollout bot swapped a live flush
+/// wait for an honour single because of this, plan 2026-11-09 Task 1). A full
+/// hand of 13 − 3 × melds tiles always has a leftover tile, so plain shanten is
+/// unchanged.
+pub(crate) fn shanten_of(f: &Frontier, melds: usize, tiles: usize) -> i8 {
     let need = 4 - melds.min(4) as i8;
     let mut best = i8::MAX;
     for p in 0..2 {
@@ -209,7 +219,8 @@ pub(crate) fn shanten_of(f: &Frontier, melds: usize) -> i8 {
             }
             let m = (m as i8).min(need);
             let t = t.min(need - m);
-            best = best.min(2 * need - 2 * m - t - p as i8);
+            let no_leftover = p == 0 && tiles <= (3 * m + 2 * t) as usize;
+            best = best.min(2 * need - 2 * m - t - p as i8 + no_leftover as i8);
         }
     }
     best
