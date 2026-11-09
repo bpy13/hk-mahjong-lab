@@ -110,3 +110,17 @@ with their defaults.
 - `make` is not installed on this PC; run the Makefile lines directly (CLAUDE.md).
 - Two app-api wall-clock tests fail under outside CPU load; asked the app stream in bot-notes
   (hk-games 5342a50).
+
+## From the review-fix and race-bot run (plan 2026-11-09)
+- **`faan_shanten` calls four pin pungs plus a lone Green "ready for a full flush"**; the true
+  distance is one step more. A fix passes the analysis tests but changes the feature encoding,
+  so every model would need retraining. Not applied; patch kept outside the repo
+  (coordinator's scratchpad, `analysis-leftover-fix.patch`). Likely also why `ev` swaps the live
+  4p for honour singles after Brian's pung (not traced). Default: fix it in Phase 4, when the
+  race bot's network is trained anyway.
+- **The danger tables call a tile safe when the player holds its last unseen copy.** Only the
+  defending `fast` bot works around it (Task 2); `defensive` and `ev` still have the flaw.
+  Default: the race bot counts live copies itself; fix the tables when they are refitted.
+- **Task 4's match is stuck behind the queue's quiet lane** (jobs 29–31 wait while quiet job 28,
+  a holdem benchmark, waits for Dou Dizhu's 72-hour gpu job 27). Raised with Brian 2026-11-09.
+- `fast` is about 10–15 % slower per hand after Tasks 1–2 (noisy timings).
