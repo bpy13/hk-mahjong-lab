@@ -403,6 +403,32 @@ guessed. Shanten counts exchanges to a ready hand; "faan path" means the faan-aw
 | `error.not_your_turn` | `hint` for a seat that is not to act |
 | `error.bad_position` | a `Position` that cannot be rebuilt |
 
+## Regrade a kept hand
+
+`examples/regrade.rs` rechecks the review's verdict on one decision of a hand kept in the
+app (the JSON under sessionStorage `hkgames.keptDeal.mahjong`: `position.wall`,
+`position.history`, `position.rules`). It replays the wall and history natively, so it
+needs no app. Brian's hand of 2026-11-09 is the fixture
+`crates/search/tests/data/brian-2026-11-09.json` (decision 85: the pung of 8p).
+
+```powershell
+cargo build --release -p mahjong-app-api --example regrade
+$hand = 'crates\search\tests\data\brian-2026-11-09.json'
+.\target\release\examples\regrade.exe $hand 85 0        # scene + phone-sized grade (< 1 s)
+.\target\release\examples\regrade.exe $hand 85 1        # + three searches 50x bigger (a few seconds)
+.\target\release\examples\regrade.exe $hand all         # every decision of the human seat, phone-sized
+.\target\release\examples\regrade.exe $hand 85 5 trace  # 5,000 traced futures per move and policy
+.\target\release\examples\regrade.exe $hand 85 1 count  # pin copies: real deal vs sampled worlds
+```
+
+| Mode | What it prints |
+|---|---|
+| `<index> 0` | The scene at history index `<index>` (every hand as it stood then, the discards in order, the legal moves, the move played) and the phone-sized `grade` (12 s per hand split over the player's decisions, clamped to 0.2–1.5 s, as the app's review) |
+| `<index> <scale>` | The same, then three searches with `scale` × (15,000, 5,000, 1,500) samples: the review's method; opponents' hands from the belief model; the belief model plus `ev` as the player's own rollout policy. Each move: mean points, difference from the baseline with a 95 % interval, win, deal-in and draw rates |
+| `all` | One line per decision of the human seat: the move played, the best move, the grade and the loss, graded as the phone's review grades it |
+| `<index> <scale> trace` | `scale` × 1,000 sampled futures of every legal move, once with the review's rollout bot (`fast`) and once with `ev` playing the player's later moves: win, other seats' wins, draws, mean points, the player's first move after the decision (count and wins), the six most common winning hands |
+| `<index> 1 count` | Copies of each pin tile in the wall and in the opponents' hands, for the real deal and five sampled worlds (a check that the sampler deals hidden tiles correctly) |
+
 ## Measured timings
 
 Release builds, one thread, the dealer's opening decision of seed 100, Windows 11 desktop

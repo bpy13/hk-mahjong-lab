@@ -1,14 +1,23 @@
 //! Rechecks one decision of a kept hand (the app's `hkgames.keptDeal.mahjong` JSON) with
 //! searches far bigger than the phone's review, to see whether the review's verdict holds.
 //!
-//! `cargo run --release -p mahjong-app-api --example regrade -- <hand.json> [decision] [scale]`
-//!
-//! `decision` is a history index (default: the last move). `scale` multiplies the sample
-//! counts (default 1). Prints the scene at that decision (every hand, as the hand ended),
-//! the phone-sized grade, then three bigger searches:
-//! 1. the review's own method with 50x the samples;
-//! 2. opponents' hands drawn from the trained belief model;
-//! 3. the belief model plus the stronger `ev` bot playing the player's later moves.
+//! `cargo run --release -p mahjong-app-api --example regrade -- <hand.json> <mode>`
+//! (README "Regrade a kept hand"). Modes, where `<index>` is a history index (default:
+//! the last move):
+//! - `<index> 0`: the scene at that decision (every hand as it stood then, the discards,
+//!   the legal moves) and the phone-sized grade (12 s per hand split over the player's
+//!   decisions, 0.2–1.5 s each, as the app's review).
+//! - `<index> <scale>`: the same, then three bigger searches with `scale` × the samples:
+//!   1. the review's own method with 50x the samples;
+//!   2. opponents' hands drawn from the trained belief model;
+//!   3. the belief model plus the stronger `ev` bot playing the player's later moves.
+//! - `all`: every decision of the human seat, graded as the phone's review grades it.
+//! - `<index> <scale> trace`: `scale` × 1,000 sampled futures of every legal move, played
+//!   with the review's rollout bot (`fast`) and with `ev` as the player's own policy:
+//!   the player's first move after the decision, win / other-wins / draw rates, mean
+//!   points, the most common winning hands.
+//! - `<index> 1 count`: copies of each pin tile in the wall and the opponents' hands,
+//!   real and in five sampled worlds (checks the sampler).
 use mahjong_app_api::shapes::{legal_action, rules_from_json, tile_from_id, TurnJson};
 use mahjong_app_api::Api;
 use mahjong_games::Game;
@@ -45,7 +54,14 @@ fn trace(s: &State, seat: usize, n: usize) {
     use std::collections::BTreeMap;
     let policies = [
         ("fast", Rollout::for_seat(seat)),
-        ("ev", Rollout::with(seat, Bot::by_name("ev").unwrap(), Rollout::default_opponents())),
+        (
+            "ev",
+            Rollout::with(
+                seat,
+                Bot::by_name("ev").unwrap(),
+                Rollout::default_opponents(),
+            ),
+        ),
     ];
     for &cand in &s.legal_actions_vec() {
         for (pname, pol) in &policies {
@@ -97,7 +113,7 @@ fn trace(s: &State, seat: usize, n: usize) {
                 println!("    {k:<14} {:>6} {:>6}", v.0, v.1);
             }
             let mut top: Vec<_> = endings.into_iter().collect();
-            top.sort_by(|a, b| b.1.cmp(&a.1));
+            top.sort_by_key(|e| std::cmp::Reverse(e.1));
             println!("  most common winning hands:");
             for (k, v) in top.iter().take(6) {
                 println!("    {v:>6}  {k}");
@@ -114,7 +130,9 @@ fn main() {
     if args.get(2).map(String::as_str) == Some("all") {
         // Every decision of the human seat, graded as the phone's review grades it.
         let human = pos["human_seats"][0].as_u64().unwrap_or(0) as usize;
-        let idx: Vec<usize> = (0..history.len()).filter(|&i| history[i].player == human).collect();
+        let idx: Vec<usize> = (0..history.len())
+            .filter(|&i| history[i].player == human)
+            .collect();
         let step = (12000 / idx.len().max(1)).clamp(200, 1500) as u32;
         let api = Api::new();
         for i in idx {
@@ -136,7 +154,10 @@ fn main() {
         }
         return;
     }
-    let at: usize = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(history.len() - 1);
+    let at: usize = args
+        .get(2)
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(history.len() - 1);
     let scale: usize = args.get(3).map(|s| s.parse().unwrap()).unwrap_or(1);
     let rules = rules_from_json(pos.get("rules")).unwrap();
     let wall = pos["wall"]
@@ -153,7 +174,11 @@ fn main() {
     let seat = s.current_player().unwrap();
     let played = legal_action(&s, &history[at].action).unwrap();
 
-    println!("decision at history index {at} of {} (seat {seat}, phase {})", history.len(), s.phase_name());
+    println!(
+        "decision at history index {at} of {} (seat {seat}, phase {})",
+        history.len(),
+        s.phase_name()
+    );
     println!("tiles left in the wall: {}", s.wall_remaining());
     for p in 0..4 {
         println!(
@@ -168,8 +193,17 @@ fn main() {
         .iter()
         .map(|(p, t, c)| format!("{p}:{t}{}", if *c { "*" } else { "" }))
         .collect();
-    println!("discards in order (seat:tile, * = claimed): {}", river.join(" "));
-    println!("legal: {:?}", s.legal_actions_vec().iter().map(|a| a.to_string()).collect::<Vec<_>>());
+    println!(
+        "discards in order (seat:tile, * = claimed): {}",
+        river.join(" ")
+    );
+    println!(
+        "legal: {:?}",
+        s.legal_actions_vec()
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+    );
     println!("played: {played}");
     let mut after = s.clone();
     after.apply(played);
@@ -200,7 +234,10 @@ fn main() {
         let count = |w: &State, t: &str| -> String {
             let tile = tile_from_id(t).unwrap();
             let wall = w.wall().iter().filter(|&&x| x == tile).count();
-            let opp: usize = (0..4).filter(|&p| p != seat).map(|p| w.hand(p)[tile] as usize).sum();
+            let opp: usize = (0..4)
+                .filter(|&p| p != seat)
+                .map(|p| w.hand(p)[tile] as usize)
+                .sum();
             format!("{t}: wall {wall} opp-hands {opp}")
         };
         let pins = ["1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p", "9p"];
@@ -228,10 +265,13 @@ fn main() {
     let a = pimc_anchored(&s, &cfg(15000), &WorldSampler::BestOfK, &value, &fast);
     show("1. review method, big", &a, t.elapsed().as_secs_f64());
 
-    let model = Arc::new(BeliefModel::load(
-        "C:/Users/brian/OneDrive/Documents/workspace/repo/hk-mahjong-lab/models/belief.mjnn",
-    )
-    .unwrap());
+    let model = Arc::new(
+        BeliefModel::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../models/belief.mjnn"
+        ))
+        .unwrap(),
+    );
     let belief = WorldSampler::belief(model, true);
     let t = Instant::now();
     let a = pimc_anchored(&s, &cfg(5000), &belief, &value, &fast);
@@ -241,5 +281,9 @@ fn main() {
     let strong = Rollout::with(seat, ev, Rollout::default_opponents());
     let t = Instant::now();
     let a = pimc_anchored(&s, &cfg(1500), &belief, &value, &strong);
-    show("3. belief sampler + ev rollouts", &a, t.elapsed().as_secs_f64());
+    show(
+        "3. belief sampler + ev rollouts",
+        &a,
+        t.elapsed().as_secs_f64(),
+    );
 }

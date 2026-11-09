@@ -88,7 +88,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
   - Notes: the danger model already has a flush relation (`danger.rs`). Keep `fast`'s speed
     (rollouts call it millions of times): no belief network inside rollouts.
 
-- [ ] **Task 3: Keep and document the regrade tool**
+- [x] **Task 3: Keep and document the regrade tool**
   - Files: `crates/app-api/examples/regrade.rs` (exists, uncommitted), README section in
     `crates/app-api/README.md`.
   - Done when: `cargo build --release -p mahjong-app-api --example regrade` passes; README
