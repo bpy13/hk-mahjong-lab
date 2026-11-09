@@ -598,3 +598,44 @@ match may revisit. The rest is built as written.
     `mode` head, used by the two-threat test).
 11. **Spec**: `race` takes `horizon=`, `tie_margin=`, `threat=` (`τ_threat`) and `belief=`; the
     plain `race` uses `HeuristicBelief`, so §6's belief heads need `race:belief=models/belief.mjnn`.
+
+## 12. Deviations in Phase 4 (Tasks 8–9: labels, heads, the loop)
+
+Code: the labels in `crates/search/src/race.rs` (`true_state`, `discard_mode`, `LabelTracker`),
+the logger `crates/search/examples/race_log.rs`, the heads in `python/mahjong/belief/model.py`
+(`BeliefConfig(race=True)`, `train.py --race --init`), the tables and checks in
+`python/mahjong/belief/race_fit.py`, the loop `experiments/race_loop.py` (+ `.ps1` queue job).
+**Deviation** marks where the code departs from §6–§8.
+
+1. **Deviation: the race log is the belief log plus race fields.** Each row is
+   `mahjong_search::log`'s row (so the five belief heads train unchanged) followed by
+   `opp_state`, `opp_mode`, `opp_shanten`, `opp_points_sd` (the self-draw value of §7's
+   `value`), the observer's own `my_mode` / `my_feeds` / `ready_opps` (for `q`), `league`,
+   `wall_at_end` (rounds to the outcome) and, for race seats, `race_rounds` / `race_pwin`
+   (§8.2). Layout version 101.
+2. **Deviation: the `mode` head enters only as P(fold)**, through the fold hook, the same in
+   every state (§5.2's per-state split and the detour share stay heuristic). A fixed
+   `fold_override` still wins. The `state` head gives only `p_O` (capped at `1 − tenpai`);
+   `tenpai` stays the tenpai head's, and the head's P(folded) is not used (the fold comes from
+   the mode head).
+3. **Deviation: fitted tables.** `a`, `b` are per wall bucket only (not by visible melds), as
+   spec options `a=…,b=…` (six values each); a round is the same seat's first later
+   observation with at least 4 fewer wall tiles; folded seats are left out; a bucket with fewer
+   than 200 cases keeps v0's 0.15. `q(m)` is the feeds per ready opponent over the discards
+   labelled `m` (spec `q=push/detour/fold`). `φ`'s usefulness factor and §4.4's `P_o(u | k)`
+   rise are **not** fitted (v0's values stay).
+4. **Deviation: §8.2's check** compares the race bot's own P(opponent wins within its horizon)
+   for the chosen action with "won before the wall fell by `4 × rounds` tiles", per bucket,
+   and flags a miss over 20 % relative. The tables are refitted every generation anyway.
+5. **Deviation: the gates' intervals** combine the 20 chunks' wall-paired bootstrap intervals
+   (normal approximation); the teacher match also reports race minus teacher, paired by wall.
+6. **Deviation: generation 0** (v0 on `models/belief.mjnn`) is measured only against three
+   `value` (the stop rule's first reference); the best generation is chosen among the learned
+   ones. The score "has not risen by more than 1.2 over the last three generations" is
+   `v_g − v_{g−3}`. A regression retry trains with seed 1. Each generation also plays a
+   5,000-hand hold-out log (seed 50,000 + g) for the hold-out loss and the calibration tables.
+7. **Observation on §7's fold label** (not a deviation; for Brian): swapping one tile changes
+   faan-aware shanten by at most one step, so `s(t*) ≥ s_best + 2` fires only when the discard
+   leaves no target that meets the minimum faan. Fold labels come almost only from breaking a
+   ready hand. In a 200-hand smoke log the race bot's own discards were push 7,525, detour
+   8,367, fold 740 (`fast` bots in `race_labels.rs`: push 4,315, detour 21, fold 2).
