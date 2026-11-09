@@ -119,7 +119,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
 
 ## Phase 3 – Race bot v0 with existing estimates (opus)
 
-- [ ] **Task 6: `crates/search/src/race.rs`**
+- [x] **Task 6: `crates/search/src/race.rs`**
   - Files: create `crates/search/src/race.rs`, `Bot::Race` in `bots.rs`, spec `race[:...]` in
     `agent.rs`; tests `crates/search/tests/race_bot.rs`.
   - Done when: tests: legal moves on 1,000 random hands; Brian's pung hand values pung ≥ pass;
