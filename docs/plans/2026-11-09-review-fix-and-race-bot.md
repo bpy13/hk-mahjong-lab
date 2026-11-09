@@ -168,6 +168,79 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
     pung as a critical mistake; committed together. If the race bot later wins Phase 4, the
     app switch is a separate decision for Brian.
 
+## Phase 6 – The passed-win rule and passed-tile reading (Brian, 2026-11-09; waits for his go)
+
+Brian's instruction (close to verbatim): add the passed-win rule (過水: a player who passes a
+win on a tile can't win on that tile until their next turn). The defence must use it, not
+only within this go-round: a dangerous tile another player recently let pass is less likely
+to deal in, by how much that player has changed their hand since (入章 / 換章). A player
+willing to throw dangerous tiles updates our estimate of their offence: how hard they push
+narrows the range of what they are aiming for.
+
+Brian's answers (2026-11-09): the lock covers only the passed tile. 換章 means a pushing
+player throws a tile that was clearly useful to them, which shows their hand improved; every
+tile they let pass before is no longer safe against them (a full reset, beyond the gradual
+fade per 入章). The existing models (teacher network, belief model, danger tables) are
+retrained with the rule (Task 18). Old recorded deals need no support: the app is not in
+production, so the server and the app simply switch to the new rule together (no rules
+version on deals).
+
+- AC8: the engine applies the rule (on by default in `RuleSet`); positions and kept hands
+  carry it; the server's replay and the app agree; old recorded deals still replay.
+- AC9: every player's discard record says whether the discard was the tile just drawn
+  (摸打) or a tile from the hand (入章), as players see at a real table.
+- AC10: the race bot's deal-in chance for tile t against player P uses "P let t pass",
+  with a safety that fades with each of P's 入章 since; tests and a match show its effect.
+- AC11: the race bot's read of each opponent rises toward push, and toward a closer or
+  bigger hand, when that player throws tiles that were dangerous when thrown; a test.
+
+- [ ] **Task 12: The rule in the engine** (opus)
+  - Files: `crates/hk/src/{rules,state,position}.rs`, the rules doc, `crates/hk` tests.
+  - Done when: tests: a seat that passed a win on t gets no Win on t from any discard or
+    kong rob until its next turn (draw or own claim); other seats can still win; pung and
+    chow are unaffected; `RuleSet::passed_win_lock` false restores today's play; the
+    position spec round-trips the lock; `cargo test --workspace --release` passes.
+- [ ] **Task 13: 摸打 / 入章 in the record** (opus)
+  - Files: `crates/hk/src/state.rs` (discard history), app-api view JSON, `SeatView`.
+  - Done when: each discard in the view carries `from_hand: bool`; test.
+- [ ] **Task 14: Passed-tile safety in the race bot and the defending `fast` bot** (fable:
+  a new estimate with no data yet)
+  - Files: `crates/search/src/{race,bots}.rs`, a new `crates/search/src/passed.rs`,
+    `docs/race-bot.md` (a new section), tests.
+  - Done when: for each opponent and tile, the bot keeps "let it pass, with N 入章 since";
+    N = 0 and the lock still active gives zero deal-in chance; after that the chance moves
+    back toward the table's estimate per 入章, at a rate measured from self-play logs
+    (true win-on-t rate by N), not guessed; a 換章 (a pushing player throws a tile that was
+    clearly useful to them: by our estimate it connected to their likely hand) resets all
+    their passed-tile safety; the 換章 test is checked against self-play truth (did their
+    waits really change); tests; timing still under 5 ms per decision.
+- [ ] **Task 15: Reading an opponent's risk-taking** (fable: model choice open)
+  - Files: `crates/search/src/race.rs`, `docs/race-bot.md`, tests.
+  - Done when: each opponent's push probability and hand-value estimate update from the
+    danger of the tiles they threw (danger measured from our view when they threw it); the
+    size of the update is checked against self-play truth (pushers' real closeness and hand
+    value); a test where a player throws two dangerous tiles moves them to push.
+- [ ] **Task 16: Measure** (opus)
+  - Files: `docs/study-results/race-bot.md`; job under `experiments/`.
+  - Done when: race bot with Tasks 14–15 against without, duplicate match through the cpu
+    lane, 1,000 walls × 4 seatings, interval; teacher with and without the rule as a sanity
+    row.
+- [ ] **Task 17: Ship** (sonnet; in hk-games)
+  - Files: pin, `app/src/engine/wasm/mahjong/`, the server's mahjong module
+    (`server\engines\build.ps1`), `app/src/drills/mahjong.json` re-solved on the same
+    positions, a ui string in three languages saying why Win is not offered.
+  - Done when: `npm test`, `npm run build`, server `pytest` pass; a browser check of a hand
+    where the player passes a win and then cannot win on the same tile.
+- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu)
+  - Files: feature encoding (add the passed-tile record and 摸打 / 入章), labels, the belief
+    model, the danger tables, the teacher's distilled network; the `faan_shanten` fix from
+    open-items rides along (it also changes the encoding).
+  - Done when: each retrained model passes its existing checks (belief calibration, danger
+    calibration, the distilled network against the teacher); the app's review and drills use
+    the new models only if they are not weaker in a duplicate match.
+- Phase 4's loop (job 33) waits for this phase: its logger and features add the passed-tile
+  record and the risk-taking read, and it is requeued after Task 16.
+
 ## Shared resources
 `crates/search/src/bots.rs` (Tasks 1, 2, 6: serial), the job queue (Tasks 4, 7, 8, 9), the GPU
 lane (Task 8, after Dou Dizhu's block), `models/` (Task 8 adds a file; nothing is replaced).
