@@ -553,3 +553,48 @@ read from one table.
 3. **Horizon cap 8 rounds.** The same as `ev-bot.md`; a longer cap costs linearly.
 4. **League shares 60 / 20 / 20** and **100,000 hands per generation.** Estimates; the first
    generation's calibration table (§8.2) says whether more hands are needed.
+
+## 11. Deviations in v0 (Task 6, `crates/search/src/race.rs`)
+
+**Deviation** marks where the code departs from §2–§6; each is a v0 choice that Phase 4 or a
+match may revisit. The rest is built as written.
+
+1. **Deviation: the deal-in now is its own step before round 1.** §3.3 puts `P_o(t(a))` inside
+   round 1, where it competes with the round's other hazards; the code applies it first
+   (`S` after it is `1 − Σ_o P_o(t(a))`) because my discard comes before anyone else acts.
+   It is scaled by `1 − fold_R,o`, as every other hazard of `o` (a folded seat does not win).
+2. **Deviation: §4.4's `P_o(u | k)` is read as `wait_o(u)`, conditional on `o` being ready.**
+   The outer factor `p_R,o(k)(1 − fold_o)` already supplies readiness; multiplying by
+   `p_R,o(k) / p_R,o(1)` as well would count it twice.
+3. **Deviation: `W_o`** (an opponent's live copies in the wall) is the unseen copies of its
+   waits less the belief's expected copies in every hidden hand, `o`'s own included.
+4. **Deviation: the push plan.** My later discards are one copy of each kind whose discard now
+   reaches the same faan-aware shanten or better (the hand's useless tiles), the most
+   dangerous first; then the per-discard rate `q(m)` of my mode toward each opponent. After a
+   pass or a kong there is no 14-tile hand to rank, so only the rates apply.
+5. **Deviation: the fold plan** throws the allowed tiles (§5.1's intersection) with the
+   useless ones first, in the push order, then the rest safest first against the seats I fold
+   against. A seat I push against is ignored, as §5.1 says; this is what makes "fold against B,
+   push against A" differ from the reverse. When two mode vectors give equal equity, the less
+   defensive one wins (fewer folds, then fewer detours).
+6. **Deviation: detour** keeps my hazard at 0.5 of push (estimate) instead of recomputing
+   `b_me` and `L_me` on a detour hand; its plan is the push plan filtered by `P_o(u) ≤ 0.05`
+   when a fold is also chosen.
+7. **Deviation: a far hand** (faan-aware shanten ≥ 2) moves `F → O` at `acceptance / U / (s − 1)`
+   per draw and `O → R` at `acceptance / U`, and has 4 live copies once ready (estimate). A
+   one-away hand's live copies once ready are computed as §4.3 says (per accepting kind, the
+   best ready discard's live winning tiles), with the unseen counts before the draw.
+8. **Deviation: §5.2's cost from me** is `P̂_sd(me) × Pay_sd(me) + P̂_fed by o(me) × Pay(me)` for
+   an unliable `o`, three times all of my wins for the seat liable for me, 0 for the others.
+   `P̂(me)` is my hazard over the rounds with nobody else racing and `φ` before folds. A seat
+   counts as folded (no mode of its own, §5.1) when `π_fold ≥ 0.5`.
+9. **Deviation: `φ`'s usefulness** for a hand that is not ready uses the accepting kinds in
+   place of the waits. An honour is useless to `j` only if `j` has discarded it (§6).
+10. **Additions not in the doc**: ties within `tie_margin` (0.5 point) go to `rank_discards`,
+    and a claim or kong must beat the pass or the best discard by more than `tie_margin`, as in
+    the `ev` bot; rounds past the horizon are dropped without `ev-bot.md`'s `κ` (so `p_draw` is
+    "nobody wins within the horizon"); a round's hazards are scaled to sum to at most 1;
+    `RaceBot::fold_override` replaces §5.2's fold heuristic per seat (the hook for Phase 4's
+    `mode` head, used by the two-threat test).
+11. **Spec**: `race` takes `horizon=`, `tie_margin=`, `threat=` (`τ_threat`) and `belief=`; the
+    plain `race` uses `HeuristicBelief`, so §6's belief heads need `race:belief=models/belief.mjnn`.
