@@ -66,7 +66,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
 
 ## Phase 1 – Review fixes (opus; Tasks 1–3 [parallel-ok] apart from shared `bots.rs`)
 
-- [ ] **Task 1: Live-tile-aware waits in the rollout bot**
+- [x] **Task 1: Live-tile-aware waits in the rollout bot**
   - Files: modify `crates/search/src/bots.rs` (and `crates/analysis` if the acceptance count
     lives there); test `crates/search/tests/rollout_fixes.rs` (new), fixture from Brian's hand
     at index 85 (copy `hand.json` into `crates/search/tests/data/brian-2026-11-09.json`).
