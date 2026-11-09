@@ -121,6 +121,11 @@ with their defaults.
 - **The danger tables call a tile safe when the player holds its last unseen copy.** Only the
   defending `fast` bot works around it (Task 2); `defensive` and `ev` still have the flaw.
   Default: the race bot counts live copies itself; fix the tables when they are refitted.
+- **Passed-win rule (Task 12–13) limits.** The engine counts tiles by kind, so throwing a
+  tile of the same kind as the one just drawn counts as 摸打 (no observable difference at a
+  table either, unless players watch which copy). States built from a position have no kong
+  events in their log, so a re-deal there misses a lock from a passed kong rob (rare).
+  Job 32 (race v0 match) now runs with the rule on, since the Python extension was rebuilt.
 - **Requeue the poker benchmark after all hk-games tasks** (Brian, 2026-11-09). Job 28 was
   cancelled before it started (no progress lost) to unblock jobs 29–32. Requeue it unchanged:
   `hkq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
