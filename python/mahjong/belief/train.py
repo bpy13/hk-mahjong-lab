@@ -48,12 +48,11 @@ def load_group(log: LogDir, chunks: list[int]) -> Batch:
     parts = [batch_from_rows(log.chunk(c)) for c in chunks]
     if len(parts) == 1:
         return parts[0]
-    return Batch(
-        **{
-            k: None if getattr(parts[0], k) is None else torch.cat([getattr(p, k) for p in parts])
-            for k in parts[0].__dict__
-        }
-    )
+    joined: dict[str, Any] = {
+        k: None if getattr(parts[0], k) is None else torch.cat([getattr(p, k) for p in parts])
+        for k in parts[0].__dict__
+    }
+    return Batch(**joined)
 
 
 def evaluate_loss(net: BeliefNet, batch: Batch, device: torch.device, bs: int) -> dict[str, float]:

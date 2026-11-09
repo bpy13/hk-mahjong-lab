@@ -4,6 +4,7 @@ tables and the per-bucket calibration."""
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,7 @@ from mahjong.belief.model import (
     warm_start,
 )
 from mahjong.belief.race_fit import (
+    fit,
     fit_q,
     fit_steps,
     head_calibration,
@@ -222,6 +224,10 @@ def test_a_real_race_log_trains_and_fits() -> None:
     steps = fit_steps(rows, min_n=1)
     assert all(0.0 <= x <= 1.0 for x in steps["a"] + steps["b"])
     assert all(0.0 <= x <= 1.0 for x in fit_q(rows)["q"])
+    # The whole fit, as the loop runs it (label fields only, chunk by chunk).
+    out = fit(argparse.Namespace(logs=RACE_LOG, holdout=None, model=None, min_n=1))
+    assert out["rows"] == log.rows
+    assert out["spec"].startswith("a=") and len(out["hazard"]) == 6
 
 
 def test_spec_options_are_race_spec_text() -> None:

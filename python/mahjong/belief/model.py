@@ -240,10 +240,16 @@ class Batch:
         return int(self.features.shape[0])
 
     def to(self, device: torch.device | str) -> Batch:
-        return Batch(**{k: None if v is None else v.to(device) for k, v in self.__dict__.items()})
+        moved: dict[str, Any] = {
+            k: None if v is None else v.to(device) for k, v in self.__dict__.items()
+        }
+        return Batch(**moved)
 
     def index(self, idx: torch.Tensor) -> Batch:
-        return Batch(**{k: None if v is None else v[idx] for k, v in self.__dict__.items()})
+        picked: dict[str, Any] = {
+            k: None if v is None else v[idx] for k, v in self.__dict__.items()
+        }
+        return Batch(**picked)
 
 
 def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:

@@ -31,6 +31,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from numpy.lib.recfunctions import repack_fields
 
 from mahjong.belief.evaluate import PROGRESS_BUCKETS, Calibration, buckets
 from mahjong.belief.logs import LogDir
@@ -178,24 +179,46 @@ def spec_options(steps: dict[str, Any], q: dict[str, Any]) -> str:
     return f"a={_fmt(steps['a'])},b={_fmt(steps['b'])},q={_fmt(q['q'])}"
 
 
-def _all_rows(log: LogDir) -> Rows:
-    return np.concatenate([np.asarray(c) for c in log.chunks()])
+#: The fields the fits read (a generation's log is ~20 GB; only these are loaded).
+LABEL_FIELDS = [
+    "hand",
+    "step",
+    "observer",
+    "wall_remaining",
+    "opp_tenpai",
+    "opp_won",
+    "opp_state",
+    "opp_mode",
+    "opp_shanten",
+    "my_mode",
+    "my_feeds",
+    "ready_opps",
+    "wall_at_end",
+    "race_rounds",
+    "race_pwin",
+]
 
 
-def _predict(net: BeliefNet, rows: Rows, bs: int = 4096) -> tuple[np.ndarray, np.ndarray]:
+def _label_rows(log: LogDir) -> Rows:
+    """The label fields of every chunk, packed (no features)."""
+    return np.concatenate([repack_fields(np.asarray(c[LABEL_FIELDS])) for c in log.chunks()])
+
+
+def _predict(net: BeliefNet, log: LogDir, bs: int = 4096) -> tuple[np.ndarray, np.ndarray]:
     states, modes = [], []
     net.eval()
     with torch.no_grad():
-        for i in range(0, len(rows), bs):
-            b = batch_from_rows(rows[i : i + bs])
-            p = net.predict(net(net.inputs(b.features, b.discards)), b.unseen)
-            states.append(p["state"].numpy())
-            modes.append(p["mode"].numpy())
+        for rows in log.chunks():
+            for i in range(0, len(rows), bs):
+                b = batch_from_rows(rows[i : i + bs])
+                p = net.predict(net(net.inputs(b.features, b.discards)), b.unseen)
+                states.append(p["state"].numpy())
+                modes.append(p["mode"].numpy())
     return np.concatenate(states), np.concatenate(modes)
 
 
 def fit(args: argparse.Namespace) -> dict[str, Any]:
-    rows = _all_rows(LogDir(args.logs))
+    rows = _label_rows(LogDir(args.logs))
     steps = fit_steps(rows, min_n=args.min_n)
     q = fit_q(rows)
     result: dict[str, Any] = {
@@ -212,12 +235,13 @@ def fit(args: argparse.Namespace) -> dict[str, Any]:
             ).tolist(),
         },
     }
-    hold = _all_rows(LogDir(args.holdout)) if args.holdout else rows
+    hold_log = LogDir(args.holdout) if args.holdout else LogDir(args.logs)
+    hold = _label_rows(hold_log) if args.holdout else rows
     result["hazard"] = hazard_calibration(hold)
     if args.model:
         net = BeliefNet.load(Path(args.model))
         if net.cfg.race:
-            ps, pm = _predict(net, hold)
+            ps, pm = _predict(net, hold_log)
             result["calibration"] = head_calibration(hold, ps, pm)
     return result
 
