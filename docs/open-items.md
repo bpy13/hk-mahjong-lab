@@ -128,7 +128,7 @@ with their defaults.
   `features`, so it does not see the passed block yet; extend it before distilling;
   (2) the danger tables and `PASSED_FACTOR` refit on the new logs (`fit_danger`, `fit_passed`);
   (3) `features::encode` speed after the fix is not measured (no benchmark while jobs ran).
-- **Task 18: label with the old belief model now, or wait for the retrained one?**
+- **Task 18: label with the old belief model now, or wait for the retrained one?** Decided: wait (Brian, 2026-11-10: "4 ok"; hk-games D74).
   **What it is:** the teacher that writes the distillation labels (64-sample search) and the
   three other seats read a belief model, a network that guesses opponents' hidden tiles.
   **Example:** the job `experiments\task18-data\labels.ps1 -Belief 'models/belief.mjnn'`
