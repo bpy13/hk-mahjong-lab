@@ -220,7 +220,7 @@ version on deals).
     danger of the tiles they threw (danger measured from our view when they threw it); the
     size of the update is checked against self-play truth (pushers' real closeness and hand
     value); a test where a player throws two dangerous tiles moves them to push.
-- [ ] **Task 16: Measure** (opus)
+- [x] **Task 16: Measure** (opus) (job 35; write-up bc2b807; all intervals include zero)
   - Files: `docs/study-results/race-bot.md`; job under `experiments/`.
   - Done when: race bot with Tasks 14–15 against without, duplicate match through the cpu
     lane, 1,000 walls × 4 seatings, interval; teacher with and without the rule as a sanity
