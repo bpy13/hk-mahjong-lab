@@ -17,6 +17,7 @@
 use crate::danger::{Danger, Opponent};
 use crate::danger_tables::WAIT;
 use crate::ev::{Belief, EvBot};
+use crate::race::RaceBot;
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::{Game, Policy};
@@ -118,32 +119,9 @@ pub(crate) fn rank_discards(
         for (t, key) in keyed.iter_mut().filter(|k| k.1 .0 == 0) {
             let mut hand = view.concealed;
             hand.remove(*t);
-            let (mut live, mut faan) = (0i32, 0i32);
-            for w in Tile::all_kinds() {
-                // A winning tile is a held tile or within two of one in its suit
-                // (any tile that can finish thirteen orphans, with no melds).
-                let near = hand[w] > 0
-                    || view.melds.is_empty() && w.is_terminal_or_honour()
-                    || [-2i8, -1, 1, 2]
-                        .iter()
-                        .any(|&d| w.offset(d).is_some_and(|u| hand[u] > 0));
-                if !near || view.unseen[w] == 0 || hand[w] >= 4 {
-                    continue;
-                }
-                hand.add(w);
-                let fs = faan_shanten(
-                    &HandView {
-                        concealed: &hand,
-                        ..view.hand_view()
-                    },
-                    &view.rules,
-                );
-                hand.remove(w);
-                if fs.shanten < 0 {
-                    live += view.unseen[w] as i32;
-                    faan = faan.max(fs.target.map_or(0, |t| t.faan as i32));
-                }
-            }
+            let wins = live_winning_tiles(view, &hand);
+            let live: i32 = wins.iter().map(|&(w, _)| view.unseen[w] as i32).sum();
+            let faan = wins.iter().map(|&(_, f)| f as i32).max().unwrap_or(0);
             *key = (0, (live == 0) as i32, -faan, -live);
         }
     } else if metric != Metric::FaanQuick {
@@ -167,6 +145,41 @@ pub(crate) fn rank_discards(
     }
     keyed.sort_by_key(|&(t, k)| (k, t));
     keyed
+}
+
+/// The live winning tiles of a waiting hand (`hand` is the concealed part, 13
+/// tiles less 3 per meld of `view`): each kind with an unseen copy that
+/// completes a legal win, with the faan of that win (`Target::faan`, no win
+/// way). Dead waits (no unseen copy) are left out. Shared by the rollout bot's
+/// ready tie-break and the race bot (`crate::race`).
+pub(crate) fn live_winning_tiles(view: &SeatView, hand: &TileCounts) -> Vec<(Tile, u8)> {
+    let mut hand = *hand;
+    let mut out = Vec::new();
+    for w in Tile::all_kinds() {
+        // A winning tile is a held tile or within two of one in its suit
+        // (any tile that can finish thirteen orphans, with no melds).
+        let near = hand[w] > 0
+            || view.melds.is_empty() && w.is_terminal_or_honour()
+            || [-2i8, -1, 1, 2]
+                .iter()
+                .any(|&d| w.offset(d).is_some_and(|u| hand[u] > 0));
+        if !near || view.unseen[w] == 0 || hand[w] >= 4 {
+            continue;
+        }
+        hand.add(w);
+        let fs = faan_shanten(
+            &HandView {
+                concealed: &hand,
+                ..view.hand_view()
+            },
+            &view.rules,
+        );
+        hand.remove(w);
+        if fs.shanten < 0 {
+            out.push((w, fs.target.map_or(0, |t| t.faan)));
+        }
+    }
+    out
 }
 
 /// The best discard and its key.
@@ -548,15 +561,19 @@ pub enum Bot {
     Fast(Fast),
     /// Brian's explicit EV design ([`crate::ev`]).
     Ev(EvBot),
+    /// The race over all four players' chances (B28, [`crate::race`]).
+    Race(RaceBot),
 }
 
 impl Bot {
     /// Builds a bot by name: `random`, `efficiency`, `value`, `defensive`,
-    /// `closed` (value, never claims melds), `fast`, `ev` (with the heuristic
-    /// belief; `ev:` spec options are parsed by [`crate::Agent`]).
+    /// `closed` (value, never claims melds), `fast`, `ev` and `race` (with the
+    /// heuristic belief; `ev:` and `race:` spec options are parsed by
+    /// [`crate::Agent`]).
     pub fn by_name(name: &str) -> Option<Bot> {
         Some(match name {
             "ev" => Bot::Ev(EvBot::default()),
+            "race" => Bot::Race(RaceBot::default()),
             "random" => Bot::Random(RandomBot),
             "efficiency" => Bot::Efficiency(Efficiency::default()),
             "value" => Bot::Value(Value::default()),
@@ -576,6 +593,7 @@ impl Policy<State> for Bot {
             Bot::Value(b) => b.choose(state, legal, rng),
             Bot::Fast(b) => b.choose(state, legal, rng),
             Bot::Ev(b) => b.choose(state, legal, rng),
+            Bot::Race(b) => b.choose(state, legal, rng),
         }
     }
 }

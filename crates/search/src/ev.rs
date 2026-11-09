@@ -681,7 +681,7 @@ impl Table {
 }
 
 /// My hand after a kong of `t` declared on my turn.
-fn after_own_kong(view: &SeatView, a: Action) -> Option<SeatView> {
+pub(crate) fn after_own_kong(view: &SeatView, a: Action) -> Option<SeatView> {
     let mut h = view.concealed;
     let mut m = view.melds.clone();
     match a {
@@ -701,7 +701,7 @@ fn after_own_kong(view: &SeatView, a: Action) -> Option<SeatView> {
     Some(view.with(h, m))
 }
 
-fn exposed(melds: &[Meld]) -> usize {
+pub(crate) fn exposed(melds: &[Meld]) -> usize {
     melds.iter().filter(|m| !m.concealed).count()
 }
 

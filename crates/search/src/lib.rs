@@ -13,6 +13,8 @@
 //! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
+//! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
+//!   chances.
 //! * [`reasons`]: reason keys (no text) for the `ev` bot and the network path.
 //! * [`solo`]: offense-only estimates for each discard.
 //! * [`target_value`]: P(win), P(self-draw | win) and points by target plan
@@ -32,6 +34,7 @@ pub mod labels;
 pub mod log;
 pub mod net;
 pub mod pimc;
+pub mod race;
 pub mod reasons;
 pub mod solo;
 pub mod target_tables;
@@ -52,6 +55,7 @@ pub use pimc::{
     pimc, pimc_anchored, pimc_with, pimc_with_leaf, shortlist, shortlist_anchored, ActionStats,
     Analysis, LeafValue, PimcConfig, Rollout,
 };
+pub use race::{Mode, RaceBot, RaceConfig, RaceDecision, RaceTerms};
 pub use reasons::{Reason, ReasonArgs, ReasonKey};
 pub use solo::{solo, SoloStats};
 pub use tournament::{

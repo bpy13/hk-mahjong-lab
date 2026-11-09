@@ -4,7 +4,11 @@
 //!
 //! Spec strings:
 //!
-//! * a bot name: `random`, `efficiency`, `value`, `defensive`, `closed`, `fast`, `ev`;
+//! * a bot name: `random`, `efficiency`, `value`, `defensive`, `closed`, `fast`, `ev`,
+//!   `race`;
+//! * `race` with options, e.g. `race:horizon=8,tie_margin=0.5,threat=0.2` and
+//!   `belief=models/belief.mjnn` ([`crate::race`], `docs/race-bot.md`; without
+//!   `belief=` it uses the heuristic belief);
 //! * `ev` with options, e.g. `ev:horizon=8,clip=0.95,tie_margin=0.5,r_disc=2,
 //!   four_meld_win=0.5,feed_clip=0.5-1.5,warn_p=0.1,fold=safest,floor=target`
 //!   ([`crate::ev`],
@@ -364,6 +368,18 @@ impl Agent {
                     None => Arc::new(HeuristicBelief),
                 };
                 Ok(Agent::Bot(Bot::Ev(EvBot::new(config, belief))))
+            }
+            "race" => {
+                let mut pairs = Vec::new();
+                options(opts, |k, v| {
+                    pairs.push((k.to_string(), v.to_string()));
+                    Ok(())
+                })?;
+                let pairs: Vec<(&str, &str)> = pairs
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str()))
+                    .collect();
+                Ok(Agent::Bot(Bot::Race(crate::race::parse_spec(&pairs)?)))
             }
             "defensive" if !opts.is_empty() => {
                 let mut belief = None;

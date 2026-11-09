@@ -18,7 +18,7 @@ pub fn counts(s: &str) -> TileCounts {
 
 /// A belief stub that returns fixed numbers.
 #[derive(Debug)]
-pub struct Stub(Beliefs);
+pub struct Stub(pub Beliefs);
 
 impl Belief for Stub {
     fn estimate(&self, _state: &State, _me: usize) -> Beliefs {
