@@ -126,6 +126,36 @@ def fit_q(rows: Rows, default: tuple[float, ...] = DEFAULT_Q) -> dict[str, list[
     return {"q": q, "n_ready": n}
 
 
+def label_counts(rows: Rows, agents: list[str]) -> dict[str, dict[str, dict[str, int]]]:
+    """Each agent's own discard labels (``docs/race-bot.md`` §12): push, detour, fold and
+    mistake (written as push in ``my_mode``, flagged by ``my_mistake``; here ``push``
+    excludes them), over all its discards and over those when no opponent was ready
+    (``calm``) or some was (``threat``). Keys are the agent specs of the log's meta."""
+    sel = rows["my_mode"] != NO_MODE
+    r = rows[sel]
+    agent = r["agents"][np.arange(len(r)), r["observer"].astype(np.int64)].astype(np.int64)
+    mode = r["my_mode"].astype(np.int64)
+    if "my_mistake" in (r.dtype.names or ()):
+        mistake = r["my_mistake"].astype(bool)
+    else:  # a log from before §12's mistake flag
+        mistake = np.zeros(len(r), dtype=bool)
+    label = np.where(mistake, len(MODE_NAMES), mode)
+    calm = r["ready_opps"] == 0
+    names = (*MODE_NAMES, "mistake")
+    out: dict[str, dict[str, dict[str, int]]] = {}
+    for i, spec in enumerate(agents):
+        mine = agent == i
+        if not mine.any():
+            continue
+        out[spec] = {
+            part: dict(
+                zip(names, np.bincount(label[mine & m], minlength=len(names)).tolist(), strict=True)
+            )
+            for part, m in (("all", np.ones_like(calm)), ("calm", calm), ("threat", ~calm))
+        }
+    return out
+
+
 def head_calibration(
     rows: Rows, probs_state: np.ndarray, probs_mode: np.ndarray
 ) -> dict[str, dict[str, list[dict[str, float | bool]]]]:
@@ -184,6 +214,7 @@ LABEL_FIELDS = [
     "hand",
     "step",
     "observer",
+    "agents",
     "wall_remaining",
     "opp_tenpai",
     "opp_won",
@@ -193,6 +224,7 @@ LABEL_FIELDS = [
     "my_mode",
     "my_feeds",
     "ready_opps",
+    "my_mistake",
     "wall_at_end",
     "race_rounds",
     "race_pwin",
@@ -200,8 +232,14 @@ LABEL_FIELDS = [
 
 
 def _label_rows(log: LogDir) -> Rows:
-    """The label fields of every chunk, packed (no features)."""
-    return np.concatenate([repack_fields(np.asarray(c[LABEL_FIELDS])) for c in log.chunks()])
+    """The label fields of every chunk, packed (no features). A field the log lacks
+    (``my_mistake`` before §12) is left out."""
+    return np.concatenate(
+        [
+            repack_fields(np.asarray(c[[f for f in LABEL_FIELDS if f in (c.dtype.names or ())]]))
+            for c in log.chunks()
+        ]
+    )
 
 
 def _predict(net: BeliefNet, log: LogDir, bs: int = 4096) -> tuple[np.ndarray, np.ndarray]:
@@ -218,7 +256,8 @@ def _predict(net: BeliefNet, log: LogDir, bs: int = 4096) -> tuple[np.ndarray, n
 
 
 def fit(args: argparse.Namespace) -> dict[str, Any]:
-    rows = _label_rows(LogDir(args.logs))
+    log = LogDir(args.logs)
+    rows = _label_rows(log)
     steps = fit_steps(rows, min_n=args.min_n)
     q = fit_q(rows)
     result: dict[str, Any] = {
@@ -233,6 +272,7 @@ def fit(args: argparse.Namespace) -> dict[str, Any]:
             "my_mode": np.bincount(
                 rows["my_mode"][rows["my_mode"] != NO_MODE], minlength=3
             ).tolist(),
+            "by_agent": label_counts(rows, list(log.meta.get("agents", []))),
         },
     }
     hold_log = LogDir(args.holdout) if args.holdout else LogDir(args.logs)
@@ -263,6 +303,8 @@ def main(argv: list[str] | None = None) -> None:
     tmp.write_text(json.dumps(result, indent=1), encoding="utf-8")
     tmp.replace(out)
     print(f"{out}: {result['rows']} rows; spec {result['spec']}")
+    for spec, parts in result["labels"]["by_agent"].items():
+        print(f"  {spec}: " + "; ".join(f"{p} {c}" for p, c in parts.items()))
 
 
 if __name__ == "__main__":

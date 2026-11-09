@@ -389,7 +389,7 @@ def generation(
     olds = [g["spec"] for g in accepted[:-1]]
     play(Gen(k), prev["spec"], olds, cfg)
     init = REPO / prev["pt"] if prev["generation"] > 0 else REPO / BASE_PT
-    dropped = []
+    dropped: list[dict[str, Any]] = []
     for attempt in (0, 1):
         gen = Gen(k, attempt)
         if gen.result.exists():
@@ -397,6 +397,10 @@ def generation(
         else:
             train(gen, init, cfg)
             fit(gen, cfg)
+            # docs/race-bot.md §12: the main bot's own discard labels, as a sanity line.
+            mine = read_json(gen.fit)["labels"].get("by_agent", {}).get(prev["spec"])
+            if mine:
+                log(f"g{k} labels of {prev['spec']}: {mine}")
             spec = spec_of(gen)
             matches = gen.run / "matches"
             res = {

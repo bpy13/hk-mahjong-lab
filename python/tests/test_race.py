@@ -27,6 +27,7 @@ from mahjong.belief.race_fit import (
     fit_q,
     fit_steps,
     head_calibration,
+    label_counts,
     spec_options,
 )
 from mahjong.rl.model import STATE_LEN
@@ -114,6 +115,7 @@ def race_rows(n: int) -> np.ndarray:
             ("step", "<u2"),
             ("observer", "u1"),
             ("wall_remaining", "u1"),
+            ("agents", "u1", (4,)),
             ("features", "<f2", (STATE_LEN,)),
             ("discards", "u1", (4, 8)),
             ("opp_counts", "u1", (3, NUM_KINDS)),
@@ -127,6 +129,7 @@ def race_rows(n: int) -> np.ndarray:
             ("my_mode", "u1"),
             ("my_feeds", "u1"),
             ("ready_opps", "u1"),
+            ("my_mistake", "u1"),
             ("wall_at_end", "u1"),
             ("race_rounds", "u1"),
             ("race_pwin", "<f2", (4,)),
@@ -160,6 +163,23 @@ def test_q_is_feeds_per_ready_opponent_by_mode() -> None:
     q = fit_q(rows, default=(0.08, 0.04, 0.01))
     assert q["q"] == [0.25, 0.0, 0.01]  # fold keeps its default (no evidence)
     assert q["n_ready"] == [4, 2, 0]
+
+
+def test_label_counts_split_by_agent_and_threat() -> None:
+    rows = race_rows(6)
+    # Seats 0 and 2 are agent 0 (race), seats 1 and 3 agent 1 (value).
+    rows["agents"] = [0, 1, 0, 1]
+    rows["observer"] = [0, 2, 1, 0, 3, 0]
+    rows["my_mode"] = [0, 1, 0, 255, 2, 0]
+    rows["my_mistake"] = [0, 0, 1, 0, 0, 1]
+    rows["ready_opps"] = [0, 1, 0, 0, 2, 1]
+    out = label_counts(rows, ["race", "value", "fast"])
+    assert set(out) == {"race", "value"}  # "fast" never played
+    race = out["race"]
+    assert race["all"] == {"push": 1, "detour": 1, "fold": 0, "mistake": 1}
+    assert race["calm"] == {"push": 1, "detour": 0, "fold": 0, "mistake": 0}
+    assert race["threat"]["detour"] == 1 and race["threat"]["mistake"] == 1
+    assert out["value"]["all"] == {"push": 0, "detour": 0, "fold": 1, "mistake": 1}
 
 
 def test_steps_per_round_from_one_seat_s_true_states() -> None:
@@ -228,6 +248,9 @@ def test_a_real_race_log_trains_and_fits() -> None:
     out = fit(argparse.Namespace(logs=RACE_LOG, holdout=None, model=None, min_n=1))
     assert out["rows"] == log.rows
     assert out["spec"].startswith("a=") and len(out["hazard"]) == 6
+    # Every own discard is counted once, under the agent that made it.
+    by_agent = out["labels"]["by_agent"]
+    assert sum(sum(p["all"].values()) for p in by_agent.values()) == sum(out["labels"]["my_mode"])
 
 
 def test_spec_options_are_race_spec_text() -> None:
