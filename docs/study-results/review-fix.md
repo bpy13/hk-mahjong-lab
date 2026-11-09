@@ -83,7 +83,7 @@ Unchanged grades: 21 of the 28 decisions. The loss of a "good" move moves by a f
 at most; 40 and 49 sit near the inaccuracy threshold in both builds (400 samples per
 decision, standard errors of several points), so their swap is within noise.
 
-## 5. AC3: the teacher with the fixed rollouts (pending)
+## 5. AC3: the teacher with the fixed rollouts (FAILED)
 
 **Question.** Does the teacher spec (`pimc:samples=64,candidates=4,belief=models/belief.mjnn,weights=1`,
 anchor `value`, rollout `fast`) play at least as well with the fixed `fast` as with the old
@@ -95,8 +95,24 @@ and once from the fix (`pkg-new`); the spec string is identical. Difference pair
 (t-interval, 19 degrees of freedom). Job: `experiments/review-fix/job.ps1` through the cpu
 lane, queue jobs 29 (old), 30 (new) and 31 (compare, after both).
 
-**Result.** Pending. Check: `Get-Content runs\review-fix\old.progress, runs\review-fix\new.progress`;
-the verdict lands in `runs\review-fix\compare.json` (`new_minus_old`, `ac3_pass`).
+**Result (queue jobs 29-31, done 2026-11-09; `runs/review-fix/compare.json`).** AC3 fails.
+
+| Teacher rollouts | Mean points per hand (95 %) | Win rate | Deal-in rate | Draw rate |
+|---|---|---|---|---|
+| Old `fast` (75dae32) | +1.020 ± 1.115 | 23.1 % | 18.6 % | 6.2 % |
+| Fixed `fast` (2c23636) | +0.464 ± 1.075 | 23.7 % | 17.1 % | 6.5 % |
+| New minus old (paired by chunk, 19 df) | **-0.556 ± 1.054**, interval [-1.61, +0.50] | | | |
+
+The lower end, -1.61, is below the -0.5 bar. The interval also contains zero, so the match
+shows no measured loss, only that it cannot rule out one of more than half a point per hand.
+Per chunk of 50 walls the difference ranges from -5.8 to +3.7 (11 of 20 chunks negative).
+The fixed rollouts win slightly more often and deal in less (18.6 % to 17.1 %); mean faan per
+win is about the same (4.83 to 4.75). Inference (not tested): the lower average comes from
+fewer large wins, but 4,000 hands cannot separate that from noise.
+
+**Decision per the plan.** Keep the fix for the review's grade (decision 85 moves from blunder
+to best); do not claim it makes the teacher stronger. The bots' own play with the fixed `fast`
+is unproven, recorded in `docs/open-items.md`. Brian decides whether to extend the match.
 
 ## 6. Open items
 

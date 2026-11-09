@@ -94,7 +94,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
   - Done when: `cargo build --release -p mahjong-app-api --example regrade` passes; README
     shows the four modes (`<index> 0`, `<index> <scale>`, `all`, `<index> 1 trace|count`).
 
-- [ ] **Task 4: Measure the fix**
+- [x] **Task 4: Measure the fix** (AC3 failed: -0.556 [-1.61, +0.50]; see study-results/review-fix.md)
   - Files: `docs/study-results/review-fix.md` (new); queue job script under `experiments/`.
   - Done when: AC1 (regrade output pasted) and AC3 (duplicate match through the cpu lane,
     teacher spec old vs new rollouts) are recorded; plus `regrade all` on Brian's hand before

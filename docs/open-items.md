@@ -4,6 +4,7 @@ Plan: `docs/plans/2026-10-29-mahjong-bot-build.md`. Its "Open questions for Bria
 with their defaults.
 
 ## Waiting on Brian
+- **Review-fix Task 4: AC3 failed (2026-11-10 write-up).** Teacher with the fixed `fast` minus old: -0.556 points per hand, 95 % interval [-1.61, +0.50] (bar: lower end above -0.5). Not a measured loss, but not ruled out. The fix stays for the review's grade; the bots' own play is unproven. Decide: extend the match (more walls) or accept. Details: `docs/study-results/review-fix.md` section 5.
 - **EV bot: the `Pay(me)` floor** (`docs/ev-bot.md`, Task 10, a2d1b05). The doc sets my payout
   to at least the target hand's guaranteed points. In both test hands `faan_shanten` picks a
   10-faan full flush, so the floor makes my payout 128 points even when the flush is far away.
