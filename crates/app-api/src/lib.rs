@@ -11,6 +11,7 @@ pub mod api;
 pub mod reasons;
 pub mod shapes;
 pub mod solver;
+pub mod waits;
 
 pub use api::{Api, BOT_LEVELS};
 pub use shapes::API_VERSION;
@@ -107,6 +108,11 @@ pub mod python {
 
         pub fn restore(&mut self, position: &str) -> String {
             self.inner.restore(position)
+        }
+
+        /// Tiles that complete a concealed hand of 4, 7, 10 or 13 tiles (stateless).
+        pub fn waits(&self, tiles_json: &str) -> String {
+            crate::waits::waits(tiles_json)
         }
 
         pub fn drop_game(&mut self, game_id: &str) -> String {
@@ -208,6 +214,11 @@ pub mod wasm {
 
         pub fn restore(&mut self, position: &str) -> String {
             self.inner.restore(position)
+        }
+
+        /// Tiles that complete a concealed hand of 4, 7, 10 or 13 tiles (stateless).
+        pub fn waits(&self, tiles_json: &str) -> String {
+            crate::waits::waits(tiles_json)
         }
 
         pub fn drop_game(&mut self, game_id: &str) -> String {
