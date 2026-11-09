@@ -203,7 +203,7 @@ version on deals).
 - [x] **Task 13: 摸打 / 入章 in the record** (opus)
   - Files: `crates/hk/src/state.rs` (discard history), app-api view JSON, `SeatView`.
   - Done when: each discard in the view carries `from_hand: bool`; test.
-- [ ] **Task 14: Passed-tile safety in the race bot and the defending `fast` bot** (fable:
+- [x] **Task 14: Passed-tile safety in the race bot and the defending `fast` bot** (fable:
   a new estimate with no data yet)
   - Files: `crates/search/src/{race,bots}.rs`, a new `crates/search/src/passed.rs`,
     `docs/race-bot.md` (a new section), tests.
@@ -214,7 +214,7 @@ version on deals).
     clearly useful to them: by our estimate it connected to their likely hand) resets all
     their passed-tile safety; the 換章 test is checked against self-play truth (did their
     waits really change); tests; timing still under 5 ms per decision.
-- [ ] **Task 15: Reading an opponent's risk-taking** (fable: model choice open)
+- [x] **Task 15: Reading an opponent's risk-taking** (fable: model choice open)
   - Files: `crates/search/src/race.rs`, `docs/race-bot.md`, tests.
   - Done when: each opponent's push probability and hand-value estimate update from the
     danger of the tiles they threw (danger measured from our view when they threw it); the

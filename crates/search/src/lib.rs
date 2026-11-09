@@ -12,6 +12,7 @@
 //! * [`labels`]: search-labelled decisions for distillation (plan Task 13).
 //! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
+//! * [`passed`]: passed-tile safety and the risk-taking read (plan Tasks 14–15).
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
 //!   chances.
@@ -33,6 +34,7 @@ pub mod features;
 pub mod labels;
 pub mod log;
 pub mod net;
+pub mod passed;
 pub mod pimc;
 pub mod race;
 pub mod reasons;

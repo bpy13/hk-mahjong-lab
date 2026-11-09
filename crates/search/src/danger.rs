@@ -27,7 +27,8 @@
 
 use crate::danger_tables::{CALIBRATION, THREAT, WAIT};
 use crate::ev::{Belief, Beliefs, FIRST_FAAN_BUCKET};
-use mahjong_hk::{Event, State};
+use crate::passed::Passed;
+use mahjong_hk::{Event, Meld, State};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
 
 /// Number of wall-progress buckets in the threat table.
@@ -48,9 +49,11 @@ struct Tag {
 }
 
 fn tag(state: &State, o: usize) -> Tag {
-    let rules = state.rules();
-    let melds = state.melds(o);
-    let exposed = melds.exposed_count().min(4);
+    tag_of(state.rules(), o, state.melds(o))
+}
+
+fn tag_of(rules: &mahjong_hk::RuleSet, o: usize, melds: &[Meld]) -> Tag {
+    let exposed = melds.iter().filter(|m| !m.concealed).count().min(4);
     let mut suits: Vec<_> = melds.iter().filter_map(|m| m.tile.suit()).collect();
     suits.sort();
     suits.dedup();
@@ -103,6 +106,23 @@ impl Opponent {
         }
     }
 
+    /// The same lookups from public facts gathered elsewhere (`passed::risk_scores`
+    /// rebuilds each seat's view at an earlier discard): the seat's melds so far,
+    /// the wall-progress bucket (0–5) and the kinds it has discarded.
+    pub fn from_public(
+        rules: &mahjong_hk::RuleSet,
+        o: usize,
+        melds: &[Meld],
+        progress: usize,
+        discarded: [bool; NUM_KINDS],
+    ) -> Opponent {
+        Opponent {
+            tag: tag_of(rules, o, melds),
+            progress: progress.min(PROGRESS_BUCKETS - 1),
+            discarded,
+        }
+    }
+
     /// The threat-table cell.
     pub fn threat_cell(&self) -> usize {
         (self.tag.exposed * PROGRESS_BUCKETS + self.progress) * 3 + self.tag.kind
@@ -137,7 +157,7 @@ impl Opponent {
 /// Maps a raw estimate to the deal-in rate observed for it on real discards
 /// (piecewise linear through [`CALIBRATION`]; proportional below the first point,
 /// flat above the last).
-fn calibrate(raw: f64) -> f64 {
+pub(crate) fn calibrate(raw: f64) -> f64 {
     let first = CALIBRATION[0];
     if raw <= first.0 {
         return if first.0 > 0.0 {
@@ -180,6 +200,12 @@ struct Payment {
 pub struct Danger {
     tiles: [f64; NUM_KINDS],
     threat: [f64; 4],
+    /// Per opponent, P(it wins on each tile) before combining: the table's
+    /// `threat × rate` for [`Danger::estimate`], the belief's `tenpai × wait` for
+    /// [`Danger::from_belief`]. [`Danger::apply_passed`] rescales it.
+    raw: [[f64; NUM_KINDS]; 4],
+    /// Whether `tiles` goes through the calibration curve (the tables do).
+    calibrated: bool,
     /// Present only when built by [`Danger::from_belief`].
     payment: Option<Box<Payment>>,
 }
@@ -188,7 +214,7 @@ impl Danger {
     /// Estimates danger for `me` from public information.
     pub fn estimate(state: &State, me: usize) -> Danger {
         let unseen = state.unseen(me);
-        let mut safe = [1.0f64; NUM_KINDS];
+        let mut raw = [[0.0f64; NUM_KINDS]; 4];
         let mut threat = [0.0f64; 4];
         for o in (0..4).filter(|&o| o != me) {
             let opp = Opponent::of(state, o);
@@ -196,19 +222,52 @@ impl Danger {
             threat[o] = t_o;
             for t in Tile::all_kinds() {
                 if let Some(c) = opp.wait_cell(t, &unseen) {
-                    safe[t.index() as usize] *= 1.0 - t_o * WAIT[c];
+                    raw[o][t.index() as usize] = t_o * WAIT[c];
                 }
             }
         }
-        let mut tiles = [0.0f64; NUM_KINDS];
-        for i in 0..NUM_KINDS {
-            tiles[i] = calibrate(1.0 - safe[i]);
-        }
-        Danger {
-            tiles,
+        let mut d = Danger {
+            tiles: [0.0; NUM_KINDS],
             threat,
+            raw,
+            calibrated: true,
             payment: None,
+        };
+        d.combine();
+        d
+    }
+
+    /// `tiles` from `raw`: `1 − Π_o (1 − raw_o)`, through the calibration curve for
+    /// the table estimate.
+    fn combine(&mut self) {
+        for i in 0..NUM_KINDS {
+            let safe: f64 = (0..4).map(|o| 1.0 - self.raw[o][i]).product();
+            self.tiles[i] = if self.calibrated {
+                calibrate(1.0 - safe)
+            } else {
+                1.0 - safe
+            };
         }
+    }
+
+    /// Passed-tile safety (plan Task 14, `docs/race-bot.md` §13): scales each
+    /// opponent's rate on each tile by [`Passed::factor`] (0 while that seat's
+    /// passed-win lock holds on the tile, then rising with its 入章 since), and
+    /// rebuilds [`Danger::tile`] and [`Danger::expected_loss`] from the result.
+    pub fn apply_passed(&mut self, passed: &Passed) {
+        for o in 0..4 {
+            for t in Tile::all_kinds() {
+                let i = t.index() as usize;
+                if self.raw[o][i] > 0.0 {
+                    let f = passed.factor(o, t);
+                    self.raw[o][i] *= f;
+                    if let Some(p) = self.payment.as_mut() {
+                        p.p[o][i] *= f;
+                    }
+                }
+            }
+        }
+        self.combine();
     }
 
     /// Payment-aware danger for `me` from a belief about each opponent (plan
@@ -237,7 +296,7 @@ impl Danger {
             claim4: [[0.0; NUM_KINDS]; 4],
             can_claim4: [[false; NUM_KINDS]; 4],
         };
-        let mut safe = [1.0f64; NUM_KINDS];
+        let mut raw = [[0.0f64; NUM_KINDS]; 4];
         let mut threat = [0.0f64; 4];
         for o in (0..4).filter(|&o| o != me) {
             let b = &beliefs.seats[o];
@@ -264,7 +323,7 @@ impl Danger {
                 }
                 let p = (b.tenpai * b.wait[i]).clamp(0.0, 1.0);
                 pay.p[o][i] = p;
-                safe[i] *= 1.0 - p;
+                raw[o][i] = p;
                 if pay.three_exposed[o] {
                     let mut chow = 0.0f64;
                     let mut chow_possible = false;
@@ -283,15 +342,15 @@ impl Danger {
                 }
             }
         }
-        let mut tiles = [0.0f64; NUM_KINDS];
-        for i in 0..NUM_KINDS {
-            tiles[i] = 1.0 - safe[i];
-        }
-        Danger {
-            tiles,
+        let mut d = Danger {
+            tiles: [0.0; NUM_KINDS],
             threat,
+            raw,
+            calibrated: false,
             payment: Some(Box::new(pay)),
-        }
+        };
+        d.combine();
+        d
     }
 
     /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o) ×

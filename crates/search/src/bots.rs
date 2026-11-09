@@ -17,6 +17,7 @@
 use crate::danger::{Danger, Opponent};
 use crate::danger_tables::WAIT;
 use crate::ev::{Belief, EvBot};
+use crate::passed::Passed;
 use crate::race::RaceBot;
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
@@ -347,13 +348,19 @@ impl Brain {
             }
         }
         if self.defense > 0.0 && key.0 >= 1 {
-            let (danger, risk_of): (Danger, fn(&Danger, Tile) -> f64) = match &self.belief {
+            let (mut danger, risk_of): (Danger, fn(&Danger, Tile) -> f64) = match &self.belief {
                 Some(b) => (
                     Danger::from_belief(state, view.seat, b.as_ref()),
                     Danger::expected_loss,
                 ),
                 None => (Danger::estimate(state, view.seat), Danger::tile),
             };
+            // Passed-tile safety (plan Task 14, `docs/race-bot.md` §13), for the
+            // defending rollout bot only: a tile a seat let pass is safe against
+            // it until that seat's next turn, and less safe with each 入章 since.
+            if self.metric == Metric::FaanQuick {
+                danger.apply_passed(&Passed::of(state));
+            }
             // The "clearly safer" margin: 0.3 % deal-in, or that much of one
             // 3-faan share (8 points) in expected loss.
             let margin = if self.belief.is_some() { 0.024 } else { 0.003 };

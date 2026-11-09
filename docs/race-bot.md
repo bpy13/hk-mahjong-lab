@@ -678,3 +678,126 @@ the logger `crates/search/examples/race_log.rs`, the heads in `python/mahjong/be
    make few (`value`: push 234, detour 1, fold 0, mistake 50). The race bot's far-hand model
    (§11 item 7) barely tells distances apart, so tiny danger gaps decide its discard.
    The labels now show this; the bot itself is unchanged.
+
+## 13. Passed tiles and risk-taking (Phase 6, Tasks 14–15)
+
+Code: `crates/search/src/passed.rs` (the record and the risk score), `race.rs` (`RiskRead`,
+`Table::new`), `danger.rs` (`Danger::apply_passed`), the defending `fast` bot in `bots.rs`.
+The numbers are fitted by `cargo run --release -p mahjong-search --example fit_passed --
+--hands 8000 --seed 1` (full-information self-play, a field drawn per seat from `race`,
+`value`, `defensive`, `fast`, `closed`, `efficiency`; 585,620 decisions; about 200 s on one
+thread). Rerun it to refit; `--belief models/belief.mjnn` fits against the model's estimates.
+Brian's words and answers are the Phase 6 header of the plan.
+
+### 13.1 The passed-tile record (Task 14, AC10)
+
+When another seat discards `t` and seat `P` does not win on it, `P` **let `t` pass**: from
+our view `P` was either not waiting on `t` or is now locked on it (rules §4.4). `Passed::of`
+scans the public events and keeps, per seat and kind: passed; whether `P` has had a turn
+since (a discard, claim or kong); the number `N` of `P`'s 入章 since (a tile from the hand
+went out; a 摸打, the drawn tile straight out, leaves the hand unchanged; a claim or kong
+counts as one change). `Passed::factor(P, t)` multiplies the deal-in estimate `P_P(t)`:
+
+| Record | Factor | Measured (truth / estimate, relative to tiles that did not pass) |
+|---|---|---|
+| did not pass | 1 | 1.000 (29.1 M cases; the raw ratio is 0.957) |
+| passed, no turn since (the lock) | **0** | 0 legal wins in 1.50 M cases (the rule) |
+| passed, turned, N = 0 | 0 | 0 waits in 3.80 M cases (the hand is as it was) |
+| N = 1 | **0.546** | 5.34 M cases |
+| N = 2 | **0.618** | 3.72 M |
+| N = 3 | **0.763** | 2.63 M |
+| N ≥ 4 | **0.973** | 5.02 M |
+
+`PASSED_FACTOR` in `passed.rs`. Without any 換章 reset the fade is slower (0.595, 0.667,
+0.828, 1.100), because the reset takes out exactly the cases where the hand did change.
+Against `models/belief.mjnn`'s estimates (`--belief`) the same cases give 0.722, 0.804, 1.0,
+1.0 (`PASSED_FACTOR_MODEL`, used by `race:belief=`): the model already rates passed tiles
+lower, so less of the fade is left for the factor.
+
+**換章.** Brian: a pushing player throws a tile that was clearly useful to them, so the hand
+took a new shape, and every tile they let pass is no longer safe. We see no hand, so the
+fitter tried public readings of "clearly useful" and checked each against the truth (did the
+seat's waits or faan-aware shanten change against its hand after its previous discard):
+
+| Test (on a discard from the hand) | Fires | Waits or distance changed | Passed tiles after it (truth / estimate) |
+|---|---|---|---|
+| any 入章 | 265,942 | 39.5 % | 0.873 |
+| middle tile 3–7 | 109,404 | 39.0 % | 0.868 |
+| inner tile 2–8 | 155,648 | 38.9 % | 0.861 |
+| fresh middle (kind and neighbours never discarded) | 64,564 | 41.1 % | 0.926 |
+| terminal or honour | 110,294 | 40.3 % | 0.998 |
+| **a tile of the seat's visible flush suit** | 14,546 | **55.0 %** | **1.248** |
+| (摸打, for reference) | 283,327 | 0 % | — |
+
+A middle tile from the hand says nothing beyond "a 入章": every hand reshapes a little on
+each one. The one reading that marks a real change is a tile of the suit the seat's
+exposed melds show it collecting: after it the waits changed in 55 % of cases and the
+tiles it had let pass were back at 1.25 of the unconditioned deal-in rate, so a **full reset
+is right there** (even conservative). `passed::reshaped` is that test; a seat without a
+visible flush never resets, its safety only fades by `N`. The "pushing" part of Brian's
+definition is not checked separately: the fitter found no public reading of it, and the
+reset bucket is above 1 without it.
+
+**Where it enters.** The race bot: `Table::new` scales `P_o(t)` (deal-in now, the fold and
+detour tile sets, the plan's danger order) by the factor; the later-round `wait_o(u)` is left
+alone (by then the seat has drawn again). The defending `fast` bot: `Danger::apply_passed`
+rescales each opponent's rate before the fold's safest-tile choice and the "clearly safer"
+tie-break; `Danger::estimate` now keeps the per-opponent rates for that. The `defensive` bot
+and the `ev` bot are unchanged. Spec: `race:passed=off` switches it off (Task 16's match).
+
+### 13.2 The risk-taking read (Task 15, AC11)
+
+`passed::risk_scores` gives each seat a score: for every tile it threw, the public danger of
+that tile as the tables rated it at the time (the thrower's view of the other three seats:
+threat by exposed melds and wall progress, wait rate by tile class, copies then unseen on
+the table, whether the target had discarded it) **less the mean danger of every kind still
+unseen then**, summed with 0.75 per later discard. Positive: the seat throws more dangerous
+tiles than the table offers; negative: it picks safe ones. The plain danger was tried first
+and only measured how threatening the table was: its high bins held both pushers and
+folders late in the hand.
+
+`RiskRead` (`race.rs`) turns the score into multipliers on the heuristic fold probability
+(§5.2), `tenpai_o`, `p_O,o` and `Pay(o)`, by five bins, each relative to what the wall
+bucket's own truth / estimate ratio predicts (folds and readiness both rise late, as the
+score's spread does):
+
+| Score | Share of observations | Fold | Ready | One away | Pay |
+|---|---|---|---|---|---|
+| below −0.02 (picks safe tiles) | 18 % | **1.685** | **0.776** | 0.988 | 0.998 |
+| −0.02 to 0 | 36 % | 0.467 | 0.867 | 0.982 | 1.015 |
+| 0 to 0.02 (nothing thrown, or no danger around) | 35 % | 0.435 | 1.112 | 1.005 | 0.960 |
+| 0.02 to 0.05 | 5 % | 0.536 | 1.311 | 1.041 | 0.995 |
+| 0.05 and up (throws dangerous tiles) | 6 % | **0.736** | **1.466** | 1.034 | 1.030 |
+
+Raw rates behind it (all wall buckets together): seats below −0.02 were folded 1.23 % of the
+time and ready 8.3 % against an estimated 13.0 %; seats at 0.05 and up were folded 0.55 %
+and ready 18.1 % against 15.0 %. So Brian's reading holds for closeness (a risk-taker is
+1.5× as likely to be ready as the table says, a safe-picker 0.78×) and for the push / fold
+split between the two ends (2.3× apart). **Observations for Brian:** (1) the hand value
+hardly moves (within 4 %): how hard a seat pushes did not narrow what it is aiming to win,
+in this field; (2) the fold multipliers are not monotone: the seats near zero (nothing
+dangerous thrown, usually because no tile was dangerous) fold least within their wall
+bucket, less than the risk-takers. The table is used as fitted. The fold truth is rare
+(0.6 % of observations) and comes from the §12 label.
+
+**Where it enters.** `Table::new` multiplies `tenpai_o`, `p_O,o`, `Pay(o)`, `Pay_sd(o)`; the
+heuristic fold of §5.2 gets the fold multiplier (a `mode` head's P(fold), a `state` head's
+one-away estimate and a fixed `fold_override` are left alone). `RISK_HEURISTIC` applies to the plain `race`; a `race:belief=`
+bot uses `RISK_MODEL`, fitted with `--belief` against that model's estimates (ready 0.787 …
+1.313 across the bins, the same fold row, value and one-away within 7 %). Spec:
+`race:risk=off`. `RaceTerms::risk` carries the scores.
+
+### 13.3 Deviations and limits
+
+1. The 換章 test reads the seat's melds, not its hand: a concealed flush never resets.
+2. The risk score's "danger at the time" counts unseen copies from the table only (the
+   thrower's hand is hidden) and reads wall progress back from the discards and claims that
+   followed; positions built from a `PositionSpec` have no draw events, so this works for
+   them too.
+3. The deal-in factor applies to the tile thrown now; the later-round feed rates ignore the
+   record.
+4. The `defensive` bot and the `ev` bot do not use the record (the `fast` bot runs the
+   rollouts and the league; the fixed field's play is kept as the belief model saw it).
+5. Fitted on the heuristic belief and the rule-based field plus `race` v0; Task 18's
+   retrained models should see the record and the score as features, and Task 16 measures
+   the two reads in a match before anything is trusted.

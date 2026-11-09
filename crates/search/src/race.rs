@@ -32,6 +32,7 @@ use crate::bots::{after_claim, live_winning_tiles, rank_discards, Metric};
 use crate::danger::{Danger, PROGRESS_BUCKETS};
 use crate::ev::{after_own_kong, exposed, Belief, Beliefs, HeuristicBelief};
 use crate::ev::{FAAN_BUCKETS, FIRST_FAAN_BUCKET};
+use crate::passed::{risk_scores, Passed, PASSED_FACTOR, PASSED_FACTOR_MODEL};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
@@ -71,6 +72,61 @@ const DETOUR_HAZARD: f64 = 0.5;
 /// becomes ready.
 const FAR_LIVE: f64 = 4.0;
 
+// ----- The risk-taking read (plan Task 15, `docs/race-bot.md` §13). -----
+
+/// How an opponent's risk score (`passed::risk_scores`: the discounted public
+/// danger of the tiles it threw) moves my estimates of it. The score falls in one
+/// of five bins (`edges` are the upper edges of the first four); each table gives
+/// a multiplier per bin, relative to the average over all bins, so the average
+/// opponent is unchanged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RiskRead {
+    pub edges: [f64; 4],
+    /// On §5.2's fold probability (the heuristic; a head's or a fixed override
+    /// is left alone).
+    pub fold: [f64; 5],
+    /// On `tenpai_o`.
+    pub tenpai: [f64; 5],
+    /// On `p_O,o` (one away).
+    pub one_away: [f64; 5],
+    /// On `Pay(o)` and `Pay_sd(o)`.
+    pub pay: [f64; 5],
+}
+
+impl RiskRead {
+    /// The bin of a risk score.
+    pub fn bin(&self, score: f64) -> usize {
+        self.edges.iter().position(|&e| score < e).unwrap_or(4)
+    }
+}
+
+/// Fitted by `fit_passed` (2026-11-09, 8,000 hands, seed 1, mixed field, 1.76 M
+/// opponent observations) against the true fold label, state and discard-win
+/// points of each opponent, with the heuristic belief's estimates as the baseline,
+/// within wall-progress buckets (folds and readiness both rise late in the hand).
+/// A seat picking safe tiles (score below −0.02) folds 1.7× the bucket's rate and
+/// is ready at 0.78 of the estimate; one throwing clearly dangerous tiles (0.05
+/// and up) folds at 0.74 and is ready at 1.47. Hand value and the one-away share
+/// barely move (within 4 %). See `docs/race-bot.md` §13.
+pub const RISK_HEURISTIC: RiskRead = RiskRead {
+    edges: [-0.02, 0.0, 0.02, 0.05],
+    fold: [1.685, 0.467, 0.435, 0.536, 0.736],
+    tenpai: [0.776, 0.867, 1.112, 1.311, 1.466],
+    one_away: [0.988, 0.982, 1.005, 1.041, 1.034],
+    pay: [0.998, 1.015, 0.960, 0.995, 1.030],
+};
+
+/// As [`RISK_HEURISTIC`], with `models/belief.mjnn`'s estimates as the baseline
+/// (`fit_passed --belief models/belief.mjnn`, the same 8,000 hands). The fold
+/// truth does not depend on the belief, so that row is the same.
+pub const RISK_MODEL: RiskRead = RiskRead {
+    edges: [-0.02, 0.0, 0.02, 0.05],
+    fold: [1.685, 0.467, 0.435, 0.536, 0.736],
+    tenpai: [0.787, 0.909, 1.146, 1.252, 1.313],
+    one_away: [0.981, 1.025, 1.043, 0.992, 0.933],
+    pay: [0.981, 1.010, 0.991, 1.012, 1.018],
+};
+
 /// My mode against one threat (§5.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
@@ -100,6 +156,10 @@ pub struct RaceConfig {
     pub opp_b: [f64; PROGRESS_BUCKETS],
     /// `q(m)` for push, detour, fold. Spec `q=push/detour/fold`.
     pub q: [f64; 3],
+    /// Passed-tile safety (Task 14, §13). Spec `passed=on|off`.
+    pub passed: bool,
+    /// The risk-taking read (Task 15, §13). Spec `risk=on|off`.
+    pub risk: bool,
 }
 
 impl Default for RaceConfig {
@@ -111,6 +171,8 @@ impl Default for RaceConfig {
             opp_a: [OPP_STEP; PROGRESS_BUCKETS],
             opp_b: [OPP_STEP; PROGRESS_BUCKETS],
             q: Q,
+            passed: true,
+            risk: true,
         }
     }
 }
@@ -139,6 +201,19 @@ impl RaceConfig {
             "a" => return probabilities(k, v).map(|x| self.opp_a = x),
             "b" => return probabilities(k, v).map(|x| self.opp_b = x),
             "q" => return probabilities(k, v).map(|x| self.q = x),
+            "passed" | "risk" => {
+                let on = match v {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err(format!("race option {k}: {v:?} must be on or off")),
+                };
+                if k == "passed" {
+                    self.passed = on;
+                } else {
+                    self.risk = on;
+                }
+                return Ok(());
+            }
             _ => {}
         }
         match k {
@@ -221,6 +296,8 @@ pub struct RaceTerms {
     pub phi: [f64; 4],
     /// `c_o(t)`: the chance the tile now lets `o` claim (§4.2).
     pub claim: [f64; 4],
+    /// Each opponent's risk score (`passed::risk_scores`, §13).
+    pub risk: [f64; 4],
     /// My discard now: `P_o(t) × (1 − fold_R,o) × Pay(o) × L_disc(o)` per seat.
     pub deal_in_now: [f64; 4],
     // The race (§3), under the best mode vector.
@@ -259,6 +336,12 @@ pub struct RaceBot {
     /// The belief file's race heads (`state`, `mode`), when it has them: the same
     /// model as `belief`, so one network pass (cached) serves both.
     pub heads: Option<Arc<BeliefModel>>,
+    /// The risk-taking read's tables (§13): [`RISK_HEURISTIC`] for the heuristic
+    /// belief, [`RISK_MODEL`] for a belief file. Off with `risk=off`.
+    pub risk: &'static RiskRead,
+    /// The passed-tile fade `f(N)` (§13): [`PASSED_FACTOR`] for the heuristic
+    /// belief, [`PASSED_FACTOR_MODEL`] for a belief file.
+    pub passed_factor: &'static [f64; 5],
 }
 
 impl Default for RaceBot {
@@ -287,6 +370,8 @@ pub fn parse_spec(opts: &[(&str, &str)]) -> Result<RaceBot, String> {
             let heads = m.has_race_heads().then(|| Arc::clone(&m));
             RaceBot {
                 heads,
+                risk: &RISK_MODEL,
+                passed_factor: &PASSED_FACTOR_MODEL,
                 ..RaceBot::new(config, m)
             }
         }
@@ -357,6 +442,9 @@ struct Table {
     flush: [Option<Suit>; 4],
     /// Honours each seat has discarded.
     discarded: [[bool; NUM_KINDS]; 4],
+    /// Each opponent's risk score and the fold multiplier it earns (§13).
+    risk: [f64; 4],
+    risk_fold: [f64; 4],
     horizon: usize,
     threat: f64,
     fold_override: [Option<f64>; 4],
@@ -414,6 +502,8 @@ impl Table {
             liable_for: std::array::from_fn(|o| state.liable_for(o)),
             flush: [None; 4],
             discarded: [[false; NUM_KINDS]; 4],
+            risk: [0.0; 4],
+            risk_fold: [1.0; 4],
             horizon: bot.config.horizon,
             threat: bot.config.threat,
             fold_override: fold,
@@ -426,15 +516,34 @@ impl Table {
                 t.discarded[seat as usize][tile.index() as usize] = true;
             }
         }
+        // §13: passed-tile safety and the risk-taking read.
+        let passed = bot.config.passed.then(|| Passed::of(state));
+        if bot.config.risk {
+            t.risk = risk_scores(state);
+        }
         for o in (0..4).filter(|&o| o != me) {
             let b = &beliefs.seats[o];
-            let ready = b.tenpai.clamp(0.0, 1.0);
-            let one_away = one_away[o].unwrap_or(1.5 * ready).min(1.0 - ready);
+            let bin = bot.risk.bin(t.risk[o]);
+            let (m_ready, m_one, m_pay) = if bot.config.risk {
+                (
+                    bot.risk.tenpai[bin],
+                    bot.risk.one_away[bin],
+                    bot.risk.pay[bin],
+                )
+            } else {
+                (1.0, 1.0, 1.0)
+            };
+            if bot.config.risk {
+                t.risk_fold[o] = bot.risk.fold[bin];
+            }
+            let ready = (b.tenpai.clamp(0.0, 1.0) * m_ready).min(1.0);
+            // A `state` head's one-away estimate is left alone, like a head's fold.
+            let one_away = one_away[o].unwrap_or(1.5 * ready * m_one).min(1.0 - ready);
             t.states[o] = [ready, one_away, 1.0 - ready - one_away];
             for (bucket, &pb) in b.faan.iter().enumerate().take(FAAN_BUCKETS) {
                 let f = FIRST_FAAN_BUCKET + bucket as u8;
-                t.pay[o] += pb * points(&rules, f);
-                t.pay_sd[o] += pb * points(&rules, (f + 1).min(10));
+                t.pay[o] += pb * points(&rules, f) * m_pay;
+                t.pay_sd[o] += pb * points(&rules, (f + 1).min(10)) * m_pay;
             }
             (t.l_disc[o], t.l_sd[o], t.l_other[o]) = match state.liable_for(o) {
                 None => (1.0, 1.0, 0.0),
@@ -455,8 +564,11 @@ impl Table {
             t.mean_count[o] = b.mean_count;
             t.has_one[o] = b.has_one;
             t.has_two[o] = b.has_two;
-            for i in 0..NUM_KINDS {
-                t.p[o][i] = (b.tenpai * b.wait[i]).min(P_CLIP);
+            for (i, k) in Tile::all_kinds().enumerate() {
+                let f = passed
+                    .as_ref()
+                    .map_or(1.0, |p| p.factor_with(o, k, bot.passed_factor));
+                t.p[o][i] = (ready * b.wait[i] * f).min(P_CLIP);
             }
         }
         // `W_o`: o's winning copies expected in the wall (§2.2), the unseen copies
@@ -709,6 +821,8 @@ impl RaceBot {
             belief,
             fold_override: [None; 4],
             heads: None,
+            risk: &RISK_HEURISTIC,
+            passed_factor: &PASSED_FACTOR,
         }
     }
 
@@ -1004,6 +1118,7 @@ impl RaceBot {
             q: opp.q,
             phi: opp.phi,
             claim,
+            risk: t.risk,
             deal_in_now: out.deal_in_now,
             gain: out.gain,
             loss_self_draw: out.loss_sd,
@@ -1066,7 +1181,8 @@ impl RaceBot {
                         Some(_) => 0.0,
                         None => sd_me * mine.pay_sd + fed_by[o] * mine.pay,
                     };
-                    let f = (cost / FOLD_SCALE).min(FOLD_CAP);
+                    // §13: a seat that throws dangerous tiles folds less.
+                    let f = ((cost / FOLD_SCALE).min(FOLD_CAP) * t.risk_fold[o]).min(1.0);
                     // R, O, F order in `states`; FOLD_BY_STATE is F, O, R.
                     [
                         f * FOLD_BY_STATE[2],
