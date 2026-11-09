@@ -639,3 +639,42 @@ the logger `crates/search/examples/race_log.rs`, the heads in `python/mahjong/be
    leaves no target that meets the minimum faan. Fold labels come almost only from breaking a
    ready hand. In a 200-hand smoke log the race bot's own discards were push 7,525, detour
    8,367, fold 740 (`fast` bots in `race_labels.rs`: push 4,315, detour 21, fold 2).
+8. **Deviation: the mode label redefined** (replaces §7's rules 1–3; Brian's meaning:
+   push plays the best tile for winning, detour keeps a chance to win but throws a safer
+   tile at some cost in speed, fold gives up winning for safe tiles). Code:
+   `race::discard_label` and the `LABEL_*` constants beside it. For a discard `t*`:
+   - **best for the hand**: `rank_discards`' best faan-aware distance, acceptance short of
+     the best by at most `max(2 tiles, 15 %)`, target faan at most 1 below the best;
+   - **push**: `t*` is best for the hand, whatever its danger;
+   - **clearly safer**: `Danger::expected_loss(t*)` (the public estimate, as before) is at
+     most half the lowest expected loss among the best-for-hand discards, and lower by at
+     least 0.16 points;
+   - **fold**: clearly safer, and the distance rises or the acceptance falls below half
+     the best's; **detour**: clearly safer, same distance, the rest;
+   - **mistake**: neither best for the hand nor clearly safer. The log writes it as push
+     (`my_mode` 0, no defensive intent) and flags it in `my_mistake` (layout version
+     102); `race_fit`'s `labels.by_agent` counts it apart, per agent, calm (no opponent
+     ready) and under threat.
+
+   The folded state still runs from a fold label to the seat's next push label or claim;
+   a detour or a mistake keeps it. The compare is against the **safest** best-for-hand
+   discard, so a defensive label needs a real trade: throwing a hand-worse tile when an
+   equally safe best-for-hand tile was there is a mistake.
+
+   Why these numbers (my inference, not fitted): one tile kind has at most 4 live
+   copies, so a gap of 2 tiles is under one kind and noise among near-equal shapes; 15 %
+   scales it for wide hands (20 tiles of acceptance allow 3). One faan is the gap between
+   `faan_shanten`'s near-equal targets. Below half the acceptance, the next step takes
+   more than twice as long: speed is mostly given up, which is a fold. "Clearly safer"
+   halves the deal-in risk and, at `Danger::estimate`'s 8 points per deal-in, cuts it by
+   at least 2 percentage points; early in a hand every tile is under 2 % there, so no
+   discard there counts as defensive.
+
+   Smoke log (200 hands, seed 1, `--main race:belief=models/belief.mjnn --old race`, as
+   item 7): the race seats' own discards went from push 6,152 / detour 8,154 / fold 715
+   to push 6,076 / detour 17 / fold 38 / mistake 8,890. **Observation for Brian:** about
+   99 % of those mistakes come while no opponent is ready; in a 20-hand sample almost all
+   were in far hands (faan-aware shanten 3–7), one step behind the best. The fixed bots
+   make few (`value`: push 234, detour 1, fold 0, mistake 50). The race bot's far-hand model
+   (§11 item 7) barely tells distances apart, so tiny danger gaps decide its discard.
+   The labels now show this; the bot itself is unchanged.
