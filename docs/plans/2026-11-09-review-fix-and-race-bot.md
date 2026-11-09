@@ -160,7 +160,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
   - Done when: each sentence describes the move ("Passing gives up a win you could take"),
     not the player; the dictionary key check and `npm test` pass.
 
-- [ ] **Task 11: Ship the engine**
+- [x] **Task 11: Ship the engine** (hk-games 77ea4a8: pin 9c3eb2b, wasm, the 10 drills re-solved on the same positions; browser review of Brian's hand: pung of 8p graded best, 0 blunders)
   - Files: hk-games `games/hk-mahjong-lab` pin, `app/src/engine/wasm/mahjong/`.
   - Done when: after Phase 1 is pushed here, hk-games moves the pin, runs
     `npm run engines -- mahjong`, `npm test`, `npm run build`, and the browser review of
