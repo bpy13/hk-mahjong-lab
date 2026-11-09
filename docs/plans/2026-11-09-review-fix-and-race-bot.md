@@ -130,7 +130,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
     counts); state and mode from heuristics until Phase 4. `mahjong hk tournament` must accept
     the spec.
 
-- [ ] **Task 7: v0 strength**
+- [x] **Task 7: v0 strength** (-9.128 [-9.794, -8.496] vs three value; see study-results/race-bot.md)
   - Files: `docs/study-results/race-bot.md` (new); job under `experiments/`.
   - Done when: AC5 recorded: `race` vs three `value`, 1,000 walls × 4 seatings, points per
     hand with a wall-bootstrap interval, win / deal-in / draw rates, mean faan.
@@ -153,7 +153,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
 
 ## Phase 5 – App (sonnet; in hk-games)
 
-- [ ] **Task 10: Neutral reason wording**
+- [x] **Task 10: Neutral reason wording** (done in hk-games b6946d4)
   - Files: hk-games `app/src/i18n/ui/{en,zh-Hant,zh-Hans}.json` keys `mahjong.reason.declines_win`,
     `mahjong.reason.pass_keeps_hand`, `mahjong.reason.pass_misses_claim` (and any other
     `mahjong.reason.*` written as "you did …").
