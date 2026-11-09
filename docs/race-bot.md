@@ -1,0 +1,555 @@
+# The race bot: equity over all four players' chances (B28)
+
+Plan `docs/plans/2026-11-09-review-fix-and-race-bot.md`, Task 5. This file is the design
+that Phase 3 (`crates/search/src/race.rs`, v0) and Phase 4 (learned estimates, the
+self-play loop) build. Brian's decisions for it are B28 in bot-stream `docs/decisions.md`;
+the plan header lists them. This file implements them; it does not re-argue them.
+
+Every input names its source in this repo. Where a number is an estimate, the text says
+"estimate" and gives the value used. Matches decide between methods; the formula's numbers
+are never trusted on their own (B28, last point).
+
+**Why a new bot.** The `ev` bot (`docs/ev-bot.md`) values offence as `P_win × Pay(me)` with
+`P_win` from a table keyed by target kind, faan-shanten, wall bucket and melds. The table
+knows nothing about live tiles or the other players' progress, and the `Pay(me)` floor made
+the bot chase 10-faan hands it rarely completed (`ev-bot.md` §10: −7.23 points per hand with
+the floor, −0.99 without). The race bot replaces `P_win` by a race: every player's chance
+of winning, turn by turn, worked out from live tiles and from how each player is placed.
+
+| Brian's decision (B28) | Where it lives here |
+|---|---|
+| Offence sums every player's chances; better-placed opponents make my EV negative | §3 (the race), §3.3 (equity) |
+| A good draw raises my side; compare it with the later cost of throwing a useless tile | §4.3, §4.4 (improvement tiles and holding cost) |
+| Nested decisions: fold, detour, push; a folded player's threat is about zero | §5 |
+| One-away opponents who have not folded matter; throw dangerous-later, useless-now tiles early, including claimable tiles and faan honours | §4.2, §4.4, §4.6 |
+| Two threats: fold against B, push again once B folds if nothing I hold loses to A | §5.3 (mode per threat, re-chosen every turn) |
+| Pushing a cheap hand can be defence | §3.3 (my win ends the race, so it removes every opponent's later term) |
+| Hand value enters only through the EV | §3.3: payout multiplies the hazard, nothing else |
+| Table image left out at first | §5.2 (opponents' modes depend on public state only) |
+| Learn from bot play, self-improving until it converges | §7, §8 |
+| Never trust simulation blindly | §8.3 (gates by duplicate match), AC5–AC6 |
+
+## 1. Notation and inputs
+
+| Symbol | Meaning | Source |
+|---|---|---|
+| `me`, `o`, `i` | the acting seat; an opponent; any of the four players | `State` (`crates/hk/src/state.rs`) |
+| `a`, `t(a)`, `h(a)` | a candidate action, the tile it discards now (none for a pass or a claim), my hand after it | `state.legal_actions_vec()`, `SeatView` (`crates/search/src/view.rs`) |
+| `wall`, `U` | tiles left in the wall; tiles I have not seen (`wall` + the three concealed hands) | `state.wall_remaining()`, `State::unseen(me)` |
+| `n_i` | draws left for player `i`: `wall` tiles dealt in turn order from the next drawer | derived from the turn order after `a` (a claim moves the turn) |
+| `k` | a round: one draw by each player, `k = 1 … n` with `n = max_i n_i` | derived |
+| `points(f)` | points per share for `f` faan (3 → 8 … 10 → 128) | `RuleSet::points`, rules §8.1 |
+| `s_i` | player `i`'s state: far (F), one away (O), ready (R), folded (X) | §2 |
+| `h_i(k)` | player `i`'s win hazard in round `k`: P(`i` wins in round `k` \| the hand is still running) | §2 |
+| `S(k)` | P(the hand is still running at the start of round `k`) | §3 |
+| `m_i` | player `i`'s mode: push, detour, fold | §5 |
+| `L_i(k)` | expected live copies (tiles that complete `i`'s hand) among the unseen tiles | §2.2 |
+| `W_i`, `H_{i,j}` | of those, the expected copies in the wall and in player `j`'s hand | §2.2, from the counts head |
+| `φ_{j→i}` | P(player `j` discards a live tile of `i` that `j` holds or draws this round) | §4.2 |
+| `q(m)` | P(one discard by a player in mode `m` completes a given ready opponent's hand) | §2.3 |
+
+**From the belief model** (`docs/belief.md` §2, `crates/search/src/belief.rs`, trait
+`Belief` in `ev.rs`), run once per decision, per opponent `o`: `tenpai_o` (P(ready now)),
+`wait_o(t)` (P(`t` completes `o` \| ready)), `P_b(o)` (faan bucket of a discard win now),
+`cnt_o(t)` (distribution of copies of `t` in `o`'s hand), `outcome_o` (no win / discard win /
+self-draw). Derived as in `ev-bot.md` §1: `Pay(o) = Σ_b P_b(o) × points(b)`, `Pay_sd(o)` one
+faan higher, `P_o(t) = min(tenpai_o × wait_o(t), 0.95)`, `P1_o(t)`, `P2_o(t)`, `E[cnt_o(t)]`.
+Without a model, `HeuristicBelief` gives the same quantities from the danger tables
+(`danger.rs`, `danger_tables.rs`; `ev-bot.md` §8).
+
+**From the hand analysis** (`crates/analysis/src/target.rs`): `faan_shanten(h)` gives my
+faan-aware shanten `s`, the best target `T` and its guaranteed faan `f_T`; the acceptance
+count (`rank_discards`, `bots.rs`) gives the unseen tiles that lower `s`.
+
+**Share multipliers** are exactly `ev-bot.md` §1's table (`L_disc`, `L_sd`, `L_other`,
+`Shares(me)`; rules §8.2–8.3). The 12-tile rule matters twice in the worked example (§9).
+
+## 2. Each player's state chain and per-turn hazard
+
+### 2.1 States
+
+Every player is in one of four states, from my point of view a probability vector
+`p_i(k) = (p_F, p_O, p_R, p_X)`:
+
+| State | Meaning | How I know it |
+|---|---|---|
+| far (F) | faan-aware shanten ≥ 2 | me: exact from `faan_shanten`; opponents: the rest after O and R |
+| one away (O) | faan-aware shanten 1 | me: exact; opponents: v0 estimate `p_O = min(1 − p_R, 1.5 × p_R)` (estimate; `docs/solver.md` §4's calibration table puts mean shanten at 1.2–1.5 in the last two wall buckets); Phase 4: the `state` head (§7) |
+| ready (R) | shanten 0 with a legal win available | me: exact; opponents: `tenpai_o` |
+| folded (X) | the player has given up winning this hand and discards for safety | me: my mode (§5); opponents: v0 heuristic fold probabilities (§5.2); Phase 4: the `mode` head |
+
+Transitions per round, for a player who is not folded: `F → O` with probability `a_i`,
+`O → R` with `b_i`, `R` stays. A folded player stops moving. For me, `a_me` and `b_me` are
+the acceptance count over `U` (exact counts, my view). For opponents, v0 uses
+`a_o = b_o = 0.15` per round (estimate: a one-away hand accepts about 6–8 of 54 unseen tiles
+and claims add a little); Phase 4 fits `a`, `b` per wall bucket and state from the logged
+true states (§7).
+
+### 2.2 Live tiles
+
+For a ready player `i`, `L_i = Σ_t wait_i(t) × unseen(t)` (for me, exact: my waits times
+unseen copies). Where the copies sit matters: a copy in the wall can be drawn by me; a copy
+in `j`'s hand can only be fed. From the counts head, `H_{i,j} = Σ_t wait_i(t) × E[cnt_j(t)]`
+and `W_i = L_i − Σ_j H_{i,j}`. For opponents v0 uses the waits head for `wait_o(t)`; the
+copies of their waits in my hand are known exactly (I hold them).
+
+### 2.3 Hazards
+
+Player `i`'s win hazard in round `k`:
+
+```
+h_i(k) = p_R,i(k) × (1 − fold_i(k)) × [ d_i + g_i(k) ]
+d_i      = W_i / wall                      self-draw: a live copy drawn from the wall
+g_i(k)   = Σ_{j≠i} feed_{j→i}(k)           fed by another player's discard
+feed_{j→i}(k) = φ_{j→i} × ( H_{i,j} × 1[k = first round j acts] + W_i / wall )
+```
+
+`W_i / wall` stays constant in expectation as the wall shrinks (every draw removes a live
+copy with that same chance), so `d_i` is one number per path. Held copies are fed at most
+once, in the first round the holder acts after the decision. The feed rate `φ_{j→i}` depends
+on `j`'s mode toward `i` and on whether the tile is useful to `j` (§4.2).
+
+For an opponent whose waits I do not know exactly, v0 collapses `feed` to a per-discard
+rate: `g_o(k) = Σ_{j≠o} q(m_j)`, with `q(push) = 0.08`, `q(detour) = 0.04`, `q(fold) =
+0.01` (estimates; `docs/belief.md` §4.2 measures 2.5 % deal-in per discard in wall bucket 4
+with about 0.5 of some opponent being ready, so about 5 % per discard against a ready hand
+averaged over all styles). Phase 4 measures `q(m)` from the mode labels. For the acting
+seat's own discard `j = me`, round 1 uses the exact `P_o(t(a))` instead of `q`.
+
+A player in O or F has hazard 0 this round and becomes a threat only through the chain.
+That is how "one-away opponents who have not folded" enter: their `p_O` feeds `p_R` in the
+next rounds, and nothing I throw later is safe against them unless they fold.
+
+## 3. The race: competing risks and my equity
+
+### 3.1 Competing risks
+
+The hand ends at the first win (or when the wall runs out). Hazards within a round are
+treated as exclusive (they are small):
+
+```
+S(1) = 1,   S(k + 1) = S(k) × (1 − Σ_i h_i(k))
+P(i wins in round k) = S(k) × h_i(k)
+P(draw) = S(n + 1)
+```
+
+This is the same bookkeeping as `ev-bot.md`'s `S(k)` for the fold plan, now applied to every
+player, with each player's hazard built from live tiles and states instead of from one
+table cell. It is the "sum every player's chances" of B28: if `Σ_o h_o` is large, `S(k)`
+collapses before my hazard pays, and my equity goes negative even with a good hand.
+
+### 3.2 Payments
+
+When I win in round `k`: by a self-draw I collect `Pay_sd(me) × 3`; on `j`'s discard
+`Pay(me) × 1`; if someone is liable for me (12-tile rule), `× 3` either way, paid by them.
+When `o` wins: by self-draw I pay `Pay_sd(o) × L_sd(o)`; on my discard `Pay(o) × L_disc(o)`;
+on another's discard `Pay(o) × L_other(o)` (0 unless I am liable for `o`). `Pay(me)` is
+`points(f_T)` plus the faan my win way adds (self-draw +1; the cap applies). No floor and no
+table mean: hand value enters only through these payments (B28).
+
+### 3.3 My equity for action `a`
+
+```
+E(a) = Σ_k S(k) × [ d_me(k) × Pay_sd(me) × Shares_sd
+                  + Σ_j feed_{j→me}(k) × Pay(me) × Shares_disc
+                  − Σ_o p_R,o(k)(1 − fold_o(k)) × ( d_o × Pay_sd(o) × L_sd(o)
+                                                  + feed_{me→o}(k) × Pay(o) × L_disc(o)
+                                                  + Σ_{j≠me,o} feed_{j→o}(k) × Pay(o) × L_other(o) ) ]
+```
+
+where `feed_{me→o}(1)` is `P_o(t(a))` for the tile I throw now and `q(m_me)` or the holding
+plan (§4.4) later. Two consequences Brian asked for fall out without extra rules:
+
+- **A cheap push is defence.** My win in round `k` sets `S(k + 1)` to zero for everyone;
+  the opponents' later terms vanish. A 3-faan hand with a high hazard can beat folding when
+  an opponent's expected payment is large.
+- **Better-placed opponents make my equity negative.** With `p_R,o` high and `Pay(o)` large,
+  the negative sum dominates even when my own hazard is decent.
+
+## 4. A move's effects
+
+Each candidate `a` changes the inputs of §2–3 as follows. Everything else is shared.
+
+### 4.1 Deal-in now
+
+`feed_{me→o}(1) = P_o(t(a))` from the belief (0 for a pass or a claim). A dead tile (no
+unseen copy) has `P_o = 0` exactly (`belief.rs` sets a wait with no unseen copy to 0).
+
+### 4.2 Feeding a pung or chow, by seat
+
+A tile `o` can claim speeds `o` up by one state step this round: in round 1 add
+`c_o(t) = P_claim_o(t) × (1 − P_o(t))` to `o`'s transition (`F → O` or `O → R`, split by
+`p_F : p_O`), where `P_claim_o(t) = min(1, P2_o(t) + 1[o is my next seat] × max_chow
+P1_o(u) × P1_o(v))`, the same as `ev-bot.md`'s `P_claim4_o`. If `o` shows three exposed melds
+and nobody is liable for `o`, the claim also makes me liable: `L_sd = L_disc = L_other = 3`
+for `o` from round 2 on, weighted by `c_o(t)` (`ev-bot.md`'s `Liab` term, now inside the
+race). Source: `Danger::liability_tile`, `Danger::liability_chance` (`danger.rs`).
+
+### 4.3 My live and improvement tiles
+
+After `a`, `s`, `T`, my waits and acceptance come from `faan_shanten` on `h(a)`. Ready:
+`L_me`, `W_me`, `H_{me,j}` from §2.2 with exact `unseen` counts and the counts head. One
+away or far: `b_me` (or `a_me`) = acceptance / `U`; the hazard after reaching R uses the
+expected live count of the target's waits (v0: the mean over the acceptance tiles of the
+waits they would leave, computed by one `faan_shanten` per accepting kind, bounded in §6).
+A drawn tile that raises `f_T` (a faan honour completing a pung, the flush's suit) raises
+`Pay(me)`: v0 scores it through `faan_shanten` on the hand after the draw, averaged over the
+accepting kinds.
+
+### 4.4 Holding cost: the fold reserve and dangerous-later tiles
+
+Each later round I discard one tile. Which one depends on my mode (§5): pushing, I throw
+the tile `rank_discards` (`bots.rs`, `Metric::Faan`) ranks lowest; folding, the safest tile
+left. The cost of throwing tile `u` in round `k` is `Σ_o p_R,o(k)(1 − fold_o(k)) ×
+P_o(u | k) × Pay(o) × L_disc(o)`, where `P_o(u | k)` rises with `o`'s progress: v0 takes
+`P_o(u | k) = wait_o(u) × p_R,o(k) / p_R,o(1)` (the wait pattern of today scaled to the
+later ready chance; estimate; Phase 4 fits a per-bucket rise from the logs). The sum of these
+costs over the rounds I expect to keep playing is the **holding cost** of my hand after `a`.
+
+Two tiles with the same effect on my hand differ in holding cost. A tile that is useless to
+my target and dangerous later (a middle tile of a suit an opponent is collecting, a
+claimable tile, a lone faan honour) is cheaper to throw now, while `p_R,o` is low, than in
+round 4. That is B28's "throw dangerous-later, useless-now tiles early": it is the
+difference between `E(discard u now)` and `E(discard u in round k)` through this term, not a
+rule.
+
+The **fold reserve** is the number of tile copies in `h(a)` with `Σ_o P_o(u | k) × Pay(o) <
+1 point` at the round I would start folding. When I fold with an empty reserve, the fold
+plan's later discards use `q(push)`-level danger: folding then costs almost as much as
+pushing, which is what makes a thin hand push (§9 shows one: after the pung I hold one
+concealed tile, reserve 0).
+
+### 4.5 Claims and passes
+
+A claim is valued as `max_d E(Discard(d))` over the hand after the claim (`after_claim`,
+`bots.rs`), with the turn order after the claim (my draws `n_me` shrink or grow). A pass
+keeps the hand and the current order. Kongs as in `ev-bot.md` §2.1 (replacement draw adds
+nothing). A legal win is always taken.
+
+### 4.6 Honour tiles that give faan
+
+A lone dragon or value wind in my hand raises `Pay(me)` only through `faan_shanten` on the
+hands that pair or pung it (§4.3). It raises my cost through §4.4: honours are the classic
+late deal-in tile (`danger_tables.rs` `WAIT` class 0 rises from 0.011 to 0.27 as unseen
+copies fall). The bot keeps the honour while the first term beats the second, and throws it
+early otherwise. No separate rule.
+
+## 5. Modes: push, detour, fold
+
+### 5.1 My modes, per threat
+
+A **threat** is an opponent with `p_O + p_R` above `τ_threat = 0.2` (estimate) who is not
+folded. For each threat `o` I choose a mode:
+
+| Mode | Discards allowed against `o` | My hazard |
+|---|---|---|
+| push | any tile | full |
+| detour | tiles with `P_o(u) ≤ 0.05` **or** tiles whose discard keeps `s` within one step of the best; prefer the best tile among those | reduced: `b_me`, `L_me` recomputed on the detour hand |
+| fold | only tiles with `P_o(u) ≤ 0.02` (the reserve); when the reserve is empty, the safest tile | zero after the fold starts (`p_X,me = 1`); my chain stops |
+
+My combined discard set is the intersection over threats of the allowed sets; if it is
+empty, the tile with the smallest total `Σ_o P_o(u) × Pay(o) × L_disc(o)` is used (B28:
+fold against B, push against A only if nothing I hold loses to A; the intersection does
+that). The mode vector is chosen afresh every turn (§5.3); a fold against B lasts exactly as
+long as B threatens. `p_X,me` for the later rounds follows the chosen mode: push or detour
+keep my chain running; fold sets my hazard to 0 from the next round.
+
+### 5.2 Opponents' modes as probabilities
+
+Each opponent's mode is a distribution `π_o(m | public state)`, not a guess at one mode. It
+enters §2 as `fold_o(k)` (removes `o`'s hazard and progress) and §2.3 as `q(m_j)` (how freely
+`j` feeds the others). Independence between opponents is assumed.
+
+v0 heuristic (estimate, replaced by Phase 4's `mode` head): `o` folds in proportion to what
+a visible threat would cost `o`, scaled by `o`'s state:
+
+```
+cost_o = Σ_{i≠o} P̂(i wins) × Pay(i) × shares o would pay      (my own hand enters as i = me)
+π_fold(o) = min(0.9, cost_o / 64) × { F: 1.0, O: 0.6, R: 0.2 }
+π_detour(o) = 0.5 × (1 − π_fold)  if state O or R, else 0;   π_push = the rest
+```
+
+Here `P̂(i wins)` is a one-pass estimate (`tenpai_i × 0.6` for opponents, my own ready
+hazard summed over the rounds for me). Two things fall out: under the 12-tile rule a seat
+that pays nothing if I win has `cost = 0` from me and keeps pushing, and the liable seat
+folds hard. That is the real table dynamic (§9). Table image (opponents reading *my*
+folds) is left out (B28); the public state the Phase 4 head sees includes my discards, so
+it learns part of it without being told.
+
+### 5.3 The mode choice each turn: best response with a cost bound
+
+For every candidate action `a` and every mode vector `M = (m_o)` over my threats, compute
+`E(a, M)` with the opponents' modes averaged over `π_o` (hazards are linear in `fold_o`, so
+the average is one pass, not an enumeration). Choose `argmax_{a, M} E(a, M)`.
+
+Bound: threats are capped at the two with the highest `p_O + p_R`; a third threat is
+folded into the hazards only (no mode for it). So at most `3² = 9` mode vectors. Candidates:
+at most 14 discards plus claims, kongs and pass. Rounds: `n ≤ 8` after the first sixth of the
+wall; `n = ceil(wall / 4)` capped at 8 (as `ev-bot.md`'s `horizon`). Per `(a, M)` the chain
+is 4 players × 4 states × 8 rounds and a handful of multiplications per entry, about 600
+floating-point operations. Total: 16 candidates × 9 vectors × 600 ≈ 90,000 operations, plus
+one `faan_shanten` per candidate (0.3 µs each, `docs/solver.md` §1) and §4.3's
+per-accepting-kind calls (≤ 34 per candidate, cached by hand). The belief runs once
+(0.5 ms, `belief.rs` cache). Estimate: under 1 ms per decision on one thread, the AC5 bar is
+5 ms. Task 6's timing test measures it.
+
+## 6. What v0 takes from existing parts, and what Phase 4 trains
+
+| Quantity | v0 (Phase 3) | Phase 4 |
+|---|---|---|
+| `tenpai_o`, `wait_o(t)`, `P_b(o)`, `cnt_o(t)`, `outcome_o` | belief heads (`models/belief.mjnn`) | retrained on the race field (`models/race-belief.mjnn`) |
+| `p_O,o` (one away) | `min(1 − p_R, 1.5 p_R)` (estimate) | the `state` head: softmax over F / O / R / X |
+| `fold_o`, `π_o(m)` | §5.2 heuristic | the `mode` head: softmax over push / detour / fold, per opponent |
+| `a_o`, `b_o` | 0.15 per round (estimate) | tables fitted from the logged true-state transitions, per wall bucket and visible melds |
+| `q(m)`, `φ_{j→i}` | 0.08 / 0.04 / 0.01; `φ` = `q`-level scaled by tile usefulness (§4.2 note) | measured from the logs by mode label and tile usefulness |
+| `P_o(u \| k)` rise | scaled wait pattern (§4.4) | per-bucket rise fitted from the logs |
+| My `s`, `T`, `f_T`, acceptance, waits | `faan_shanten`, `rank_discards` (exact) | unchanged |
+| `Pay(o)` without a model | `HeuristicBelief` from the danger tables | unchanged fallback |
+| Target value table (`target_value.rs`) | **not used** in the formula; `TargetValue::points` only as the cross-check in Task 7's report | unchanged |
+| Danger tables (`danger_tables.rs`) | the `HeuristicBelief` fallback; `Danger::liability_tile` | unchanged |
+
+Tile usefulness for `φ`: v0 sets `φ_{j→i} = 1.0 × (1 − π_fold(j) toward i)` for a tile that
+`j`'s visible plan cannot use (another suit than `j`'s flush, an honour `j` discarded) and
+`0.3` of that for a tile `j` could use (estimate).
+
+## 7. Training labels from full-information self-play
+
+The logger (`examples/selfplay_log.rs`, extended in Task 8) writes, for every decision of
+every seat, the observer's public features (`features::encode`) plus, for each other
+player, these labels read from the **true** hands:
+
+| Label | Definition | Used for |
+|---|---|---|
+| `state` | the player's faan-aware shanten of the true hand: F (≥ 2), O (1), R (0 with a legal win available); X overrides when the player is folded (below) | the `state` head, the `a`, `b` tables |
+| `mode` | the mode of the player's **last discard** (definition below); push for a player who has not discarded yet | the `mode` head, `q(m)`, `φ` |
+| `waits` | the 34-bit set of tiles that complete the true hand with a legal win (R only) | the `waits` head |
+| `value` | points per share of the best discard win now (`opp_faan_now`, as `belief.md`) and of a self-draw now | the `faan` head |
+| `counts` | true copies of each kind in the hand | the `counts` head |
+| `outcome` | who won the hand, how (self-draw / discard, by whom), in which round from this decision | hazard calibration per wall bucket (§8.2) |
+
+**The mode label, exactly.** For a discard `t*` by player `j` from hand `H` (14 tiles after
+the draw, melds included), with `s(t) = faan_shanten(H − t)` for every legal discard `t`,
+`s_best = min_t s(t)`, and `s_before` the faan-aware shanten before the draw:
+
+1. **fold** if `s(t*) ≥ s_best + 2`, or if `s_before = 0` and `s(t*) ≥ 1` (breaking a ready
+   hand is a fold even by one step).
+2. **detour** if not fold and `s(t*) = s_best + 1`; or if `s(t*) = s_best = 0` and the wait set
+   after `t*` differs from the wait set after `rank_discards`' first choice and
+   `Danger::expected_loss(t*)` (the public estimate at that moment, from the log's own
+   features) is lower than that choice's.
+3. **push** otherwise (`s(t*) = s_best`, including every tie by acceptance).
+
+A player is **folded** (state X) from the first turn after a fold-labelled discard, and stays
+folded until a push-labelled discard; a detour does not end a fold. Claims: a pung or chow is
+labelled push; a pass that would have lowered `s` by one is labelled by the player's next
+discard (no mode of its own). The labels need the true hand for `s(t)` and the waits; the
+public danger estimate is the log's own number, so every label is a function of the log and
+nothing else, and a second run reproduces it.
+
+Why this definition and not the bot's internal mode: the labels must apply to every seat
+in the league (fixed bots, old generations, later Brian's own hands), none of which has a
+race-bot mode. Faan-aware shanten before and after is observable for any player.
+
+## 8. The self-play loop
+
+### 8.1 One generation
+
+Generation `g` has a race bot `R_g` (the formula of §2–5 with estimate heads `θ_g`; `R_0` is
+v0 with the existing belief and the heuristics of §6). Steps, all through the job queue
+(B26/B27, `bot-stream\tools\queue\hkq.ps1`; cpu lane for play, gpu lane for training; the
+GPU lane is Dou Dizhu's until about 2026-11-12):
+
+1. **Play** (cpu lane): 100,000 hands with full-information logging (§7). Seats drawn from a
+   **league**: 60 % of hands four copies of `R_g`; 20 % `R_g` with three seats from
+   `{R_{g−1}, R_{g−2}, …}` (uniform over the generations kept); 20 % `R_g` with three seats from
+   the fixed field `{value, defensive, fast, efficiency, closed}`. The fixed share keeps the
+   heads calibrated on styles the loop does not produce (the belief's hold-out gap,
+   `belief.md` §4.3); the old generations stop the loop from beating only its latest self.
+   Estimate: the race bot under 1 ms per decision and about 70 decisions per hand gives
+   about 100,000 hands in under an hour on 8 threads (`selfplay_log` reached 370,000 hands
+   per hour with the rule-based field, commit `dabe54e`).
+2. **Label**: §7, inside the logger.
+3. **Train** (gpu lane): `python -m mahjong.belief.train` extended with the `state` and
+   `mode` heads, warm-started from `θ_g`, 5 epochs (the belief took 349 s for 2.1 M rows,
+   `belief.md` §3; estimate 10 minutes here). Fit the `a`, `b`, `q`, `φ` tables from the same
+   logs. Output `θ_{g+1}`, `models/race-belief-g<g+1>.mjnn`.
+4. **Gate** (cpu lane, duplicate matches, 1,000 walls × 4 seatings = 4,000 hands each, seeds
+   as Task 7's 7000–7019 so the walls match the teacher's matches):
+   - `R_{g+1}` in one seat against three `R_g`: the generation's **gain**, paired by wall.
+   - `R_{g+1}` against three `value`: the common yardstick (the teacher scored +1.24 ± 1.21
+     on these walls, `study-results/phase4-build.md` §2).
+   - `R_{g+1}` against the **teacher** (belief-PIMC-64, `anchor=value, rollout=fast`): one
+     seat each plus two `value`, 4 seatings so each agent sits in every seat. Estimate about
+     1.2 hours (the teacher takes 1.0 s per hand on 4 threads, `solver.md` §4).
+5. **Report**: `docs/study-results/race-bot.md` gets one row per generation: points per hand
+   and 95 % wall-bootstrap interval for each match, win / self-draw / deal-in / draw rates,
+   mean faan, held-out calibration of the `state` and `mode` heads per wall bucket.
+
+### 8.2 Hazard calibration
+
+From each log the `outcome` label gives, per wall bucket, the observed share of ready
+opponents who won within one round, two rounds, …; the race model's `h_o` summed the same
+way must match within the bucket's 95 % interval. A bucket that misses by more than 20 %
+relative is reported and the `q`, `a`, `b` tables of that bucket are refitted before the
+next generation. This is the "never trust the formula" check inside the loop.
+
+### 8.3 Stop rule
+
+Noise: a 4,000-hand duplicate match has a 95 % interval of about ±1.2 points per hand
+(`phase4-build.md`: ±1.21, ±1.22, ±1.18 at 4,000 hands). The loop stops when:
+
+- **inside noise for 2–3 generations**: the gain of `R_{g+1}` over `R_g` (step 4, first
+  match) has |gain| < 1.2 for two consecutive generations, **and** the score against `value`
+  has not risen by more than 1.2 over the last three generations; or
+- **a hard cap** of 8 generations (estimate of the budget; Brian can raise it); or
+- **a regression**: a generation loses to its predecessor by more than 1.2 (paired interval
+  below 0). Then that generation is dropped, training is repeated once from the same logs
+  with a new seed, and if it regresses again the loop stops.
+
+At least three generations run before the first stop check (AC6). The **best generation** is
+the one with the highest score against `value`; ties within 1.2 go to the later one. Its
+match against the teacher (step 4, third match) is the AC6 report. No bar is set: the report
+and Brian decide what the review uses next.
+
+## 9. Worked example: Brian's pung hand (decision 85)
+
+Fixture `crates/search/tests/data/brian-2026-11-09.json`, history index 85, printed by
+`target\release\examples\regrade.exe <fixture> 85 0`. Rules: minimum 3 faan, cap 10,
+half-spicy, flowers on, 12-tile liability on. Only seat 0's view is used until §9.5.
+
+### 9.1 The scene from seat 0
+
+- **Me (seat 0, East)**: concealed `4p 5p 8p 8p`, exposed pungs `333p 111p 777p`, one bonus
+  tile (the seat flower, 正花, +1 faan). Ready on `3p` or `6p` (the `45p` chow plus the `88p`
+  pair): 清一色 7 + 正花 1 = **8 faan**, `points(8) = 64` per share on a discard; a self-draw
+  adds 自摸 → 9 faan, 96 per share from each of three seats.
+- **Seat 2 just discarded `8p`.** Legal: pung or pass. A pung gives me four exposed melds
+  (`333p 111p 777p 888p`); by rules §8.3 seat 2 becomes **liable** for me: if I win in any
+  way, seat 2 pays 3 shares and nobody else pays. The hand becomes 清一色 7 + 對對糊 3 +
+  正花 1 = 11 → **capped at 10 faan**, 128 per share, **384 from seat 2** however I win.
+- **Unseen from my view (U = 54)**: 30 in the wall, 10 + 10 + 4 concealed in seats 1, 2, 3.
+- **Pung then discard 5p**: wait `4p`, 2 copies unseen (one in my hand, one discarded by
+  seat 2). The other discard, `4p` waiting on `5p`, is dead: seat 3 shows `555p` and I hold the
+  fourth. `5p` itself is dead for every opponent: `P_o(5p) = 0`, so the pung's discard carries
+  no deal-in risk at all.
+- **Pass**: waits `3p` (1 unseen: my `333p` holds three) and `6p` (1 unseen: three discarded).
+  Both paths have **2 live copies**.
+- **Draws left**: pass → seat 3 draws next, then me; 30 tiles give me **8 draws**. Pung → the
+  turn passes to seat 1 after my discard; I get **7 draws**.
+- **Opponents' visible melds**: seat 1 `222s` (1 meld, no faan shown; discards shed
+  characters and dots); seat 2 `111m` (1 meld; discards shed dots and bamboo); seat 3 `555p
+  WhWhWh 789p` (3 melds, a dragon pung and all suited melds in dots: a dots flush tag with
+  faan; discards shed characters and bamboo).
+
+### 9.2 Inputs and the estimates I take
+
+| Input | Value | Source |
+|---|---|---|
+| `tenpai_o`: seats 1, 2, 3 | 0.17, 0.17, 0.44 | danger `THREAT` cells (1 meld, bucket 4, plain) = 0.172; (3 melds, bucket 4, flush) = 0.436, `danger_tables.rs`. v0 reads the belief head instead; the table is the stand-in here |
+| `p_O,o` | 0.26, 0.26, 0.56 | §2.1's estimate `min(1 − p_R, 1.5 p_R)` |
+| `a_o = b_o` | 0.15 per round | estimate (§2.1) |
+| `Pay(o)`, `Pay_sd(o)`: seats 1, 2, 3 | 24 / 32, 16 / 24, 48 / 64 | estimate: seat 3 from `ev-bot.md` §8's fallback (3 + 1 dragon + 3 flush = 7 faan); seats 1 and 2 a guess at the belief faan head (a half flush with honours for seat 1, a plain hand for seat 2) |
+| `r_sd` of a ready opponent | 2 / 54 = 0.037 per round | estimate: about two live copies |
+| `q(push)`, `q(fold)` | 0.08, 0.01 | estimate (§2.3); my own later discards use `q(push)` (I push on both paths: a ready 8–10 faan hand never folds here) |
+| Copies of my live tiles in each hand, `H_{me,j}` | pung path (`4p`): 0.05, 0.15, 0.25; pass path (`3p` + `6p`): 0.05, 0.10, 0.40 | estimate of the belief counts head: seats 1 and 2 have shed dots for 60 discards; seat 3 collects dots and holds 4 concealed tiles |
+| Live copies in the wall `W_me` | pung 1.55, pass 1.45 | `2 − Σ_j H_{me,j}` |
+| My self-draw hazard `d_me = W_me / 30` | pung **0.052**, pass **0.048** | §2.3 |
+| Feed rates `φ_{j→me}`, pung path | seat 1 0.8, seat 2 0.05, seat 3 0.5 | §5.2: seats 1 and 3 pay nothing if I win (seat 2 is liable), so they push; a `4p` is useless to seat 1 and possibly useful to seat 3; seat 2 would pay 384 and folds. Estimates |
+| Feed rates, pass path | 0.3, 0.3, 0.2 | feeding my visible 3-meld dots flush costs the feeder 64; a dots tile is useful to seat 3. Estimates |
+| Opponents' fold probabilities (F, O, R), pung path | seat 2: 0.9, 0.6, 0.2; seats 1 and 3: 0 | §5.2 with `cost_2 ≈ 0.6 × 384`, `cost_1 = cost_3 = 0` from me |
+| Opponents' fold probabilities, pass path | seats 1, 2: 0.4, 0.25, 0.1; seat 3: 0.3, 0.2, 0.05 | §5.2 with `cost ≈ 26` from me (a 64-point feed at about 0.1 plus a 96-point self-draw at about 0.2) |
+| Liability | pung path: seat 2 liable for me; nobody liable for any opponent on either path | rules §8.3 |
+
+### 9.3 The race, round by round
+
+`h_me(k) = g_me(k) + (1 − g_me(k)) × d_me`, with the held copies fed in the first round each
+seat acts (pung path: seats 1, 2, 3 all act before my first draw; pass path: only seat 3).
+Opponents' hazards: `p_R,o(k) × (1 − fold_R,o) × (0.037 + Σ_{j≠o} q(m_j) + 0.08)`, states
+advanced by `a`, `b` each round for the unfolded share.
+
+**Pung, then 5p** (7 rounds; my win pays 384 any way):
+
+| k | S(k) | h_me | h_1 | h_2 | h_3 | Σ h |
+|---|---|---|---|---|---|---|
+| 1 | 1.000 | 0.281 | 0.039 | 0.038 | 0.100 | 0.458 |
+| 2 | 0.542 | 0.118 | 0.048 | 0.041 | 0.120 | 0.326 |
+| 3 | 0.365 | 0.118 | 0.058 | 0.044 | 0.136 | 0.357 |
+| 4 | 0.235 | 0.118 | 0.070 | 0.048 | 0.151 | 0.386 |
+| 5 | 0.144 | 0.118 | 0.082 | 0.051 | 0.163 | 0.413 |
+| 6 | 0.085 | 0.118 | 0.094 | 0.054 | 0.173 | 0.439 |
+| 7 | 0.048 | 0.118 | 0.106 | 0.057 | 0.182 | 0.463 |
+
+Round 1's `g_me = 0.8 × (0.05 + 0.052) + 0.05 × (0.15 + 0.052) + 0.5 × (0.25 + 0.052) =
+0.243`; `h_me = 0.243 + 0.757 × 0.052 = 0.281`. From round 2: `g_me = (0.8 + 0.05 + 0.5) ×
+0.052 = 0.070`, `h_me = 0.118`.
+
+Sums: **P(I win) = 0.449**; P(seat 1) 0.127, P(seat 2) 0.102, P(seat 3) 0.297; draw 0.026.
+Gain `Σ_k S(k) h_me(k) × 384 = 172.3`. Losses: opponents' self-draws `Σ_k S(k) Σ_o p_R,o(1 −
+fold) × 0.037 × Pay_sd(o) = 4.1`; wins on my discards (round 1: `P_o(5p) = 0`; later `0.08`
+per round) `6.5`; wins on others' discards cost me nothing. **E(pung) = 172.3 − 4.1 − 6.5 =
++161.7**.
+
+**Pass** (8 rounds; a discard win pays 64, a self-draw 288):
+
+| k | S(k) | h_me | h_1 | h_2 | h_3 | Σ h |
+|---|---|---|---|---|---|---|
+| 1 | 1.000 | 0.134 | 0.038 | 0.038 | 0.098 | 0.307 |
+| 2 | 0.693 | 0.128 | 0.044 | 0.044 | 0.113 | 0.330 |
+| 3 | 0.465 | 0.085 | 0.052 | 0.052 | 0.127 | 0.316 |
+| 4 | 0.318 | 0.085 | 0.059 | 0.059 | 0.140 | 0.344 |
+| 5 | 0.209 | 0.085 | 0.067 | 0.067 | 0.151 | 0.371 |
+| 6 | 0.131 | 0.085 | 0.075 | 0.075 | 0.162 | 0.398 |
+| 7 | 0.079 | 0.085 | 0.084 | 0.084 | 0.171 | 0.423 |
+| 8 | 0.046 | 0.085 | 0.092 | 0.092 | 0.179 | 0.448 |
+
+Round 1: only seat 3 acts before my draw: `g_me = 0.2 × (0.40 + 0.048) = 0.090`, `h_me =
+0.090 + 0.910 × 0.048 = 0.134`. Round 2: seats 1 and 2 act for the first time and may feed
+a held copy: `g_me = 0.3 × (0.05 + 0.048) + 0.3 × (0.10 + 0.048) + 0.2 × 0.048 = 0.084`,
+`h_me = 0.128`. From round 3: `g_me = (0.3 + 0.3 + 0.2) × 0.048 = 0.039`, `h_me = 0.085`.
+
+Sums: **P(I win) = 0.329**; P(seat 1) 0.146, P(seat 2) 0.146, P(seat 3) 0.354; draw 0.025.
+Gain `Σ_k S(k) × [g_me × 64 + (1 − g_me) d_me × 288] = 50.8`. Losses: self-draws 4.8, my
+feeds 7.6. **E(pass) = 50.8 − 4.8 − 7.6 = +38.4**.
+
+**Pung minus pass: +123 points.** The race bot pungs.
+
+### 9.4 What drives the result, and a sensitivity check
+
+Three things, all from seat 0's view: (1) the pung's payout is 384 whichever way I win,
+against 64 on a discard for the pass (a self-draw's 288 arrives only with `d_me = 0.048`);
+(2) both paths have two live copies, so the pung loses no live tiles, only one draw; (3) the
+12-tile rule turns seats 1 and 3 into free feeders and makes seat 2 fold, which both help
+me; the pass path keeps every seat careful with dots.
+
+Dropping every feed (nobody ever discards a live tile to me; `H = 0`, `φ = 0`, so `d_me =
+2 / 30 = 0.067` on both paths): P(I win) 0.213 vs 0.221, **E(pung) = +67.3, E(pass) = +49.4,
+difference +17.9**. That is the order of the `ev`-rollout regrade in the plan header (pung
++20 ± 4). The pung is ahead under both feed assumptions; the size of the lead depends on
+the estimates in §9.2, and the matched numbers of Phase 3–4 will replace them.
+
+The tables are §2–3's model run with §9.2's inputs (a 60-line script, not kept). Task 6's
+test `Brian's pung hand values pung ≥ pass` reproduces the comparison in Rust with v0's
+real inputs.
+
+### 9.5 Comment with the real hidden hands (after the fact only)
+
+The fixture shows: both `4p` are in the wall (no opponent holds one), the last `3p` is in
+seat 3's concealed hand (`3p W N R`, a far hand, which keeps it only until it folds or
+reshapes), and the last `6p` is in the wall. Seat 3 is **far**, not ready: the danger table's
+0.44 for a 3-meld flush tag over-states this particular seat (the plan header's observation
+that the review's opponents "keep feeding pins" was about the `fast` rollout bot, not about
+the race model). With the true positions the pung's live copies are both drawable and the
+pass's are one drawable and one stuck, which widens the pung's lead. None of this is
+available to the bot; it is why the race bot's inputs are learned from logs (§7) rather than
+read from one table.
+
+## 10. Open questions (defaults apply; the builder does not wait)
+
+1. **`τ_threat = 0.2`** for which opponents get a mode of their own. Default 0.2; Task 6 may
+   report the share of decisions with 0, 1, 2 threats.
+2. **The detour tile set** (`P_o(u) ≤ 0.05` or within one shanten step). Default as §5.1;
+   the mode label's detour rule (§7) mirrors it so the trained `mode` head and the bot's own
+   modes mean the same thing.
+3. **Horizon cap 8 rounds.** The same as `ev-bot.md`; a longer cap costs linearly.
+4. **League shares 60 / 20 / 20** and **100,000 hands per generation.** Estimates; the first
+   generation's calibration table (§8.2) says whether more hands are needed.

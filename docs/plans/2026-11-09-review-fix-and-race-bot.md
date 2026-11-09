@@ -103,7 +103,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
 
 ## Phase 2 – Race bot design (fable: method open)
 
-- [ ] **Task 5: `docs/race-bot.md`**
+- [x] **Task 5: `docs/race-bot.md`**
   - Files: create `docs/race-bot.md`; add B28 to bot-stream `docs/decisions.md`.
   - Done when: the doc defines, with sources in this repo for every input: each player's state
     chain (far / one away / ready / folded) and per-turn hazard; the competing-risks race and
