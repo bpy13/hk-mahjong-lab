@@ -509,6 +509,7 @@ mod tests {
             last_drawn: Some("N".parse().unwrap()),
             kong_chain: 0,
             liable: [None; 4],
+            passed_wins: Default::default(),
         };
         State::from_position(RuleSet::default(), &spec).expect("a valid position")
     }

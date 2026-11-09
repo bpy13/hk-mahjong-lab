@@ -31,6 +31,7 @@ def random_rules(rng: random.Random) -> Rules:
         multiple_winners=rng.choice(["all", "head_bump"]),
         twelve_tile_liability=rng.random() < 0.5,
         prevailing_wind=rng.randint(0, 3),
+        passed_win_lock=rng.random() < 0.7,
     )
 
 

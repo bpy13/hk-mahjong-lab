@@ -194,7 +194,7 @@ version on deals).
 - AC11: the race bot's read of each opponent rises toward push, and toward a closer or
   bigger hand, when that player throws tiles that were dangerous when thrown; a test.
 
-- [ ] **Task 12: The rule in the engine** (opus)
+- [x] **Task 12: The rule in the engine** (opus)
   - Files: `crates/hk/src/{rules,state,position}.rs`, the rules doc, `crates/hk` tests.
   - Done when: tests: a seat that passed a win on t gets no Win on t from any discard or
     kong rob until its next turn (draw or own claim); other seats can still win; pung and

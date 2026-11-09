@@ -23,6 +23,7 @@ fn random_rules(rng: &mut SmallRng) -> RuleSet {
         },
         twelve_tile_liability: rng.gen_bool(0.5),
         prevailing_wind: rng.gen_range(0..4),
+        passed_win_lock: rng.gen_bool(0.5),
     }
 }
 

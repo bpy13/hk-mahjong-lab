@@ -712,6 +712,7 @@ fn seat_view(game_id: &str, g: &GameEntry, seat: usize) -> Value {
         "wall_remaining": s.wall_remaining(),
         "hand": hand_to_json(s.hand(seat)),
         "last_drawn": if your_turn { s.last_drawn().map(tile_id) } else { None },
+        "passed_win_lock": tiles_to_json(&s.passed_win_lock(seat)),
         "melds": (0..4).map(|p| s.melds(p).iter().map(meld_to_json).collect::<Vec<_>>()).collect::<Vec<_>>(),
         "bonus": (0..4).map(|p| bonus_to_json(s.bonus(p))).collect::<Vec<_>>(),
         "concealed_counts": (0..4).map(|p| s.concealed_count(p)).collect::<Vec<_>>(),

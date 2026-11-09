@@ -93,10 +93,30 @@ Each of the other three players may declare at most one claim on the discard:
    from their seat. A player who skipped a turn because of a pung (or kong) on someone
    else's discard simply loses that turn.
 5. If nobody claims, the next player in seat order draws.
-6. There is no restriction on passing up a win and winning later on the same tile
-   (Hong Kong mahjong has no *furiten* rule).
+6. A player who passes up a win may not win on that same tile again until their
+   next turn starts: the passed-win rule 過水 (§4.4).
 7. The **last discard** of the hand (after the wall is exhausted) can be claimed
    only for a win; if nobody wins on it, the hand is an exhaustive draw (§9).
+
+### 4.4 Passing a win 過水
+
+*(Default on; variant `passed_win_lock` off restores play without it.)*
+
+1. A player who is offered a win on a tile, on a discard (§4.1) or by robbing a kong
+   (§5.1–§5.2), and does not declare it, is **locked** on that tile kind.
+2. While locked, they cannot win on that tile kind from any player: not on a later
+   discard, not by robbing a kong. Other tiles are unaffected, and so are the other
+   players.
+3. The lock covers only the passed tile kind. Passing two different tiles before the
+   next turn locks both.
+4. A locked player may still **pung, kong or chow** that tile, and may still win on it
+   by **self-draw**.
+5. The lock ends when the player's next turn starts: their draw, or their own claimed
+   pung, chow or kong.
+6. If several players are offered the win, only those who do not declare it are
+   locked (the hand ends at once if anyone wins).
+7. Nobody else sees a pass (declarations are hidden, §4.1.1), so each player knows
+   only their own lock.
 
 ## 5. Kongs and bonus tiles
 

@@ -40,6 +40,9 @@ pub struct RuleSet {
     pub twelve_tile_liability: bool,
     /// The prevailing wind as a seat index (0 = East … 3 = North, §2.3).
     pub prevailing_wind: usize,
+    /// The passed-win rule 過水 (§4.4): a seat that passes a win on a tile cannot
+    /// win on that tile from another player until its next turn starts.
+    pub passed_win_lock: bool,
 }
 
 impl Default for RuleSet {
@@ -52,6 +55,7 @@ impl Default for RuleSet {
             multiple_winners: MultipleWinners::All,
             twelve_tile_liability: true,
             prevailing_wind: 0,
+            passed_win_lock: true,
         }
     }
 }

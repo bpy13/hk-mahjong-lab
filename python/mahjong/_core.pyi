@@ -59,6 +59,7 @@ class HkState:
         bonus: list[list[int]] | None = None,
         liable: list[int | None] | None = None,
         kong_chain: int = 0,
+        passed_wins: list[list[int]] | None = None,
         **rules: object,
     ) -> HkState:
         """Build a mid-hand state without a wall (``State::from_position``).
@@ -66,7 +67,8 @@ class HkState:
         ``melds`` are ``(kind, tile, concealed, from)`` per seat; ``river`` is
         ``(seat, tile, claimed)`` in discard order; ``phase`` is ``"turn"``,
         ``"claim"`` or ``"rob"`` (the last two name ``claim_tile`` and
-        ``claim_from``). Raises ``ValueError`` on a malformed position.
+        ``claim_from``); ``passed_wins`` lists each seat's passed-win lock
+        (rules §4.4). Raises ``ValueError`` on a malformed position.
         """
     def current_player(self) -> int | None: ...
     def phase(self) -> str: ...
@@ -77,6 +79,8 @@ class HkState:
     def determinize(self, observer: int, seed: int | None = None) -> HkState: ...
     def wall(self) -> list[int]: ...
     def hand(self, seat: int) -> list[int]: ...
+    def passed_wins(self) -> list[list[int]]:
+        """Each seat's passed-win lock (rules §4.4). Hidden information."""
     def observation(self, seat: int) -> dict[str, Any]: ...
     def events(self) -> list[dict[str, Any]]: ...
     def result(self) -> dict[str, Any] | None: ...

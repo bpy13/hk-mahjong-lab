@@ -158,6 +158,7 @@ fn turn_position() -> (RuleSet, PositionSpec) {
         last_drawn: Some(t("5s")),
         kong_chain: 0,
         liable: [None; 4],
+        passed_wins: Default::default(),
     };
     (rules, spec)
 }

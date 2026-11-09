@@ -261,11 +261,26 @@ pub struct State {
     window: Option<Window>,
     /// `liable[p]` is the seat liable for `p` under the 12-tile rule (§8.3).
     liable: [Option<u8>; 4],
+    /// The passed-win lock (§4.4): bit `k` of `passed_wins[p]` is set when `p`
+    /// passed a win on tile kind `k` since `p`'s turn last started. Private to `p`.
+    passed_wins: [u64; 4],
     result: Option<HandResult>,
 }
 
 fn bit(t: Tile) -> u8 {
     1 << (t.index() - NUM_KINDS as u8)
+}
+
+/// The bit of a playing tile kind in a passed-win mask.
+fn kind_bit(t: Tile) -> u64 {
+    1 << t.index()
+}
+
+/// The tiles of a passed-win mask, in index order.
+fn mask_tiles(mask: u64) -> Vec<Tile> {
+    Tile::all_kinds()
+        .filter(|&t| mask & kind_bit(t) != 0)
+        .collect()
 }
 
 impl State {
@@ -319,6 +334,7 @@ impl State {
             discards: 0,
             window: None,
             liable: [None; 4],
+            passed_wins: [0; 4],
             result: None,
         };
         // §3.2: the dealer takes 14 tiles, the others 13. Bonus tiles stay in the
@@ -402,6 +418,7 @@ impl State {
             discards: p.river.len() as u16,
             window: None,
             liable: p.liable.map(|l| l.map(|x| x as u8)),
+            passed_wins: checked.passed_wins,
             result: None,
         };
         let window = match p.phase {
@@ -520,6 +537,19 @@ impl State {
         self.liable[seat].map(usize::from)
     }
 
+    /// The tiles `seat` may not win on from another player because it passed a
+    /// win on them since its turn last started (§4.4), in index order. Private to
+    /// that seat. Always empty with `RuleSet::passed_win_lock` off.
+    pub fn passed_win_lock(&self, seat: usize) -> Vec<Tile> {
+        mask_tiles(self.passed_wins[seat])
+    }
+
+    /// Whether `seat` is locked out of winning on `tile` from another player
+    /// (§4.4). Private to that seat.
+    pub fn passed_win_locked(&self, seat: usize, tile: Tile) -> bool {
+        !tile.is_bonus() && self.passed_wins[seat] & kind_bit(tile) != 0
+    }
+
     /// How the hand ended.
     pub fn result(&self) -> Option<&HandResult> {
         self.result.as_ref()
@@ -588,9 +618,18 @@ impl State {
         }
     }
 
-    /// The score `seat` would get by winning with `tile` from another player (on
-    /// a discard or by robbing a kong), if it is a legal win.
-    fn claim_win_score(&self, seat: usize, tile: Tile) -> Option<Score> {
+    /// The score `seat` would get by winning with `tile` from another player,
+    /// with its current hand: on a discard (`rob` false; `earthly` for the
+    /// dealer's first discard, #30) or by robbing a kong (`rob`, of a concealed
+    /// kong if `concealed_kong`). Ignores the passed-win lock.
+    fn offer_win_score(
+        &self,
+        seat: usize,
+        tile: Tile,
+        rob: bool,
+        concealed_kong: bool,
+        earthly: bool,
+    ) -> Option<Score> {
         let mut c = self.hands[seat];
         if c[tile] >= 4 {
             return None;
@@ -599,21 +638,51 @@ impl State {
         if !is_complete(&c, self.melds[seat].len()) {
             return None;
         }
-        if self.phase == Phase::Rob && self.window.is_some_and(|w| w.concealed_kong) {
-            // §5.1: only thirteen orphans may rob a concealed kong.
-            if !(self.melds[seat].is_empty() && is_thirteen_orphans(&c)) {
-                return None;
-            }
+        // §5.1: only thirteen orphans may rob a concealed kong.
+        if rob && concealed_kong && !(self.melds[seat].is_empty() && is_thirteen_orphans(&c)) {
+            return None;
         }
-        let ctx = self.win_context(seat, Some(tile), false);
+        let ctx = WinContext {
+            seat,
+            win_tile: Some(tile),
+            self_drawn: false,
+            bonus: self.bonus[seat],
+            last_tile: false,
+            kong_chain: 0,
+            robbing_kong: rob,
+            heavenly: false,
+            earthly,
+        };
         score_win(&c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.meets_minimum(&self.rules))
     }
 
-    /// Whether `seat` could legally win on `tile` if another player discarded it
-    /// now (complete, and meeting the minimum, §6). For analysis: it reads `seat`'s
-    /// concealed tiles, so callers must not use it to decide for another seat.
+    /// [`Self::offer_win_score`] in the current window's context (a discard
+    /// if no window is open). Ignores the passed-win lock.
+    fn claim_win_score_unlocked(&self, seat: usize, tile: Tile) -> Option<Score> {
+        let rob = self.phase == Phase::Rob;
+        let concealed = rob && self.window.is_some_and(|w| w.concealed_kong);
+        let ctx = self.win_context(seat, Some(tile), false);
+        self.offer_win_score(seat, tile, rob, concealed, ctx.earthly)
+    }
+
+    /// The score `seat` would get by winning with `tile` from another player (on
+    /// a discard or by robbing a kong), if it is a legal win: complete, meeting
+    /// the minimum, and not locked by a passed win (§4.4).
+    fn claim_win_score(&self, seat: usize, tile: Tile) -> Option<Score> {
+        if self.passed_win_locked(seat, tile) {
+            return None;
+        }
+        self.claim_win_score_unlocked(seat, tile)
+    }
+
+    /// Whether `seat`'s hand wins on `tile` if another player discarded it now
+    /// (complete, and meeting the minimum, §6). It ignores the passed-win lock
+    /// (§4.4), so it says whether the hand is waiting on `tile`; see
+    /// [`Self::passed_win_locked`] for whether the win would be allowed. For
+    /// analysis: it reads `seat`'s concealed tiles, so callers must not use it to
+    /// decide for another seat.
     pub fn wins_on(&self, seat: usize, tile: Tile) -> bool {
-        self.claim_win_score(seat, tile).is_some()
+        self.claim_win_score_unlocked(seat, tile).is_some()
     }
 
     /// The score of a self-drawn win for the player to move, if legal now.
@@ -769,6 +838,8 @@ impl State {
         self.kong_chain = 0;
         self.drew = true;
         self.drew_last_tile = false;
+        // §4.4: a new turn ends the seat's passed-win lock.
+        self.passed_wins[seat] = 0;
         self.draw(seat, false);
     }
 
@@ -853,6 +924,15 @@ impl State {
             self.finish(wins);
             return;
         }
+        // §4.4: every seat that could have won and did not is locked on this
+        // tile until its next turn starts.
+        if self.rules.passed_win_lock {
+            for &s in &order {
+                if w.declared[s].is_some() && self.claim_win_score(s, w.tile).is_some() {
+                    self.passed_wins[s] |= kind_bit(w.tile);
+                }
+            }
+        }
         if self.phase == Phase::Rob {
             self.kong_replacement(from);
             return;
@@ -921,6 +1001,8 @@ impl State {
             }
             _ => unreachable!("not a meld claim"),
         };
+        // §4.4: the claimer's turn starts, which ends its passed-win lock.
+        self.passed_wins[seat] = 0;
         if self.rules.twelve_tile_liability && self.exposed_melds_after_claim(seat) == 4 {
             self.liable[seat] = Some(from as u8);
         }
@@ -1075,6 +1157,67 @@ impl State {
 }
 
 impl State {
+    /// `seat`'s passed-win lock (§4.4) as it follows from its current hand and
+    /// the public log: every tile another player discarded, or declared a kong
+    /// of, since `seat` last acted, on which this hand would have been offered a
+    /// win. The hand ending at the first win means each such offer was passed.
+    /// The tile of a window still open is not passed yet. Exact for a state
+    /// played from the deal; a state from a position has no kong events in its
+    /// log, so a passed robbing win there is missed.
+    fn passed_wins_from_log(&self, seat: usize) -> u64 {
+        if !self.rules.passed_win_lock {
+            return 0;
+        }
+        let first_discard = self
+            .events
+            .iter()
+            .position(|e| matches!(e, Event::Discard { .. }));
+        let mut end = self.events.len();
+        if let (Some(w), Some(last)) = (self.window, self.events.last()) {
+            let open = match *last {
+                Event::Discard { seat: p, tile } => {
+                    self.phase == Phase::Claim && (p, tile) == (w.from, w.tile)
+                }
+                Event::ConcealedKong { seat: p, tile } | Event::AddedKong { seat: p, tile } => {
+                    self.phase == Phase::Rob && (p, tile) == (w.from, w.tile)
+                }
+                _ => false,
+            };
+            end -= open as usize;
+        }
+        let me = seat as u8;
+        let mut mask = 0u64;
+        for (i, e) in self.events[..end].iter().enumerate().rev() {
+            let offer = match *e {
+                Event::Draw { seat: p, .. }
+                | Event::Discard { seat: p, .. }
+                | Event::Claim { seat: p, .. }
+                | Event::ConcealedKong { seat: p, .. }
+                | Event::AddedKong { seat: p, .. }
+                    if p == me =>
+                {
+                    break;
+                }
+                Event::Discard { seat: p, tile } => {
+                    let earthly = Some(i) == first_discard && p as usize == DEALER;
+                    Some((tile, false, false, earthly))
+                }
+                Event::AddedKong { tile, .. } => Some((tile, true, false, false)),
+                Event::ConcealedKong { tile, .. } => Some((tile, true, true, false)),
+                _ => None,
+            };
+            if let Some((tile, rob, concealed, earthly)) = offer {
+                if self
+                    .offer_win_score(seat, tile, rob, concealed, earthly)
+                    .is_some()
+                {
+                    mask |= kind_bit(tile);
+                }
+            }
+        }
+        mask
+    }
+
     /// Everything hidden from `observer`, sorted (the other concealed hands and
     /// the undrawn wall, which may contain bonus tiles), and each seat's number
     /// of concealed tiles (0 for the observer). Sorting makes anything built from
@@ -1110,6 +1253,11 @@ impl State {
         let mut s = self.clone();
         for seat in (0..4).filter(|&p| p != observer) {
             s.hands[seat] = hands[seat];
+        }
+        // Another seat's passed-win lock is hidden, but it follows from its hand
+        // and the public log: re-derive it for the new hands.
+        for seat in (0..4).filter(|&p| p != observer) {
+            s.passed_wins[seat] = s.passed_wins_from_log(seat);
         }
         let start = s.front as usize;
         s.wall[start..s.back as usize].copy_from_slice(&wall);

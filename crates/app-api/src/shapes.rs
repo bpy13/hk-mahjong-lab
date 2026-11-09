@@ -317,6 +317,7 @@ pub fn rules_to_json(r: &RuleSet) -> Value {
         "multiple_winners": multiple_winners_name(r.multiple_winners),
         "twelve_tile_liability": on_off(r.twelve_tile_liability),
         "prevailing_wind": WINDS[r.prevailing_wind],
+        "passed_win_lock": on_off(r.passed_win_lock),
     })
 }
 
@@ -331,6 +332,7 @@ pub fn variants_meta() -> Value {
         "multiple_winners": ["all", "head_bump"],
         "twelve_tile_liability": ["on", "off"],
         "prevailing_wind": WINDS,
+        "passed_win_lock": ["on", "off"],
     })
 }
 
@@ -373,6 +375,7 @@ pub fn rules_from_json(v: Option<&Value>) -> ApiResult<RuleSet> {
         match key.as_str() {
             "flowers" => r.flowers = parse_switch(key, value)?,
             "twelve_tile_liability" => r.twelve_tile_liability = parse_switch(key, value)?,
+            "passed_win_lock" => r.passed_win_lock = parse_switch(key, value)?,
             "min_faan" => r.min_faan = parse_number(key, value)?,
             "faan_cap" => r.faan_cap = parse_number(key, value)?,
             "payout" => {

@@ -33,6 +33,7 @@ pub(crate) fn rules_from(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<RuleSet
                 r.multiple_winners = v.extract::<String>()?.parse().map_err(value_error)?
             }
             "twelve_tile_liability" => r.twelve_tile_liability = v.extract()?,
+            "passed_win_lock" => r.passed_win_lock = v.extract()?,
             "prevailing_wind" => {
                 let w: usize = v.extract()?;
                 if w > 3 {
@@ -181,6 +182,14 @@ pub(crate) fn observation<'py>(
         None
     };
     d.set_item("last_drawn", drawn.map(idx))?;
+    // The seat's own passed-win lock (rules §4.4); other seats' locks are hidden.
+    d.set_item(
+        "passed_win_lock",
+        s.passed_win_lock(seat)
+            .into_iter()
+            .map(idx)
+            .collect::<Vec<_>>(),
+    )?;
     let melds = PyList::empty(py);
     let bonus = PyList::empty(py);
     let counts = PyList::empty(py);

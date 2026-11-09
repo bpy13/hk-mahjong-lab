@@ -108,7 +108,8 @@ winds, dragons), repeats kept.
 { "api": 0, "game": "mahjong", "seats": [4, 4],
   "variants": { "flowers": ["on", "off"], "min_faan": ["3", "0", "1", "2", "4", "5"], "faan_cap": ["10", "13", "8"],
                 "payout": ["half_spicy", "full_spicy"], "multiple_winners": ["all", "head_bump"],
-                "twelve_tile_liability": ["on", "off"], "prevailing_wind": ["east", "south", "west", "north"] },
+                "twelve_tile_liability": ["on", "off"], "prevailing_wind": ["east", "south", "west", "north"],
+                "passed_win_lock": ["on", "off"] },
   "bot_levels": ["random", "easy", "medium", "hard", "expert"],
   "has_hint": true, "has_review": true, "has_grade": true,
   "tiles": { "1m": "tile.1_characters", "...": "..." },
@@ -160,10 +161,11 @@ Only what `seat` may see. Other hands appear only once the hand is over.
 ```json
 { "api": 0, "game_id": "g1", "seat": 0,
   "rules": { "flowers": "on", "min_faan": 3, "faan_cap": 10, "payout": "half_spicy",
-             "multiple_winners": "all", "twelve_tile_liability": "on", "prevailing_wind": "east" },
+             "multiple_winners": "all", "twelve_tile_liability": "on", "prevailing_wind": "east",
+             "passed_win_lock": "on" },
   "seed": 12345, "human_seats": [0],
   "phase": "turn", "current_player": 0, "your_turn": true, "turn": 0, "wall_remaining": 90,
-  "hand": ["3m", "6m", "8m", "1p", "..."], "last_drawn": "8m",
+  "hand": ["3m", "6m", "8m", "1p", "..."], "last_drawn": "8m", "passed_win_lock": [],
   "melds": [[ { "kind": "meld.pung", "tile": "E", "tiles": ["E", "E", "E"], "concealed": false, "from": 3 } ], [], [], []],
   "bonus": [["F1"], [], ["S2", "S3"], []],
   "concealed_counts": [14, 13, 13, 13],
@@ -177,6 +179,9 @@ Only what `seat` may see. Other hands appear only once the hand is over.
 - `turn` is the seat whose turn it is in turn order (the discarder during a claim window);
   `current_player` the seat to act (a declaring seat during a window).
 - `last_drawn` is set only in the mover's own view, on a turn that began with a draw.
+- `passed_win_lock`: the tiles this seat passed a win on since its turn last started, so it
+  cannot win on them from another player yet (rules §4.4, the variant `passed_win_lock`,
+  on by default). Only the seat's own lock; other seats' locks are hidden.
 - `river`: every discard still lying on the table, in order; `claimed` marks one taken into a
   meld (it stays listed so the app can fade it, as the lab UI does).
 - `claim`: `{tile, from}` while a claim or rob window is open.

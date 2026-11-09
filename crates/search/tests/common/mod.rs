@@ -148,6 +148,7 @@ pub fn build(s: Setup) -> State {
         last_drawn: Some(t(s.last_drawn)),
         kong_chain: 0,
         liable: s.liable,
+        passed_wins: Default::default(),
     };
     State::from_position(RuleSet::default(), &spec).expect("a valid position")
 }

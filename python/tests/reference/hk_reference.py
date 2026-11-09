@@ -71,6 +71,7 @@ class Rules:
     multiple_winners: str = "all"
     twelve_tile_liability: bool = True
     prevailing_wind: int = 0
+    passed_win_lock: bool = True
 
     def points(self, faan: int) -> int:
         """§8.1."""
@@ -345,6 +346,8 @@ class RefGame:
         self.discards = 0
         self.window: Window | None = None
         self.liable: list[int | None] = [None] * 4
+        # §4.4: tiles each seat passed a win on since its turn last started.
+        self.locked: list[set[int]] = [set() for _ in range(4)]
         self.result: dict | None = None
         dealt = []
         for seat in range(4):
@@ -486,7 +489,7 @@ class RefGame:
         if w is None or seat == w.source:
             return []
         out = []
-        if self._claim_win(seat, w.tile):
+        if w.tile not in self.locked[seat] and self._claim_win(seat, w.tile):
             out.append(WIN)
         if self.phase == "rob" or self.remaining() == 0:
             return out
@@ -531,6 +534,11 @@ class RefGame:
                 self._undo_kong(w.source, w.tile, w.concealed_kong)
             self._finish(wins)
             return
+        if self.rules.passed_win_lock:
+            # §4.4: a seat offered the win that did not take it is locked on the tile.
+            for s in order:
+                if s in w.declared and WIN in self._options(s):
+                    self.locked[s].add(w.tile)
         if self.phase == "rob":
             self._kong_draw(w.source)
             return
@@ -571,6 +579,7 @@ class RefGame:
                 if x != tile:
                     self.hands[seat][x] -= 1
             meld = Meld("chow", low, source=source)
+        self.locked[seat].clear()  # §4.4: the claimer's turn starts
         exposed = sum(1 for m in self.melds[seat] if not m.concealed)
         if self.rules.twelve_tile_liability and exposed + 1 == 4:
             self.liable[seat] = source
@@ -594,6 +603,7 @@ class RefGame:
         self.kong_chain = 0
         self.drew = True
         self.drew_last = False
+        self.locked[seat].clear()  # §4.4: a new turn ends the lock
         self._draw(seat, from_back=False)
 
     def _kong_draw(self, seat: int) -> None:

@@ -63,6 +63,11 @@ pub struct PositionSpec {
     pub kong_chain: u8,
     /// `liable[p]` is the seat liable for `p` under the 12-tile rule (§8.3).
     pub liable: [Option<usize>; 4],
+    /// The passed-win lock (§4.4): the tiles each seat passed a win on since its
+    /// turn last started, so it cannot win on them from another player yet.
+    /// Usually empty; must be empty for the player on turn and when the rules
+    /// play without the lock.
+    pub passed_wins: [Vec<Tile>; 4],
 }
 
 /// Why a [`PositionSpec`] does not describe a reachable position.
@@ -96,6 +101,8 @@ pub enum PositionError {
     BadLastDrawn,
     /// A liability entry that the 12-tile rule cannot produce.
     BadLiability(usize),
+    /// A passed-win lock that cannot exist (the reason says why).
+    BadPassedWin { seat: usize, reason: &'static str },
     /// The player to move has no decision to make here.
     NoDecision,
 }
@@ -130,6 +137,9 @@ impl fmt::Display for PositionError {
                 f.write_str("last_drawn must be a tile in the mover's hand, in the turn phase")
             }
             PositionError::BadLiability(s) => write!(f, "liability for seat {s} is impossible"),
+            PositionError::BadPassedWin { seat, reason } => {
+                write!(f, "passed-win lock of seat {seat}: {reason}")
+            }
             PositionError::NoDecision => f.write_str("the player to move has no decision"),
         }
     }
@@ -145,6 +155,8 @@ pub(crate) struct Checked {
     pub bonus: [u8; 4],
     /// The public log: each discard, followed by its claim if it was claimed.
     pub events: Vec<Event>,
+    /// Each seat's passed-win lock as a mask (bit `k` = tile kind `k`).
+    pub passed_wins: [u64; 4],
 }
 
 fn seat_ok(s: usize) -> Result<usize, PositionError> {
@@ -423,10 +435,31 @@ pub(crate) fn check(rules: &RuleSet, spec: &PositionSpec) -> Result<Checked, Pos
             }
         }
     }
+    // The passed-win lock (§4.4).
+    let mut passed_wins = [0u64; 4];
+    for (seat, tiles) in spec.passed_wins.iter().enumerate() {
+        let bad = |reason| Err(PositionError::BadPassedWin { seat, reason });
+        if tiles.is_empty() {
+            continue;
+        }
+        if !rules.passed_win_lock {
+            return bad("the rules play without the passed-win lock");
+        }
+        if spec.phase == PositionPhase::Turn && seat == spec.to_move {
+            return bad("a seat's turn ends its lock");
+        }
+        for &t in tiles {
+            if t.is_bonus() {
+                return Err(PositionError::WrongTileKind(t));
+            }
+            passed_wins[seat] |= 1 << t.index();
+        }
+    }
     Ok(Checked {
         wall,
         bonus,
         events,
+        passed_wins,
     })
 }
 
@@ -456,6 +489,7 @@ impl State {
             last_drawn: self.last_drawn(),
             kong_chain: self.kong_chain(),
             liable: std::array::from_fn(|s| self.liable_for(s)),
+            passed_wins: std::array::from_fn(|s| self.passed_win_lock(s)),
         })
     }
 }

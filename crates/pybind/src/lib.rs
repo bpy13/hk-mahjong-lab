@@ -109,13 +109,15 @@ impl PyState {
     /// a concealed kong); `river` lists `(seat, tile, claimed)` in discard
     /// order. `phase` is `"turn"`, `"claim"` or `"rob"`; a claim or rob names
     /// `claim_tile` and `claim_from`. `to_move` is the seat whose decision it
-    /// is. The undrawn wall holds the tiles not accounted for, in index order:
+    /// is. `passed_wins` lists, per seat, the tiles it passed a win on since its
+    /// turn last started (the passed-win lock, rules §4.4; default none). The
+    /// undrawn wall holds the tiles not accounted for, in index order:
     /// determinize before playing on. Raises `ValueError` on a malformed
     /// position.
     #[staticmethod]
     #[pyo3(signature = (hands, melds, river, wall_remaining, to_move, phase="turn",
         claim_tile=None, claim_from=None, last_drawn=None, bonus=None, liable=None,
-        kong_chain=0, **rules))]
+        kong_chain=0, passed_wins=None, **rules))]
     #[allow(clippy::too_many_arguments)]
     fn from_position(
         hands: Vec<Vec<u32>>,
@@ -130,6 +132,7 @@ impl PyState {
         bonus: Option<Vec<Vec<u32>>>,
         liable: Option<Vec<Option<usize>>>,
         kong_chain: u8,
+        passed_wins: Option<Vec<Vec<u32>>>,
         rules: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
         let rules = rules_from(rules)?;
@@ -145,6 +148,7 @@ impl PyState {
             bonus.unwrap_or_else(|| vec![Vec::new(); 4]),
             liable.unwrap_or_else(|| vec![None; 4]),
             kong_chain,
+            passed_wins.unwrap_or_else(|| vec![Vec::new(); 4]),
         )?;
         State::from_position(rules, &spec)
             .map(|inner| PyState { inner })
@@ -214,6 +218,20 @@ impl PyState {
             .iter()
             .map(|t| t.index() as u32)
             .collect())
+    }
+
+    /// Each seat's passed-win lock (rules §4.4): the tiles it may not win on
+    /// from another player yet. Hidden information (each seat knows only its own).
+    fn passed_wins(&self) -> Vec<Vec<u32>> {
+        (0..4)
+            .map(|p| {
+                self.inner
+                    .passed_win_lock(p)
+                    .iter()
+                    .map(|t| t.index() as u32)
+                    .collect()
+            })
+            .collect()
     }
 
     /// What `seat` can see, as a dict (their own hand and all public information).
@@ -289,6 +307,7 @@ fn position_spec(
     bonus: Vec<Vec<u32>>,
     liable: Vec<Option<usize>>,
     kong_chain: u8,
+    passed_wins: Vec<Vec<u32>>,
 ) -> PyResult<PositionSpec> {
     let mut counts = Vec::with_capacity(4);
     for hand in hands {
@@ -329,6 +348,10 @@ fn position_spec(
         .into_iter()
         .map(|v| v.into_iter().map(tile_from).collect::<PyResult<Vec<_>>>())
         .collect::<PyResult<Vec<_>>>()?;
+    let passed_wins = passed_wins
+        .into_iter()
+        .map(|v| v.into_iter().map(tile_from).collect::<PyResult<Vec<_>>>())
+        .collect::<PyResult<Vec<_>>>()?;
     let river = river
         .into_iter()
         .map(|(seat, t, claimed)| Ok((seat, tile_from(t)?, claimed)))
@@ -364,6 +387,7 @@ fn position_spec(
         last_drawn: last_drawn.map(tile_from).transpose()?,
         kong_chain,
         liable: per_seat("liable", liable)?,
+        passed_wins: per_seat("passed_wins", passed_wins)?,
     })
 }
 
