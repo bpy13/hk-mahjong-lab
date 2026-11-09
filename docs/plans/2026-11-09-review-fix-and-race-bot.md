@@ -225,7 +225,7 @@ version on deals).
   - Done when: race bot with Tasks 14–15 against without, duplicate match through the cpu
     lane, 1,000 walls × 4 seatings, interval; teacher with and without the rule as a sanity
     row.
-- [ ] **Task 17: Ship** (sonnet; in hk-games)
+- [x] **Task 17: Ship** (sonnet; in hk-games) (hk-games 3ce8c6b + e187f17: pin f288f10, wasm, server module, 9 drills same positions, drill 0003 replaced (seed 601, gap 3.32), lock message in 3 languages; app 467 tests, server 193 pass; real-engine check through the shipped wasm: 3 locked windows, Win never offered; UI rendering checked by passedWinLock.test.tsx, not in a browser)
   - Files: pin, `app/src/engine/wasm/mahjong/`, the server's mahjong module
     (`server\engines\build.ps1`), `app/src/drills/mahjong.json` re-solved on the same
     positions, a ui string in three languages saying why Win is not offered.
