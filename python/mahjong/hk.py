@@ -53,10 +53,15 @@ class Rules:
     multiple_winners: str = "all"
     twelve_tile_liability: bool = True
     prevailing_wind: int = 0
+    passed_win_lock: bool = True
 
     def kwargs(self) -> dict[str, object]:
         """Keyword arguments for ``mahjong._core`` functions."""
-        return asdict(self)
+        kw = asdict(self)
+        if kw["passed_win_lock"]:
+            # The default; an extension built before the rule lacks the name.
+            del kw["passed_win_lock"]
+        return kw
 
     def new_deal(self, seed: int | None = None) -> HkState:
         """A freshly shuffled hand under these rules."""

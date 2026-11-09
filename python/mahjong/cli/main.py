@@ -44,6 +44,9 @@ FaanCap = Annotated[int, typer.Option(help="Faan cap (limit).")]
 Payout = Annotated[str, typer.Option(help="half_spicy or full_spicy.")]
 Multi = Annotated[str, typer.Option(help="all or head_bump.")]
 NoLiability = Annotated[bool, typer.Option("--no-liability", help="Turn off the 12-tile rule.")]
+NoPassedLock = Annotated[
+    bool, typer.Option("--no-passed-win-lock", help="Turn off the passed-win rule.")
+]
 
 
 def make_rules(
@@ -53,6 +56,7 @@ def make_rules(
     payout: str,
     multiple_winners: str,
     no_liability: bool,
+    no_passed_lock: bool = False,
 ) -> Rules:
     return Rules(
         flowers=not no_flowers,
@@ -61,6 +65,7 @@ def make_rules(
         payout=payout,
         multiple_winners=multiple_winners,
         twelve_tile_liability=not no_liability,
+        passed_win_lock=not no_passed_lock,
     )
 
 
@@ -109,6 +114,7 @@ def tournament_cmd(
     payout: Payout = "half_spicy",
     multiple_winners: Multi = "all",
     no_liability: NoLiability = False,
+    no_passed_win_lock: NoPassedLock = False,
 ) -> None:
     """Duplicate tournament: every wall played in 4 rotations or all 24 seatings.
 
@@ -119,7 +125,9 @@ def tournament_cmd(
         raise typer.BadParameter("give exactly four agents")
     if seatings not in (4, 24):
         raise typer.BadParameter("--seatings must be 4 or 24")
-    rules = make_rules(no_flowers, min_faan, faan_cap, payout, multiple_winners, no_liability)
+    rules = make_rules(
+        no_flowers, min_faan, faan_cap, payout, multiple_winners, no_liability, no_passed_win_lock
+    )
     res = tournament(agents, deals, seed, seatings, bootstrap, **rules.kwargs())
     table = Table(title=f"{deals} walls × {seatings} seatings, draws {res['draw_rate']:.1%}")
     for col in (
