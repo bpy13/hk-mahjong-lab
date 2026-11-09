@@ -14,13 +14,14 @@
 //!
 //! Every bot declares a legal win whenever it can.
 
-use crate::danger::Danger;
+use crate::danger::{Danger, Opponent};
+use crate::danger_tables::WAIT;
 use crate::ev::{Belief, EvBot};
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Meld, MeldKind, State};
-use mahjong_tiles::{Tile, TileCounts};
+use mahjong_tiles::{Suit, Tile, TileCounts};
 use rand::Rng;
 use std::sync::Arc;
 
@@ -205,6 +206,20 @@ pub(crate) fn after_claim(
     Some(view.with(hand, melds))
 }
 
+/// An opponent of `me` showing an obvious flush: three or more exposed melds whose
+/// suited ones all lie in one suit. Returns that seat and suit.
+fn flush_seat(state: &State, me: usize) -> Option<(usize, Suit)> {
+    (0..4).filter(|&o| o != me).find_map(|o| {
+        let melds = state.melds(o);
+        if melds.exposed_count() < 3 {
+            return None;
+        }
+        let mut suits = melds.iter().filter_map(|m| m.tile.suit());
+        let first = suits.next()?;
+        suits.all(|s| s == first).then_some((o, first))
+    })
+}
+
 /// Shared decision logic for [`Efficiency`], [`Value`] and [`Fast`].
 #[derive(Clone, Debug)]
 struct Brain {
@@ -287,6 +302,37 @@ impl Brain {
                 return a;
             }
         }
+        // Against an obvious flush (plan 2026-11-09 Task 2). After Brian's pass on
+        // 8p the defending rollout opponents fed his three exposed pin pungs:
+        // a seat that was ready or one away never reached the fold below, and the
+        // tables call a tile safe when the observer holds its last unseen copy,
+        // though that copy is exactly what a waiting flush needs. For the
+        // defending `fast` bot only (the other bots' play is unchanged): a tile of
+        // the flush suit counts as if one copy were still unseen, and a seat
+        // ready or one away gives way to the safest discard outside the suit that
+        // keeps its distance or costs one step.
+        let flush = (self.defense > 0.0 && self.metric == Metric::FaanQuick)
+            .then(|| flush_seat(state, view.seat))
+            .flatten();
+        if let Some((o, suit)) = flush.filter(|_| key.0 <= 1) {
+            if best.suit() == Some(suit) {
+                let danger = Danger::estimate(state, view.seat);
+                if danger.threat(o) * self.defense >= 0.25 {
+                    let safer = discards
+                        .iter()
+                        .filter(|t| t.suit() != Some(suit))
+                        .map(|&t| (distance_after(&view, t, self.metric).0, t))
+                        .filter(|&(d, _)| d <= key.0 + 1)
+                        .min_by(|a, b| {
+                            a.0.cmp(&b.0)
+                                .then(danger.tile(a.1).total_cmp(&danger.tile(b.1)))
+                        });
+                    if let Some((_, t)) = safer {
+                        return Action::Discard(t);
+                    }
+                }
+            }
+        }
         if self.defense > 0.0 && key.0 >= 1 {
             let (danger, risk_of): (Danger, fn(&Danger, Tile) -> f64) = match &self.belief {
                 Some(b) => (
@@ -298,7 +344,20 @@ impl Brain {
             // The "clearly safer" margin: 0.3 % deal-in, or that much of one
             // 3-faan share (8 points) in expected loss.
             let margin = if self.belief.is_some() { 0.024 } else { 0.003 };
-            let risk = |t: Tile| risk_of(&danger, t);
+            let flush_risk =
+                flush.map(|(o, suit)| (suit, Opponent::of(state, o), danger.threat(o)));
+            let risk = |t: Tile| {
+                let r = risk_of(&danger, t);
+                match &flush_risk {
+                    Some((suit, opp, threat)) if t.suit() == Some(*suit) => {
+                        let mut one = view.unseen;
+                        one[t] = one[t].max(1);
+                        let cell = opp.wait_cell(t, &one).expect("one copy unseen");
+                        r.max(threat * WAIT[cell])
+                    }
+                    _ => r,
+                }
+            };
             let threat = danger.max_threat();
             // Fold when far from ready and someone looks close to winning.
             let fold = (key.0 >= 2 && threat * self.defense >= 0.3)

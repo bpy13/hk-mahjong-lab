@@ -128,3 +128,72 @@ fn drops_a_dead_flush_wait_for_a_live_honour_single() {
     assert!(s.unseen(0)[t("G")] > 0);
     assert_eq!(fast_choice(&Fast::default(), &s), Action::Discard(t("2p")));
 }
+
+/// Seat 0 on turn holding `hand` (the drawn tile included) while seat 1 shows three
+/// pin pungs (an obvious pin flush), late in the hand (30 wall tiles). With `last`,
+/// seat 2 has pung'ed that tile, so seat 0 holds its last unseen copy.
+fn facing_a_pin_flush(hand: &str, drawn: &str, keep: &str, last: Option<&'static str>) -> State {
+    let mut m: [Vec<Meld>; 4] = Default::default();
+    m[1] = vec![
+        Meld::exposed(MeldKind::Pung, t("1p"), 2),
+        Meld::exposed(MeldKind::Pung, t("6p"), 3),
+        Meld::exposed(MeldKind::Pung, t("9p"), 0),
+    ];
+    let mut claimed = vec![(2, "1p"), (3, "6p"), (0, "9p")];
+    if let Some(x) = last {
+        m[2] = vec![Meld::exposed(MeldKind::Pung, t(x), 3)];
+        claimed.push((3, x));
+    }
+    build(Setup {
+        hands: [Some(hand), None, None, None],
+        melds: m,
+        claimed,
+        last_drawn: drawn,
+        wall: 30,
+        liable: [None; 4],
+        keep,
+    })
+}
+
+fn is_pin(a: Action) -> bool {
+    matches!(a, Action::Discard(x) if x.suit() == Some(mahjong_tiles::Suit::Dots))
+}
+
+#[test]
+fn a_ready_defender_stops_feeding_an_obvious_flush() {
+    // Ready on 9s (half flush with the Red pung) after drawing a live 4p. Without
+    // defence the bot throws the 4p; against three exposed pin pungs it keeps it
+    // and gives up a step instead.
+    let s = facing_a_pin_flush("RRR 234s 678s 345s 9s 4p", "4p", "4p 9s", None);
+    assert!(s.unseen(0)[t("4p")] > 0, "setup: 4p is live");
+    assert!(
+        is_pin(fast_choice(&Fast::default(), &s)),
+        "the attacking bot is unchanged"
+    );
+    let a = fast_choice(&Fast::new(1.0), &s);
+    assert!(!is_pin(a), "the defending bot fed the flush: {a}");
+}
+
+#[test]
+fn a_one_away_defender_stops_feeding_an_obvious_flush() {
+    // One away (half flush in bamboo with the Red pung); the pins are its only
+    // equal-distance discards; a bamboo or honour costs at most one step.
+    let s = facing_a_pin_flush("RRR 234s 678s 5s 79s 2p 4p", "2p", "4p 2p 9s 5s 7s", None);
+    assert!(
+        is_pin(fast_choice(&Fast::default(), &s)),
+        "the attacking bot is unchanged"
+    );
+    let a = fast_choice(&Fast::new(1.0), &s);
+    assert!(!is_pin(a), "the defending bot fed the flush: {a}");
+}
+
+#[test]
+fn holding_the_last_copy_does_not_make_a_flush_tile_safe() {
+    // The danger tables call a tile safe when the observer holds its last unseen
+    // copy, but a waiting flush may need exactly that copy. Far from ready, the
+    // defending bot folds; it must not fold into the flush with its last 4p.
+    let s = facing_a_pin_flush("RRR 13s 58s 9s E S 4p W N 2m", "N", "4p", Some("4p"));
+    assert_eq!(s.unseen(0)[t("4p")], 0, "setup: seat 0 holds the last 4p");
+    let a = fast_choice(&Fast::new(1.0), &s);
+    assert!(!is_pin(a), "the defending bot fed the flush: {a}");
+}

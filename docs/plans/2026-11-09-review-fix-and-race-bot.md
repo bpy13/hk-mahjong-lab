@@ -78,7 +78,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
     a full flush (or half flush) once its wait has live tiles: do not swap to an honour single
     that drops the flush unless the flush wait is dead.
 
-- [ ] **Task 2: Defending opponents stop feeding an obvious flush**
+- [x] **Task 2: Defending opponents stop feeding an obvious flush**
   - Files: `crates/search/src/bots.rs` (`Brain::turn`), test in `rollout_fixes.rs`.
   - Done when: test: a ready or one-away defending `fast` seat, facing a seat with three
     exposed melds in one suit, discards a safe tile instead of a live tile of that suit when
