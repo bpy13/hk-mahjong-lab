@@ -445,9 +445,14 @@ mod tests {
     /// The encoding must not change when it is made faster: these hashes come
     /// from the original code (commit 86e303b). Change them only on purpose,
     /// together with every model trained on the old encoding.
+    ///
+    /// 2026-11-09: new hashes because the `fast` bot that plays the games now
+    /// keeps live waits (plan 2026-11-09 Task 1), so the positions differ. The
+    /// encoding itself did not change (`features.rs` and `mahjong-analysis`
+    /// untouched); the models stay valid.
     #[test]
     fn encoding_matches_the_golden_hash() {
-        assert_eq!(golden_hash(12, 7), (1003, 12087291700939618118));
+        assert_eq!(golden_hash(12, 7), (918, 10327929394115696147));
     }
 
     /// The same on many more positions (release build: `cargo test --release -p
@@ -455,7 +460,7 @@ mod tests {
     #[test]
     #[ignore]
     fn encoding_matches_the_golden_hash_on_many_positions() {
-        assert_eq!(golden_hash(400, 11), (36213, 15051755790659174273));
+        assert_eq!(golden_hash(400, 11), (35840, 17648144063393340893));
     }
 
     #[test]

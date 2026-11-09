@@ -43,7 +43,9 @@ fn distance(view: &SeatView, metric: Metric) -> i8 {
     }
 }
 
-/// Lower is better: (distance, -acceptance, -target faan, connectedness).
+/// Lower is better: (distance, -acceptance, -target faan, connectedness). For
+/// [`Metric::FaanQuick`] on a ready hand: (0, dead wait, -best winning faan,
+/// -live winning tiles).
 pub(crate) type Key = (i8, i32, i32, i32);
 
 /// How many tiles of the hand are near `t` (same tile, or within two in the same
@@ -101,7 +103,49 @@ pub(crate) fn rank_discards(
         .map(|k| k.1 .0)
         .min()
         .expect("at least one discard");
-    if metric != Metric::FaanQuick {
+    if metric == Metric::FaanQuick && best == 0 && keyed.iter().filter(|k| k.1 .0 == 0).count() > 1
+    {
+        // Ready: look at the actual winning tiles of each tied discard. Without
+        // this the rollout bot broke the tie by tile order and kept a wait whose
+        // four copies were all visible (Brian's pung of 8p, plan 2026-11-09
+        // Task 1). A dead wait ranks last; then the most faan any live winning
+        // tile gives; then more live tiles. The faan comes from the completed
+        // hands, not from `distance_after`: `faan_shanten` calls four pin pungs
+        // and a Green "ready for a full flush" (it sets the Green aside and finds
+        // no tile left to pair), which made the bot swap a live flush wait for
+        // an honour single.
+        for (t, key) in keyed.iter_mut().filter(|k| k.1 .0 == 0) {
+            let mut hand = view.concealed;
+            hand.remove(*t);
+            let (mut live, mut faan) = (0i32, 0i32);
+            for w in Tile::all_kinds() {
+                // A winning tile is a held tile or within two of one in its suit
+                // (any tile that can finish thirteen orphans, with no melds).
+                let near = hand[w] > 0
+                    || view.melds.is_empty() && w.is_terminal_or_honour()
+                    || [-2i8, -1, 1, 2]
+                        .iter()
+                        .any(|&d| w.offset(d).is_some_and(|u| hand[u] > 0));
+                if !near || view.unseen[w] == 0 || hand[w] >= 4 {
+                    continue;
+                }
+                hand.add(w);
+                let fs = faan_shanten(
+                    &HandView {
+                        concealed: &hand,
+                        ..view.hand_view()
+                    },
+                    &view.rules,
+                );
+                hand.remove(w);
+                if fs.shanten < 0 {
+                    live += view.unseen[w] as i32;
+                    faan = faan.max(fs.target.map_or(0, |t| t.faan as i32));
+                }
+            }
+            *key = (0, (live == 0) as i32, -faan, -live);
+        }
+    } else if metric != Metric::FaanQuick {
         for (t, key) in keyed.iter_mut().filter(|k| k.1 .0 == best) {
             let mut hand = view.concealed;
             hand.remove(*t);
