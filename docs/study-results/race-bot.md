@@ -41,3 +41,33 @@ not recorded.
 
 Consequence for Task 8 and 9: the race bot's heuristic estimates are a poor starting point
 (-9 points per hand); the loop's first generation will start far below `value`.
+
+
+## Task 16: what the passed-tile safety and the risk read are worth
+
+Source: `experiments/passed-tiles/job.ps1`, queue job 35 (exit 0, 2026-11-10 03:40 to 04:04),
+output `runs/matches/passed-*.json`, summary `runs/matches/passed-summary.json`. Race bot with
+Tasks 14 and 15 ("full") against three variants, 1,000 walls x 4 seatings, seed 2026. The
+write-up was done 2026-11-10 by the hk-games worker.
+
+Head to head (full race bot against the variant, paired by wall, bootstrap; points per hand):
+
+| Comparison | Mean | 95 % bootstrap |
+|---|---|---|
+| full - off (no Tasks 14-15 changes) | +0.228 | [-0.134, +0.600] |
+| full - nopassed (no passed-tile safety) | +0.058 | [-0.140, +0.264] |
+| full - norisk (no risk read) | +0.222 | [-0.142, +0.616] |
+
+Alone against three `value` bots, all four variants score about -9.1 points per hand
+(full -9.112, off -9.128, nopassed -9.054, norisk -9.176), win rate 0.4 %. All differences
+have intervals that include zero.
+
+Reading (measured): every interval contains zero. The data do not show that Tasks 14 and 15
+help or hurt. The race bot is so weak against `value` (-9 points per hand) that a small
+safety gain cannot show up in this match.
+
+Teacher sanity row (300 walls): the rule-on and rule-off rows are identical to every digit
+(mean 1.593, win rate 25.25 %, deal-in 19 %). Inferred, not checked: either the teacher never
+meets a passed-win case in 300 walls, or `--no-passed-win-lock` does not change the teacher's
+games. Left to check: run the two rows with a different seed, or count passed-win locks in the
+rule-on logs. This row is therefore not evidence that the rule is neutral for the teacher.
