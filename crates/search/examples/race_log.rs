@@ -22,7 +22,7 @@
 //!
 //! * `opp_state`: 0 far, 1 one away, 2 ready, 3 folded ([`race::true_state`]);
 //! * `opp_mode`: the mode of the opponent's last discard, 0 push, 1 detour, 2 fold
-//!   ([`race::discard_mode`]; push before its first discard);
+//!   ([`race::discard_label`], `docs/race-bot.md` §12; push before its first discard);
 //! * `opp_shanten`: true faan-aware shanten (255 when no target meets the minimum), for
 //!   the `a`, `b` tables;
 //! * `opp_points_sd`: points per share of the best self-drawn win now (the discard win
@@ -30,6 +30,8 @@
 //! * `my_mode`, `my_feeds`, `ready_opps`: the observer's own action at this row when it
 //!   is a discard (its mode, how many ready opponents could win on it, how many
 //!   opponents were ready; `my_mode` 255 otherwise), for `q(m)`;
+//! * `my_mistake`: 1 when that discard is a mistake (worse for the hand and not clearly
+//!   safer, §12; its `my_mode` is push), else 0;
 //! * `league`: 0 self-play, 1 against old generations, 2 against the fixed field;
 //! * `wall_at_end`: wall tiles left when the hand ended (rounds to the outcome);
 //! * `race_rounds`, `race_pwin`: when the observer is a race bot, the rounds its race
@@ -41,7 +43,7 @@
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{score_win, Action, RuleSet, State, WinContext};
 use mahjong_search::log::{capture, f16_bits, finish, row_bytes, Field, LogWriter, FIELDS};
-use mahjong_search::race::{LabelTracker, TrueState};
+use mahjong_search::race::{Label, LabelTracker, TrueState};
 use mahjong_search::{Agent, Bot, SeatView};
 use mahjong_tiles::Tile;
 use rand::rngs::SmallRng;
@@ -63,13 +65,14 @@ const RACE_FIELDS: &[Field] = &[
     field("my_mode", "u1", &[]),
     field("my_feeds", "u1", &[]),
     field("ready_opps", "u1", &[]),
+    field("my_mistake", "u1", &[]),
     field("league", "u1", &[]),
     field("wall_at_end", "u1", &[]),
     field("race_rounds", "u1", &[]),
     field("race_pwin", "f2", &[4]),
 ];
 /// Layout version of a race log (the belief log is version 1).
-const RACE_LAYOUT_VERSION: u32 = 101;
+const RACE_LAYOUT_VERSION: u32 = 102;
 const NONE: u8 = 255;
 const DEFAULT_FIXED: &[&str] = &["value", "defensive", "fast", "efficiency", "closed"];
 
@@ -220,6 +223,7 @@ struct RaceRow {
     my_mode: u8,
     my_feeds: u8,
     ready_opps: u8,
+    mistake: u8,
     rounds: u8,
     pwin: [f32; 4],
 }
@@ -232,8 +236,8 @@ impl RaceRow {
         for p in self.points_sd {
             out.extend_from_slice(&p.to_le_bytes());
         }
-        out.extend_from_slice(&[self.my_mode, self.my_feeds, self.ready_opps, league]);
-        out.extend_from_slice(&[wall_at_end, self.rounds]);
+        out.extend_from_slice(&[self.my_mode, self.my_feeds, self.ready_opps, self.mistake]);
+        out.extend_from_slice(&[league, wall_at_end, self.rounds]);
         for p in self.pwin {
             out.extend_from_slice(&f16_bits(p).to_le_bytes());
         }
@@ -259,6 +263,7 @@ fn play_hand(league: &League, seed: u64, hand: u64) -> Vec<u8> {
             my_mode: NONE,
             my_feeds: 0,
             ready_opps: 0,
+            mistake: 0,
             rounds: 0,
             pwin: [f32::NAN; 4],
         };
@@ -290,8 +295,9 @@ fn play_hand(league: &League, seed: u64, hand: u64) -> Vec<u8> {
             }
             agent => agent.choose(&s, &legal, &mut rng),
         };
-        if let Some(m) = tracker.observe(&s, action) {
-            row.my_mode = m as u8;
+        if let Some(label) = tracker.observe(&s, action) {
+            row.my_mode = label.mode() as u8;
+            row.mistake = u8::from(label == Label::Mistake);
             if let Action::Discard(t) = action {
                 row.my_feeds = (1..4).filter(|r| s.wins_on((me + r) % 4, t)).count() as u8;
             }

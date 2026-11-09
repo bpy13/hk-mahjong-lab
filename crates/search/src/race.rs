@@ -24,7 +24,8 @@
 //! ([`RaceBot::fold_override`] still wins when set). The per-round steps `a`, `b` (per
 //! wall bucket) and the feed rates `q(m)` are spec options, fitted from the logs by
 //! `python -m mahjong.belief.race_fit`. The training labels of §7 are built here too:
-//! [`true_state`], [`discard_mode`] and [`LabelTracker`] (used by the `race_log` example).
+//! [`true_state`], [`discard_label`] and [`LabelTracker`] (used by the `race_log` example;
+//! the label tolerances are the `LABEL_*` constants, §12).
 
 use crate::belief::BeliefModel;
 use crate::bots::{after_claim, live_winning_tiles, rank_discards, Metric};
@@ -1456,87 +1457,131 @@ pub fn true_state(state: &State, seat: usize, folded: bool) -> TrueState {
     }
 }
 
-/// The tiles that complete a 13-tile-shape hand with a legal win (live or not).
-fn winning_kinds(view: &SeatView, hand: &TileCounts) -> Vec<Tile> {
-    let mut h = *hand;
-    Tile::all_kinds()
-        .filter(|&w| {
-            if h[w] >= 4 {
-                return false;
-            }
-            h.add(w);
-            let win = fs_of(view, &h).shanten < 0;
-            h.remove(w);
-            win
-        })
-        .collect()
+// The label tolerances (docs/race-bot.md §12, "the mode label redefined"). All of
+// them in one place: the label of a discard compares it with the discards that are
+// best for the player's own hand.
+
+/// A discard at the best distance is still "best for the hand" when its acceptance
+/// (unseen tiles that bring the hand closer; the live winning tiles once ready) is
+/// short of the best by at most this many tiles...
+pub const LABEL_ACCEPT_TILES: i32 = 2;
+/// ...or by at most this share of the best's acceptance, whichever is larger.
+pub const LABEL_ACCEPT_SHARE: f64 = 0.15;
+/// ...and its target's faan is at most this much below the best's.
+pub const LABEL_FAAN: i32 = 1;
+/// Keeping the best distance but less than this share of the best acceptance gives
+/// up most of the hand's speed: it counts as a fold, not a detour.
+pub const LABEL_FOLD_ACCEPT_SHARE: f64 = 0.5;
+/// "Clearly safer": the discard's expected loss (`Danger::expected_loss`, points) is
+/// at most this share of the safest best-for-hand discard's...
+pub const LABEL_SAFER_SHARE: f64 = 0.5;
+/// ...and lower by at least this many points (2 percentage points of deal-in at
+/// `Danger::estimate`'s 8 points per deal-in).
+pub const LABEL_SAFER_POINTS: f64 = 0.16;
+
+/// The label of one discard (§12's redefinition of §7). [`Label::mode`] is what the
+/// log writes as the mode; a [`Label::Mistake`] is written as push and counted
+/// apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Label {
+    /// Among the best discards for the player's own hand, whatever its danger.
+    Push,
+    /// Keeps the best distance but gives up acceptance or value, for a clearly
+    /// safer tile.
+    Detour,
+    /// Gives up distance (or most of the acceptance), for a clearly safer tile.
+    Fold,
+    /// Worse for the hand and not clearly safer: no defensive intent (mode push).
+    Mistake,
 }
 
-/// The mode label of discarding `discard` from `view`'s hand (§7, exactly): with
-/// `s(t)` the faan-aware shanten after discarding `t` and `s_best` the minimum,
-///
-/// 1. **fold** if `s(t*) ≥ s_best + 2`, or the hand was ready before the draw
-///    (`s_before = Some(0)`) and `s(t*) ≥ 1`;
-/// 2. **detour** if `s(t*) = s_best + 1`, or `s(t*) = s_best = 0`, the waits after
-///    `t*` differ from those after `rank_discards`' first choice and `loss(t*)` (the
-///    public expected loss, `Danger::expected_loss`) is below that choice's;
-/// 3. **push** otherwise.
-///
-/// `s_before` is `None` when no 13-tile hand came before (the dealer's first discard).
-pub fn discard_mode(
-    view: &SeatView,
-    discard: Tile,
-    s_before: Option<i8>,
-    loss: impl Fn(Tile) -> f64,
-) -> Mode {
-    let after = |t: Tile| {
-        let mut h = view.concealed;
-        h.remove(t);
-        h
-    };
-    let kinds: Vec<Tile> = view.concealed.kinds().collect();
-    let s = |t: Tile| i32::from(fs_of(view, &after(t)).shanten);
-    let st = s(discard);
-    let best = kinds.iter().map(|&k| s(k)).min().unwrap_or(st);
-    if st >= best + 2 || (s_before == Some(0) && st >= 1) {
-        return Mode::Fold;
-    }
-    if st == best + 1 {
-        return Mode::Detour;
-    }
-    if st == 0 && best == 0 {
-        let first = rank_discards(view, &kinds, Metric::Faan)[0].0;
-        if first != discard
-            && winning_kinds(view, &after(discard)) != winning_kinds(view, &after(first))
-            && loss(discard) < loss(first)
-        {
-            return Mode::Detour;
+impl Label {
+    /// The mode the log writes: a mistake is push.
+    pub fn mode(self) -> Mode {
+        match self {
+            Label::Detour => Mode::Detour,
+            Label::Fold => Mode::Fold,
+            Label::Push | Label::Mistake => Mode::Push,
         }
     }
-    Mode::Push
 }
 
-/// The per-seat bookkeeping behind the labels over one hand: the faan-aware shanten
-/// of each seat's 13-tile hand after its last discard (`s_before` of the next), the
-/// mode of its last discard and whether it is folded (§7).
+/// The label of discarding `discard` from `view`'s 14-tile-shape hand (§12):
+///
+/// * the **best-for-hand** discards are those at `rank_discards`' best faan-aware
+///   distance whose acceptance is within [`LABEL_ACCEPT_TILES`] /
+///   [`LABEL_ACCEPT_SHARE`] of the best and whose target faan is within
+///   [`LABEL_FAAN`]; `discard` among them is **push**;
+/// * otherwise it is clearly safer when `loss(discard)` is at most
+///   [`LABEL_SAFER_SHARE`] of the lowest `loss` among the best-for-hand discards and
+///   lower by at least [`LABEL_SAFER_POINTS`];
+/// * a clearly safer discard is **fold** if it raises the distance or keeps less than
+///   [`LABEL_FOLD_ACCEPT_SHARE`] of the best acceptance, else **detour**;
+/// * a discard neither best for the hand nor clearly safer is a **mistake**.
+///
+/// `loss` is the public expected loss of a discard (`Danger::expected_loss`).
+pub fn discard_label(view: &SeatView, discard: Tile, loss: impl Fn(Tile) -> f64) -> Label {
+    let kinds: Vec<Tile> = view.concealed.kinds().collect();
+    // Key: (distance, −acceptance, −target faan, connectedness); acceptance is filled
+    // for the discards at the best distance only, which are the only ones compared.
+    let ranked = rank_discards(view, &kinds, Metric::Faan);
+    let (best_d, best_acc, best_faan) = {
+        let k = ranked[0].1;
+        (k.0, -k.1, -k.2)
+    };
+    let tolerance = f64::from(LABEL_ACCEPT_TILES).max(LABEL_ACCEPT_SHARE * f64::from(best_acc));
+    let best_for_hand = |k: &crate::bots::Key| {
+        k.0 == best_d && f64::from(best_acc + k.1) <= tolerance && best_faan + k.2 <= LABEL_FAAN
+    };
+    let Some(&(_, key)) = ranked.iter().find(|(t, _)| *t == discard) else {
+        return Label::Mistake; // not a held tile: cannot happen for a legal discard
+    };
+    if best_for_hand(&key) {
+        return Label::Push;
+    }
+    let safest = ranked
+        .iter()
+        .filter(|(_, k)| best_for_hand(k))
+        .map(|&(t, _)| loss(t))
+        .fold(f64::INFINITY, f64::min);
+    let mine = loss(discard);
+    if !(mine <= LABEL_SAFER_SHARE * safest && safest - mine >= LABEL_SAFER_POINTS) {
+        return Label::Mistake;
+    }
+    if key.0 > best_d || f64::from(-key.1) < LABEL_FOLD_ACCEPT_SHARE * f64::from(best_acc) {
+        Label::Fold
+    } else {
+        Label::Detour
+    }
+}
+
+/// The per-seat bookkeeping behind the labels over one hand: the mode of each seat's
+/// last discard and whether it is folded (§7: from a fold label until the seat's next
+/// push label or claim; a detour or a mistake keeps the fold).
 #[derive(Clone, Debug)]
 pub struct LabelTracker {
-    s13: [Option<i8>; 4],
     last: [Mode; 4],
     folded: [bool; 4],
 }
 
 impl LabelTracker {
-    /// At the start of a hand: seats holding a 13-tile hand get its shanten.
-    pub fn new(state: &State) -> LabelTracker {
-        let s13 = std::array::from_fn(|seat| {
-            let v = SeatView::of(state, seat);
-            (v.concealed.total() % 3 == 1).then(|| hand_shanten(&v))
-        });
+    /// At the start of a hand.
+    pub fn new(_state: &State) -> LabelTracker {
         LabelTracker {
-            s13,
             last: [Mode::Push; 4],
             folded: [false; 4],
+        }
+    }
+
+    /// Records `seat`'s discard labelled `label`: its mode becomes the seat's last
+    /// mode; a fold starts the folded state, a push ends it, a detour or a mistake
+    /// leaves it as it was.
+    pub fn record(&mut self, seat: usize, label: Label) {
+        self.last[seat] = label.mode();
+        match label {
+            Label::Fold => self.folded[seat] = true,
+            Label::Push => self.folded[seat] = false,
+            Label::Detour | Label::Mistake => {}
         }
     }
 
@@ -1556,28 +1601,21 @@ impl LabelTracker {
     }
 
     /// Records the player to act's `action` **before** it is applied. Returns the
-    /// mode label of a discard; a pung or chow counts as push (it ends a fold) and
-    /// returns `None`, as does everything else.
+    /// label of a discard ([`discard_label`] with the public danger estimate); a pung
+    /// or chow counts as push (it ends a fold) and returns `None`, as does everything
+    /// else.
     ///
     /// # Panics
     /// Panics if the hand is over.
-    pub fn observe(&mut self, state: &State, action: Action) -> Option<Mode> {
+    pub fn observe(&mut self, state: &State, action: Action) -> Option<Label> {
         let seat = state.current_player().expect("hand in progress");
         match action {
             Action::Discard(t) if !state.in_claim() && !state.in_rob() => {
                 let view = SeatView::of(state, seat);
                 let danger = Danger::estimate(state, seat);
-                let m = discard_mode(&view, t, self.s13[seat], |u| danger.expected_loss(u));
-                let mut h = view.concealed;
-                h.remove(t);
-                self.s13[seat] = Some(fs_of(&view, &h).shanten);
-                self.last[seat] = m;
-                match m {
-                    Mode::Fold => self.folded[seat] = true,
-                    Mode::Push => self.folded[seat] = false,
-                    Mode::Detour => {}
-                }
-                Some(m)
+                let label = discard_label(&view, t, |u| danger.expected_loss(u));
+                self.record(seat, label);
+                Some(label)
             }
             Action::Pung | Action::Chow(_) => {
                 self.last[seat] = Mode::Push;

@@ -1,14 +1,14 @@
-//! The race bot's training labels (plan 2026-11-09 Task 8, `docs/race-bot.md` §7) on
-//! hand-made positions: the true state (far / one away / ready / folded) and the mode
-//! label of a discard (push / detour / fold), plus the folded-state bookkeeping over
-//! real hands.
+//! The race bot's training labels (plan 2026-11-09 Task 8, `docs/race-bot.md` §7 and
+//! §12's redefinition) on hand-made positions: the true state (far / one away / ready /
+//! folded), the label of a discard (push / detour / fold, and the "mistake" that is
+//! written as push), plus the folded-state bookkeeping over real hands.
 
 mod common;
 
 use common::{build, counts, t, Setup};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
-use mahjong_search::race::{discard_mode, true_state, LabelTracker, Mode, TrueState};
+use mahjong_search::race::{discard_label, true_state, Label, LabelTracker, Mode, TrueState};
 use mahjong_search::{Bot, SeatView};
 use mahjong_tiles::{Tile, TileCounts};
 use rand::rngs::SmallRng;
@@ -35,80 +35,101 @@ fn view(hand: &str) -> SeatView {
 
 const NO_LOSS: fn(Tile) -> f64 = |_| 0.0;
 
+/// Expected loss 0 for `safe`, 10 points for every other tile.
+fn only_safe(safe: Tile) -> impl Fn(Tile) -> f64 {
+    move |u| if u == safe { 0.0 } else { 10.0 }
+}
+
 /// A characters full flush, ready on 1m / 4m after throwing the East (faan-aware
-/// shanten 0); throwing the 5m instead leaves it one away.
+/// shanten 0); throwing any other tile leaves it one away.
 const FLUSH: &str = "123m 456m 789m 11m 23m E";
 
 #[test]
-fn the_best_discard_is_push() {
+fn the_best_discard_is_push_whatever_its_danger() {
     let v = view(FLUSH);
-    assert_eq!(discard_mode(&v, t("E"), Some(1), NO_LOSS), Mode::Push);
-    // No earlier shanten known (the dealer's first discard): the same.
-    assert_eq!(discard_mode(&v, t("E"), None, NO_LOSS), Mode::Push);
+    assert_eq!(discard_label(&v, t("E"), NO_LOSS), Label::Push);
+    // The East is the only dangerous tile: still push.
+    let east_deadly = |u: Tile| if u == t("E") { 10.0 } else { 0.0 };
+    assert_eq!(discard_label(&v, t("E"), east_deadly), Label::Push);
 }
 
+/// Several discards of the same distance count as best for the hand when their
+/// acceptance is within the tolerance: in `123m 456m 78m 11m 2369m E` the 6m, 9m and
+/// East are all push, even when one of them is the dangerous one.
 #[test]
-fn one_step_worse_than_the_best_is_detour() {
-    let v = view(FLUSH);
-    assert_eq!(discard_mode(&v, t("5m"), Some(1), NO_LOSS), Mode::Detour);
-    assert_eq!(discard_mode(&v, t("5m"), None, NO_LOSS), Mode::Detour);
+fn near_ties_for_the_hand_are_push() {
+    let v = view("123m 456m 78m 11m 2369m E");
+    for d in ["6m", "9m", "E"] {
+        assert_eq!(discard_label(&v, t(d), NO_LOSS), Label::Push, "{d}");
+        assert_eq!(discard_label(&v, t(d), only_safe(t(d))), Label::Push, "{d}");
+    }
 }
 
+/// `123m 456m 789m 11m 233m`: throwing the 9m keeps the hand ready on the most
+/// tiles; throwing the 1m keeps it ready on fewer (same distance, acceptance beyond
+/// the tolerance). For a clearly safer 1m that is a detour.
 #[test]
-fn breaking_a_ready_hand_is_fold_even_by_one_step() {
-    let v = view(FLUSH);
-    // Ready before the draw (s_before = 0), one away after the 5m: fold.
-    assert_eq!(discard_mode(&v, t("5m"), Some(0), NO_LOSS), Mode::Fold);
-    // Staying ready is still push.
-    assert_eq!(discard_mode(&v, t("E"), Some(0), NO_LOSS), Mode::Push);
-}
-
-/// Several discards keep `123m 456m 789m 11m 233m` ready (1m, 2m, 3m among them),
-/// with different waits. A ready discard is a detour only when its waits differ from
-/// `rank_discards`' first choice and the public expected loss says it is safer.
-#[test]
-fn a_safer_ready_discard_with_other_waits_is_detour() {
+fn same_distance_fewer_tiles_for_a_safer_tile_is_detour() {
     let v = view("123m 456m 789m 11m 233m");
-    // Equal danger everywhere: every discard that stays ready is push, the others
-    // (one step worse) detour.
-    let ready: Vec<Tile> = v
-        .concealed
-        .kinds()
-        .filter(|&d| discard_mode(&v, d, Some(1), NO_LOSS) == Mode::Push)
-        .collect();
-    for d in ["1m", "2m", "3m"] {
-        assert!(ready.contains(&t(d)), "{d} keeps the hand ready: {ready:?}");
-    }
-    // Only `safe` is safe: it is a detour unless it is the first choice itself (same
-    // waits). Exactly one ready discard is the first choice; the 1m, 2m and 3m
-    // discards leave three different wait sets, so at least two of them are detours.
-    let labels: Vec<Mode> = ready
-        .iter()
-        .map(|&safe| {
-            discard_mode(
-                &v,
-                safe,
-                Some(0),
-                move |u| if u == safe { 0.0 } else { 10.0 },
-            )
-        })
-        .collect();
-    assert!(
-        labels.iter().filter(|&&m| m == Mode::Detour).count() >= 2,
-        "{labels:?}"
+    assert_eq!(discard_label(&v, t("9m"), NO_LOSS), Label::Push);
+    assert_eq!(
+        discard_label(&v, t("1m"), only_safe(t("1m"))),
+        Label::Detour
     );
-    assert!(labels.contains(&Mode::Push), "{labels:?}");
-    // A ready discard is a detour only when it is safer: with the danger reversed
-    // (the chosen tile the most dangerous) nothing is a detour.
-    for &risky in &ready {
-        let m = discard_mode(
-            &v,
-            risky,
-            Some(0),
-            move |u| if u == risky { 10.0 } else { 0.0 },
-        );
-        assert_eq!(m, Mode::Push, "{risky}");
+    assert_eq!(Label::Detour.mode(), Mode::Detour);
+}
+
+#[test]
+fn breaking_the_ready_hand_for_a_safer_tile_is_fold() {
+    let v = view(FLUSH);
+    // The 5m leaves the hand one away (distance up by one) and is the safe tile.
+    assert_eq!(discard_label(&v, t("5m"), only_safe(t("5m"))), Label::Fold);
+    assert_eq!(Label::Fold.mode(), Mode::Fold);
+}
+
+/// Worse for the hand and not clearly safer: a mistake, written as push.
+#[test]
+fn worse_for_the_hand_and_not_safer_is_a_mistake() {
+    let v = view(FLUSH);
+    // Equal danger everywhere.
+    assert_eq!(discard_label(&v, t("5m"), NO_LOSS), Label::Mistake);
+    // The 5m is the most dangerous tile.
+    let five_deadly = |u: Tile| if u == t("5m") { 10.0 } else { 1.0 };
+    assert_eq!(discard_label(&v, t("5m"), five_deadly), Label::Mistake);
+    // Safer, but not clearly: 0.1 points against the East's 0.2 is half, yet less
+    // than the 0.16-point margin lower.
+    let slightly = |u: Tile| if u == t("5m") { 0.1 } else { 0.2 };
+    assert_eq!(discard_label(&v, t("5m"), slightly), Label::Mistake);
+    // A mistake carries no defensive intent.
+    assert_eq!(Label::Mistake.mode(), Mode::Push);
+    // The safer side of the same margin: 0.0 against 0.2 is a fold.
+    let clearly = |u: Tile| if u == t("5m") { 0.0 } else { 0.2 };
+    assert_eq!(discard_label(&v, t("5m"), clearly), Label::Fold);
+}
+
+/// A fold starts the folded state; it lasts through detours and mistakes and ends at
+/// the next push discard (or a claim).
+#[test]
+fn the_folded_state_persists_until_the_next_push() {
+    let s = three_states();
+    let mut tr = LabelTracker::new(&s);
+    let seat = 1;
+    assert!(!tr.folded(seat));
+    tr.record(seat, Label::Fold);
+    assert!(tr.folded(seat));
+    assert_eq!(tr.state_of(&s, seat), TrueState::Folded);
+    assert_eq!(tr.mode_of(seat), Mode::Fold);
+    for later in [Label::Detour, Label::Mistake, Label::Fold, Label::Mistake] {
+        tr.record(seat, later);
+        assert_eq!(tr.state_of(&s, seat), TrueState::Folded, "{later:?}");
     }
+    // The last discard was a mistake: its mode is push, but the seat stays folded.
+    assert_eq!(tr.mode_of(seat), Mode::Push);
+    tr.record(seat, Label::Push);
+    assert!(!tr.folded(seat));
+    assert_eq!(tr.state_of(&s, seat), TrueState::Ready);
+    // Other seats are untouched.
+    assert!(!tr.folded(2));
 }
 
 /// Seat 1 ready (a characters flush on 1m / 4m), seat 2 one away (a dots flush
@@ -143,14 +164,15 @@ fn true_states_of_hand_made_hands() {
 }
 
 /// Over real hands: every discard gets a label; a seat is folded exactly from the
-/// turn after a fold label until a push label (a detour keeps it), claims count as
-/// push; `Ready` agrees with the seat's legal wins.
+/// turn after a fold label until a push label (a detour or a mistake keeps it), claims
+/// count as push; `Ready` agrees with the seat's legal wins. The `fast` bot plays for
+/// its own hand only, so almost all its discards are push.
 #[test]
 fn the_tracker_follows_the_labels_over_real_hands() {
     let bot = Bot::by_name("fast").unwrap();
     let mut rng = SmallRng::seed_from_u64(11);
     let hands = if cfg!(debug_assertions) { 6 } else { 60 };
-    let mut labels = [0usize; 3];
+    let mut labels = [0usize; 4];
     for _ in 0..hands {
         let mut s = State::new_deal(RuleSet::default(), &mut rng);
         let mut tr = LabelTracker::new(&s);
@@ -171,20 +193,23 @@ fn the_tracker_follows_the_labels_over_real_hands() {
             let m = tr.observe(&s, a);
             assert_eq!(m.is_some(), is_discard, "{a}");
             match (a, m) {
-                (_, Some(Mode::Fold)) => folded[p] = true,
-                (_, Some(Mode::Push)) | (Action::Pung | Action::Chow(_), None) => folded[p] = false,
+                (_, Some(Label::Fold)) => folded[p] = true,
+                (_, Some(Label::Push)) | (Action::Pung | Action::Chow(_), None) => {
+                    folded[p] = false
+                }
                 _ => {}
             }
             if let Some(m) = m {
                 labels[m as usize] += 1;
-                assert_eq!(tr.mode_of(p), m);
+                assert_eq!(tr.mode_of(p), m.mode());
             }
             s.apply(a);
         }
     }
     eprintln!(
-        "labels over {hands} hands: push {}, detour {}, fold {}",
-        labels[0], labels[1], labels[2]
+        "labels over {hands} hands: push {}, detour {}, fold {}, mistake {}",
+        labels[0], labels[1], labels[2], labels[3]
     );
-    assert!(labels[0] > labels[1]);
+    let total: usize = labels.iter().sum();
+    assert!(labels[0] * 10 > total * 8, "{labels:?}");
 }
