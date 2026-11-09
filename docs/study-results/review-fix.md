@@ -105,7 +105,7 @@ lane, queue jobs 29 (old), 30 (new) and 31 (compare, after both).
 
 The lower end, -1.61, is below the -0.5 bar. The interval also contains zero, so the match
 shows no measured loss, only that it cannot rule out one of more than half a point per hand.
-Per chunk of 50 walls the difference ranges from -5.8 to +3.7 (11 of 20 chunks negative).
+Per chunk of 50 walls the difference ranges from -5.8 to +3.7 (13 of 20 chunks negative; corrected by the orchestrator 2026-11-10 from "11", counted in `compare.json`).
 The fixed rollouts win slightly more often and deal in less (18.6 % to 17.1 %); mean faan per
 win is about the same (4.83 to 4.75). Inference (not tested): the lower average comes from
 fewer large wins, but 4,000 hands cannot separate that from noise.
