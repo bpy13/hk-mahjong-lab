@@ -1,0 +1,980 @@
+{
+ "position": {
+  "api": 0,
+  "current_player": null,
+  "game": "mahjong",
+  "hands": [
+   [
+    "4p"
+   ],
+   [
+    "6s",
+    "7s",
+    "8s",
+    "9s",
+    "9s",
+    "9s",
+    "E",
+    "W",
+    "W",
+    "G"
+   ],
+   [
+    "7m",
+    "6s",
+    "7s",
+    "7s",
+    "8s",
+    "E",
+    "E",
+    "N",
+    "R",
+    "R"
+   ],
+   [
+    "3p",
+    "W",
+    "N",
+    "R"
+   ]
+  ],
+  "history": [
+   {
+    "action": {
+     "code": 20,
+     "tile": "3s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 0,
+     "tile": "1m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 20,
+     "tile": "3s",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 4,
+     "tile": "5m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 22,
+     "tile": "5s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 3,
+     "tile": "4m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 22,
+     "tile": "5s",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 8,
+     "tile": "9m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 18,
+     "tile": "1s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 7,
+     "tile": "8m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 2,
+     "tile": "3m",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 1,
+     "tile": "2m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 26,
+     "tile": "9s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 17,
+     "tile": "9p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 29,
+     "tile": "W",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 1,
+     "tile": "2m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 3,
+     "tile": "4m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 2,
+     "tile": "3m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 2,
+     "tile": "3m",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 3,
+     "tile": "4m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 7,
+     "tile": "8m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 10,
+     "tile": "2p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 30,
+     "tile": "N",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 0,
+     "tile": "1m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 21,
+     "tile": "4s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 11,
+     "tile": "3p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 8,
+     "tile": "9m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 4,
+     "tile": "5m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 9,
+     "tile": "1p",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 2,
+     "tile": "3m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 14,
+     "tile": "6p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 19,
+     "tile": "2s",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 13,
+     "tile": "5p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 19,
+     "tile": "2s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 28,
+     "tile": "S",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 5,
+     "tile": "6m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 14,
+     "tile": "6p",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 1,
+     "tile": "2m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 7,
+     "tile": "8m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 14,
+     "tile": "6p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 12,
+     "tile": "4p",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 21,
+     "tile": "4s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 1,
+     "tile": "2m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 28,
+     "tile": "S",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 32,
+     "tile": "G",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 8,
+     "tile": "9m",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 32,
+     "tile": "G",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 4,
+     "tile": "5m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 7,
+     "tile": "8m",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 20,
+     "tile": "3s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 31,
+     "tile": "Wh",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 22,
+     "tile": "5s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 4,
+     "tile": "5m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 15,
+     "tile": "7p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 6,
+     "tile": "7m",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 3,
+     "tile": "4m",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 15,
+     "tile": "7p",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 122,
+     "tile": "7p",
+     "tiles": [
+      "7p",
+      "8p",
+      "9p"
+     ],
+     "type": "action.chow"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 28,
+     "tile": "S",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 18,
+     "tile": "1s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 10,
+     "tile": "2p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 21,
+     "tile": "4s",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 22,
+     "tile": "5s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 23,
+     "tile": "6s",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 103,
+     "type": "action.pass"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 20,
+     "tile": "3s",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 16,
+     "tile": "8p",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 105,
+     "type": "action.pung"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 13,
+     "tile": "5p",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 18,
+     "tile": "1s",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 32,
+     "tile": "G",
+     "type": "action.discard"
+    },
+    "player": 2
+   },
+   {
+    "action": {
+     "code": 25,
+     "tile": "8s",
+     "type": "action.discard"
+    },
+    "player": 3
+   },
+   {
+    "action": {
+     "code": 30,
+     "tile": "N",
+     "type": "action.discard"
+    },
+    "player": 0
+   },
+   {
+    "action": {
+     "code": 12,
+     "tile": "4p",
+     "type": "action.discard"
+    },
+    "player": 1
+   },
+   {
+    "action": {
+     "code": 104,
+     "type": "action.win"
+    },
+    "player": 0
+   }
+  ],
+  "human_seats": [
+   0
+  ],
+  "over": true,
+  "phase": "over",
+  "result": {
+   "deltas": [
+    384,
+    0,
+    -384,
+    0
+   ],
+   "wins": [
+    {
+     "from": 1,
+     "liable": 2,
+     "paid_by": [
+      0,
+      0,
+      384,
+      0
+     ],
+     "points_per_share": 128,
+     "robbed": false,
+     "score": {
+      "faan": 10,
+      "limit": false,
+      "patterns": [
+       {
+        "faan": 1,
+        "key": "faan.seat_flower"
+       },
+       {
+        "faan": 3,
+        "key": "faan.all_pungs"
+       },
+       {
+        "faan": 7,
+        "key": "faan.full_flush"
+       }
+      ],
+      "qualifying": 10,
+      "total": 11
+     },
+     "seat": 0,
+     "self_drawn": false,
+     "win_tile": "4p"
+    }
+   ]
+  },
+  "rules": {
+   "faan_cap": 10,
+   "flowers": "on",
+   "min_faan": 3,
+   "multiple_winners": "all",
+   "payout": "half_spicy",
+   "prevailing_wind": "east",
+   "twelve_tile_liability": "on"
+  },
+  "seed": 535559845,
+  "wall": [
+   "1p",
+   "S",
+   "9m",
+   "3m",
+   "3p",
+   "4m",
+   "G",
+   "3p",
+   "7p",
+   "5s",
+   "1p",
+   "8p",
+   "4p",
+   "3s",
+   "4m",
+   "8m",
+   "9s",
+   "7s",
+   "F4",
+   "W",
+   "9p",
+   "1m",
+   "9s",
+   "6p",
+   "8s",
+   "6s",
+   "S4",
+   "W",
+   "5s",
+   "1m",
+   "7s",
+   "E",
+   "6s",
+   "7p",
+   "7s",
+   "3s",
+   "R",
+   "1m",
+   "3m",
+   "G",
+   "4s",
+   "3s",
+   "9m",
+   "9p",
+   "2m",
+   "3p",
+   "5p",
+   "2s",
+   "5m",
+   "R",
+   "8p",
+   "Wh",
+   "S2",
+   "2p",
+   "S",
+   "1s",
+   "3p",
+   "E",
+   "N",
+   "9s",
+   "S",
+   "8p",
+   "4m",
+   "7p",
+   "6p",
+   "R",
+   "Wh",
+   "8m",
+   "3m",
+   "3m",
+   "5p",
+   "Wh",
+   "5p",
+   "N",
+   "1m",
+   "4s",
+   "2s",
+   "5m",
+   "S1",
+   "2s",
+   "2s",
+   "5p",
+   "6m",
+   "6p",
+   "2m",
+   "8m",
+   "1s",
+   "4p",
+   "9m",
+   "2m",
+   "W",
+   "8s",
+   "W",
+   "8p",
+   "5m",
+   "8m",
+   "5s",
+   "5m",
+   "7m",
+   "7p",
+   "4m",
+   "4s",
+   "F1",
+   "2p",
+   "7m",
+   "5s",
+   "6s",
+   "3s",
+   "N",
+   "E",
+   "G",
+   "8s",
+   "F3",
+   "4p",
+   "2p",
+   "1p",
+   "6m",
+   "6m",
+   "9p",
+   "9p",
+   "4s",
+   "7m",
+   "S",
+   "4p",
+   "Wh",
+   "9m",
+   "7s",
+   "6m",
+   "F2",
+   "8s",
+   "6p",
+   "6s",
+   "2p",
+   "7m",
+   "E",
+   "S3",
+   "R",
+   "1s",
+   "N",
+   "1s",
+   "1p",
+   "2m",
+   "G",
+   "9s"
+  ],
+  "wall_remaining": 24
+ },
+ "level": "expert"
+}
