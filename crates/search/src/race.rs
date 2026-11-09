@@ -17,9 +17,19 @@
 //!
 //! Every number behind a candidate is kept in [`RaceTerms`] ([`RaceBot::explain`]).
 //! The search is plain arithmetic: no threads, no randomness.
+//!
+//! Phase 4 (plan Task 8): a belief file with the race heads (`state`, `mode`;
+//! `models/race-belief.mjnn`) replaces §2.1's one-away estimate by the `state` head and
+//! §5.2's fold heuristic by the `mode` head's P(fold), through the fold hook
+//! ([`RaceBot::fold_override`] still wins when set). The per-round steps `a`, `b` (per
+//! wall bucket) and the feed rates `q(m)` are spec options, fitted from the logs by
+//! `python -m mahjong.belief.race_fit`. The training labels of §7 are built here too:
+//! [`true_state`], [`discard_mode`] and [`LabelTracker`] (used by the `race_log` example).
 
+use crate::belief::BeliefModel;
 use crate::bots::{after_claim, live_winning_tiles, rank_discards, Metric};
-use crate::ev::{after_own_kong, exposed, load_belief, Belief, Beliefs, HeuristicBelief};
+use crate::danger::{Danger, PROGRESS_BUCKETS};
+use crate::ev::{after_own_kong, exposed, Belief, Beliefs, HeuristicBelief};
 use crate::ev::{FAAN_BUCKETS, FIRST_FAAN_BUCKET};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, UNREACHABLE};
@@ -33,10 +43,11 @@ use std::sync::Arc;
 
 /// `P_clip` for `P_o(t)` (as `ev-bot.md`).
 const P_CLIP: f64 = 0.95;
-/// `a_o = b_o`: an opponent's chance per round to move F → O or O → R (§2.1).
+/// `a_o = b_o`: an opponent's chance per round to move F → O or O → R (§2.1); the
+/// default of [`RaceConfig::opp_a`] and [`RaceConfig::opp_b`] in every wall bucket.
 const OPP_STEP: f64 = 0.15;
 /// `q(m)`: P(one discard by a player in mode `m` completes a given ready
-/// opponent's hand), push / detour / fold (§2.3).
+/// opponent's hand), push / detour / fold (§2.3); the default of [`RaceConfig::q`].
 const Q: [f64; 3] = [0.08, 0.04, 0.01];
 /// §5.2: `π_fold = min(0.9, cost / 64) × {F: 1.0, O: 0.6, R: 0.2}`.
 const FOLD_CAP: f64 = 0.9;
@@ -69,12 +80,6 @@ pub enum Mode {
 
 const MODES: [Mode; 3] = [Mode::Push, Mode::Detour, Mode::Fold];
 
-impl Mode {
-    fn q(self) -> f64 {
-        Q[self as usize]
-    }
-}
-
 // ----- Hyper-parameters. -----
 
 /// The `race:` spec keys and their defaults.
@@ -87,6 +92,13 @@ pub struct RaceConfig {
     pub tie_margin: f64,
     /// `τ_threat`: an unfolded opponent with `p_O + p_R` above it gets a mode (§5.1).
     pub threat: f64,
+    /// `a_o`: an opponent's chance per round to move far → one away, per wall bucket
+    /// (`danger.rs`'s six progress buckets). Spec `a=x0/x1/x2/x3/x4/x5`.
+    pub opp_a: [f64; PROGRESS_BUCKETS],
+    /// `b_o`: one away → ready, per wall bucket. Spec `b=...`.
+    pub opp_b: [f64; PROGRESS_BUCKETS],
+    /// `q(m)` for push, detour, fold. Spec `q=push/detour/fold`.
+    pub q: [f64; 3],
 }
 
 impl Default for RaceConfig {
@@ -95,8 +107,22 @@ impl Default for RaceConfig {
             horizon: 8,
             tie_margin: 0.5,
             threat: 0.2,
+            opp_a: [OPP_STEP; PROGRESS_BUCKETS],
+            opp_b: [OPP_STEP; PROGRESS_BUCKETS],
+            q: Q,
         }
     }
+}
+
+/// `n` probabilities separated by `/`.
+fn probabilities<const N: usize>(k: &str, v: &str) -> Result<[f64; N], String> {
+    let xs: Vec<f64> = v
+        .split('/')
+        .map(|x| x.parse::<f64>().ok().filter(|p| (0.0..=1.0).contains(p)))
+        .collect::<Option<_>>()
+        .ok_or_else(|| format!("race option {k}: {v:?} must be probabilities split by '/'"))?;
+    xs.try_into()
+        .map_err(|_| format!("race option {k} needs {N} values, got {v:?}"))
 }
 
 impl RaceConfig {
@@ -108,6 +134,12 @@ impl RaceConfig {
                 .filter(|x| x.is_finite() && *x >= 0.0)
                 .ok_or_else(|| format!("bad number {v:?} for race option {k}"))
         };
+        match k {
+            "a" => return probabilities(k, v).map(|x| self.opp_a = x),
+            "b" => return probabilities(k, v).map(|x| self.opp_b = x),
+            "q" => return probabilities(k, v).map(|x| self.q = x),
+            _ => {}
+        }
         match k {
             "horizon" => {
                 self.horizon = v
@@ -220,8 +252,12 @@ pub struct RaceBot {
     pub config: RaceConfig,
     pub belief: Arc<dyn Belief>,
     /// A fixed fold probability per seat that replaces §5.2's heuristic (in every
-    /// state). Phase 4's `mode` head plugs in here; tests set it.
+    /// state). Tests set it; when it is `None` for a seat and [`RaceBot::heads`] is
+    /// present, the `mode` head's P(fold) for that seat fills it at each decision.
     pub fold_override: [Option<f64>; 4],
+    /// The belief file's race heads (`state`, `mode`), when it has them: the same
+    /// model as `belief`, so one network pass (cached) serves both.
+    pub heads: Option<Arc<BeliefModel>>,
 }
 
 impl Default for RaceBot {
@@ -230,18 +266,31 @@ impl Default for RaceBot {
     }
 }
 
-/// Builds the bot of a `race:` spec's options (`belief=` loads a model).
+/// Builds the bot of a `race:` spec's options (`belief=` loads a model; a file with
+/// the race heads also feeds [`RaceBot::heads`]).
 pub fn parse_spec(opts: &[(&str, &str)]) -> Result<RaceBot, String> {
     let mut config = RaceConfig::default();
-    let mut belief: Arc<dyn Belief> = Arc::new(HeuristicBelief);
+    let mut model: Option<Arc<BeliefModel>> = None;
     for &(k, v) in opts {
         if k == "belief" {
-            belief = load_belief(v)?;
+            if !std::path::Path::new(v).exists() {
+                return Err(format!("belief model {v:?} not found"));
+            }
+            model = Some(Arc::new(BeliefModel::load(v)?));
         } else {
             config.set(k, v)?;
         }
     }
-    Ok(RaceBot::new(config, belief))
+    Ok(match model {
+        Some(m) => {
+            let heads = m.has_race_heads().then(|| Arc::clone(&m));
+            RaceBot {
+                heads,
+                ..RaceBot::new(config, m)
+            }
+        }
+        None => RaceBot::new(config, Arc::new(HeuristicBelief)),
+    })
 }
 
 /// Who draws in which round (§1, `n_i`): rounds end with my draw, so in round 1
@@ -310,6 +359,17 @@ struct Table {
     horizon: usize,
     threat: f64,
     fold_override: [Option<f64>; 4],
+    /// `a_o`, `b_o` in this decision's wall bucket, and `q(m)`.
+    step_far: f64,
+    step_one: f64,
+    q: [f64; 3],
+}
+
+/// `danger.rs`'s wall-progress bucket (0 = early … 5 = late).
+fn wall_bucket(state: &State) -> usize {
+    let initial = if state.rules().flowers { 91.0 } else { 83.0 };
+    let progress = (1.0 - state.wall_remaining() as f64 / initial).clamp(0.0, 0.999);
+    (progress * PROGRESS_BUCKETS as f64) as usize
 }
 
 fn points(rules: &RuleSet, faan: u8) -> f64 {
@@ -317,10 +377,20 @@ fn points(rules: &RuleSet, faan: u8) -> f64 {
 }
 
 impl Table {
-    fn new(state: &State, me: usize, beliefs: &Beliefs, bot: &RaceBot) -> Table {
+    /// `fold` replaces §5.2's heuristic per seat and `one_away` §2.1's estimate (the
+    /// race heads, [`RaceBot::head_estimates`]).
+    fn new(
+        state: &State,
+        me: usize,
+        beliefs: &Beliefs,
+        bot: &RaceBot,
+        fold: [Option<f64>; 4],
+        one_away: [Option<f64>; 4],
+    ) -> Table {
         let rules = *state.rules();
         let unseen = state.unseen(me);
         let wall = state.wall_remaining() as f64;
+        let bucket = wall_bucket(state);
         let mut t = Table {
             me,
             rules,
@@ -345,7 +415,10 @@ impl Table {
             discarded: [[false; NUM_KINDS]; 4],
             horizon: bot.config.horizon,
             threat: bot.config.threat,
-            fold_override: bot.fold_override,
+            fold_override: fold,
+            step_far: bot.config.opp_a[bucket],
+            step_one: bot.config.opp_b[bucket],
+            q: bot.config.q,
         };
         for e in state.events() {
             if let Event::Discard { seat, tile } = *e {
@@ -355,7 +428,7 @@ impl Table {
         for o in (0..4).filter(|&o| o != me) {
             let b = &beliefs.seats[o];
             let ready = b.tenpai.clamp(0.0, 1.0);
-            let one_away = (1.5 * ready).min(1.0 - ready);
+            let one_away = one_away[o].unwrap_or(1.5 * ready).min(1.0 - ready);
             t.states[o] = [ready, one_away, 1.0 - ready - one_away];
             for (bucket, &pb) in b.faan.iter().enumerate().take(FAAN_BUCKETS) {
                 let f = FIRST_FAAN_BUCKET + bucket as u8;
@@ -634,7 +707,30 @@ impl RaceBot {
             config,
             belief,
             fold_override: [None; 4],
+            heads: None,
         }
+    }
+
+    /// Per seat: the fold probability (the fixed override, else the `mode` head's
+    /// P(fold)) and the `state` head's P(one away), for the player to act.
+    fn head_estimates(&self, state: &State, me: usize) -> ([Option<f64>; 4], [Option<f64>; 4]) {
+        let mut fold = self.fold_override;
+        let mut one_away = [None; 4];
+        if let Some(m) = self
+            .heads
+            .as_ref()
+            .filter(|_| state.current_player() == Some(me))
+        {
+            let out = m.run(state);
+            for o in (0..4).filter(|&o| o != me) {
+                let Some(b) = out.seat(o) else { continue };
+                if fold[o].is_none() {
+                    fold[o] = b.mode.map(|p| p[2]);
+                }
+                one_away[o] = b.state.map(|p| p[1]);
+            }
+        }
+        (fold, one_away)
     }
 
     /// Every candidate with its terms, best equity first. Empty when a win is legal
@@ -664,7 +760,8 @@ impl RaceBot {
         }
         let me = state.current_player().expect("the hand is not over");
         let beliefs = self.belief.estimate(state, me);
-        let table = Table::new(state, me, &beliefs, self);
+        let (fold, one_away) = self.head_estimates(state, me);
+        let table = Table::new(state, me, &beliefs, self, fold, one_away);
         let view = SeatView::of(state, me);
         let wall = state.wall_remaining();
         let mut cache = ReadyCache::new();
@@ -984,7 +1081,7 @@ impl RaceBot {
             out.fold_by_state[o] = fold_by_state;
             out.fold[o] = fold;
             out.detour[o] = detour;
-            out.q[o] = (1.0 - fold - detour) * Q[0] + detour * Q[1] + fold * Q[2];
+            out.q[o] = (1.0 - fold - detour) * t.q[0] + detour * t.q[1] + fold * t.q[2];
             out.phi[o] = (1.0 - fold) * usefulness[o];
         }
         out
@@ -1052,9 +1149,9 @@ impl RaceBot {
         // After the plan, the per-discard rate of my mode toward each opponent.
         let rate = |o: usize| -> f64 {
             match modes[o] {
-                Some(Mode::Fold) => Q[0], // the reserve is used up: push-level danger
-                Some(m) => m.q(),
-                None => Q[0],
+                Some(Mode::Fold) => t.q[0], // the reserve is used up: push-level danger
+                Some(m) => t.q[m as usize],
+                None => t.q[0],
             }
         };
 
@@ -1205,14 +1302,10 @@ impl RaceBot {
                 pm = [pm[0] - to_one, pm[1] + to_one - to_ready, pm[2] + to_ready];
             }
             for o in t.opponents().filter(|&o| acts[o]) {
-                let step = if k == 0 {
-                    (OPP_STEP + claim[o]).min(1.0)
-                } else {
-                    OPP_STEP
-                };
+                let bonus = if k == 0 { claim[o] } else { 0.0 };
                 let [r, one, far] = po[o];
-                let up_far = far * step;
-                let up_one = one * step;
+                let up_far = far * (t.step_far + bonus).min(1.0);
+                let up_one = one * (t.step_one + bonus).min(1.0);
                 po[o] = [r + up_one, one - up_one + up_far, far - up_far];
             }
             drew_last = i_draw;
@@ -1312,6 +1405,188 @@ fn discards_of(view: &SeatView) -> Vec<(Tile, Vec<Tile>)> {
             (d, useless)
         })
         .collect()
+}
+
+// ----- Training labels (§7, plan Task 8), from the true hands. -----
+
+/// A player's true state (§2.1, §7), as written to the race log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TrueState {
+    /// Faan-aware shanten ≥ 2 (or no target meets the minimum).
+    Far = 0,
+    /// Faan-aware shanten 1 (or 0 without a legal win).
+    OneAway = 1,
+    /// A legal win is available on some tile now.
+    Ready = 2,
+    /// Folded: from the turn after a fold-labelled discard until a push label.
+    Folded = 3,
+}
+
+/// Faan-aware shanten of `view`'s concealed hand; for a hand that must discard
+/// (14-tile shape), the best over its discards.
+pub fn hand_shanten(view: &SeatView) -> i8 {
+    let tiles = view.concealed.total();
+    if tiles % 3 == 2 {
+        view.concealed
+            .kinds()
+            .map(|d| {
+                let mut h = view.concealed;
+                h.remove(d);
+                fs_of(view, &h).shanten
+            })
+            .min()
+            .unwrap_or(UNREACHABLE)
+    } else {
+        fs_of(view, &view.concealed).shanten
+    }
+}
+
+/// `seat`'s true state in `state` (reads its hidden hand: labels only). `folded`
+/// overrides the rest.
+pub fn true_state(state: &State, seat: usize, folded: bool) -> TrueState {
+    if folded {
+        TrueState::Folded
+    } else if Tile::all_kinds().any(|k| state.wins_on(seat, k)) {
+        TrueState::Ready
+    } else if hand_shanten(&SeatView::of(state, seat)) <= 1 {
+        TrueState::OneAway
+    } else {
+        TrueState::Far
+    }
+}
+
+/// The tiles that complete a 13-tile-shape hand with a legal win (live or not).
+fn winning_kinds(view: &SeatView, hand: &TileCounts) -> Vec<Tile> {
+    let mut h = *hand;
+    Tile::all_kinds()
+        .filter(|&w| {
+            if h[w] >= 4 {
+                return false;
+            }
+            h.add(w);
+            let win = fs_of(view, &h).shanten < 0;
+            h.remove(w);
+            win
+        })
+        .collect()
+}
+
+/// The mode label of discarding `discard` from `view`'s hand (§7, exactly): with
+/// `s(t)` the faan-aware shanten after discarding `t` and `s_best` the minimum,
+///
+/// 1. **fold** if `s(t*) ≥ s_best + 2`, or the hand was ready before the draw
+///    (`s_before = Some(0)`) and `s(t*) ≥ 1`;
+/// 2. **detour** if `s(t*) = s_best + 1`, or `s(t*) = s_best = 0`, the waits after
+///    `t*` differ from those after `rank_discards`' first choice and `loss(t*)` (the
+///    public expected loss, `Danger::expected_loss`) is below that choice's;
+/// 3. **push** otherwise.
+///
+/// `s_before` is `None` when no 13-tile hand came before (the dealer's first discard).
+pub fn discard_mode(
+    view: &SeatView,
+    discard: Tile,
+    s_before: Option<i8>,
+    loss: impl Fn(Tile) -> f64,
+) -> Mode {
+    let after = |t: Tile| {
+        let mut h = view.concealed;
+        h.remove(t);
+        h
+    };
+    let kinds: Vec<Tile> = view.concealed.kinds().collect();
+    let s = |t: Tile| i32::from(fs_of(view, &after(t)).shanten);
+    let st = s(discard);
+    let best = kinds.iter().map(|&k| s(k)).min().unwrap_or(st);
+    if st >= best + 2 || (s_before == Some(0) && st >= 1) {
+        return Mode::Fold;
+    }
+    if st == best + 1 {
+        return Mode::Detour;
+    }
+    if st == 0 && best == 0 {
+        let first = rank_discards(view, &kinds, Metric::Faan)[0].0;
+        if first != discard
+            && winning_kinds(view, &after(discard)) != winning_kinds(view, &after(first))
+            && loss(discard) < loss(first)
+        {
+            return Mode::Detour;
+        }
+    }
+    Mode::Push
+}
+
+/// The per-seat bookkeeping behind the labels over one hand: the faan-aware shanten
+/// of each seat's 13-tile hand after its last discard (`s_before` of the next), the
+/// mode of its last discard and whether it is folded (§7).
+#[derive(Clone, Debug)]
+pub struct LabelTracker {
+    s13: [Option<i8>; 4],
+    last: [Mode; 4],
+    folded: [bool; 4],
+}
+
+impl LabelTracker {
+    /// At the start of a hand: seats holding a 13-tile hand get its shanten.
+    pub fn new(state: &State) -> LabelTracker {
+        let s13 = std::array::from_fn(|seat| {
+            let v = SeatView::of(state, seat);
+            (v.concealed.total() % 3 == 1).then(|| hand_shanten(&v))
+        });
+        LabelTracker {
+            s13,
+            last: [Mode::Push; 4],
+            folded: [false; 4],
+        }
+    }
+
+    /// `seat`'s true state now.
+    pub fn state_of(&self, state: &State, seat: usize) -> TrueState {
+        true_state(state, seat, self.folded[seat])
+    }
+
+    /// The mode of `seat`'s last discard (push before its first).
+    pub fn mode_of(&self, seat: usize) -> Mode {
+        self.last[seat]
+    }
+
+    /// Whether `seat` is folded.
+    pub fn folded(&self, seat: usize) -> bool {
+        self.folded[seat]
+    }
+
+    /// Records the player to act's `action` **before** it is applied. Returns the
+    /// mode label of a discard; a pung or chow counts as push (it ends a fold) and
+    /// returns `None`, as does everything else.
+    ///
+    /// # Panics
+    /// Panics if the hand is over.
+    pub fn observe(&mut self, state: &State, action: Action) -> Option<Mode> {
+        let seat = state.current_player().expect("hand in progress");
+        match action {
+            Action::Discard(t) if !state.in_claim() && !state.in_rob() => {
+                let view = SeatView::of(state, seat);
+                let danger = Danger::estimate(state, seat);
+                let m = discard_mode(&view, t, self.s13[seat], |u| danger.expected_loss(u));
+                let mut h = view.concealed;
+                h.remove(t);
+                self.s13[seat] = Some(fs_of(&view, &h).shanten);
+                self.last[seat] = m;
+                match m {
+                    Mode::Fold => self.folded[seat] = true,
+                    Mode::Push => self.folded[seat] = false,
+                    Mode::Detour => {}
+                }
+                Some(m)
+            }
+            Action::Pung | Action::Chow(_) => {
+                self.last[seat] = Mode::Push;
+                self.folded[seat] = false;
+                None
+            }
+            _ => None,
+        }
+    }
 }
 
 impl mahjong_games::Policy<State> for RaceBot {

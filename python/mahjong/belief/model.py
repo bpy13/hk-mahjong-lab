@@ -11,6 +11,11 @@ opponent's last eight discards one-hot, ``3 × 8 × 34``), and writes, for the t
 * ``outcome``: 3 logits over {no win, wins on a discard, self-draws} before the
   hand ends (the EV bot's ``sd_o`` is class 2 and its ``x_o`` is class 1).
 
+With ``race=True`` (the race bot's network, ``docs/race-bot.md`` §6–7) two heads follow:
+
+* ``state``: 4 logits over the opponent's true state {far, one away, ready, folded};
+* ``mode``: 3 logits over the mode of its last discard {push, detour, fold}.
+
 The output vector is the heads in that order, each holding its three opponents
 contiguously (``counts`` first: opponent, tile, copies). :meth:`BeliefNet.export`
 writes the MJNN v2 file ``crates/search/src/net.rs`` loads, with these names as
@@ -50,15 +55,20 @@ HEADS: dict[str, int] = {
     "outcome": N_OUTCOME,
 }
 OUTPUT_LEN = N_OPP * sum(HEADS.values())
+#: The race heads (``docs/race-bot.md`` §7): true state F / O / R / X and the mode
+#: of the last discard push / detour / fold. They follow the five heads above.
+N_STATES = 4
+N_MODES = 3
+RACE_HEADS: dict[str, int] = {"state": N_STATES, "mode": N_MODES}
 #: Count logits beyond the observer's unseen copies get this logit.
 MASK_LOGIT = -1e9
 
 
-def head_slices() -> dict[str, slice]:
+def head_slices(heads: dict[str, int] | None = None) -> dict[str, slice]:
     """Where each head sits in the output vector (all three opponents)."""
     out: dict[str, slice] = {}
     start = 0
-    for name, per_opp in HEADS.items():
+    for name, per_opp in (heads or HEADS).items():
         out[name] = slice(start, start + N_OPP * per_opp)
         start += N_OPP * per_opp
     return out
@@ -71,10 +81,20 @@ class BeliefConfig:
     #: improved the count log-likelihood by 0.1 %, under the plan's 2 % bar
     #: (`docs/belief.md` §5).
     discards: bool = False
+    #: Add the race heads (``state``, ``mode``) after the five belief heads.
+    race: bool = False
 
     @property
     def input_len(self) -> int:
         return STATE_LEN + (DISCARD_LEN if self.discards else 0)
+
+    @property
+    def heads(self) -> dict[str, int]:
+        return {**HEADS, **RACE_HEADS} if self.race else HEADS
+
+    @property
+    def output_len(self) -> int:
+        return N_OPP * sum(self.heads.values())
 
 
 class BeliefNet(nn.Module):
@@ -87,8 +107,8 @@ class BeliefNet(nn.Module):
             layers += [nn.Linear(width, h), nn.ReLU()]
             width = h
         self.torso = nn.Sequential(*layers)
-        self.head = nn.Linear(width, OUTPUT_LEN)
-        self.slices = head_slices()
+        self.head = nn.Linear(width, self.cfg.output_len)
+        self.slices = head_slices(self.cfg.heads)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Raw logits, shape ``(batch, OUTPUT_LEN)``."""
@@ -111,7 +131,7 @@ class BeliefNet(nn.Module):
         """The output vector as per-head tensors ``(n, 3, ...)``."""
         n = out.shape[0]
         parts: dict[str, torch.Tensor] = {}
-        for name, per_opp in HEADS.items():
+        for name, per_opp in self.cfg.heads.items():
             block = out[:, self.slices[name]].reshape(n, N_OPP, per_opp)
             if name == "counts":
                 block = block.reshape(n, N_OPP, NUM_KINDS, MAX_COPIES)
@@ -123,15 +143,19 @@ class BeliefNet(nn.Module):
     def predict(self, out: torch.Tensor, unseen: torch.Tensor) -> dict[str, torch.Tensor]:
         """Probabilities from raw logits: ``counts`` ``(n, 3, 34, 5)`` (masked by the
         observer's ``unseen`` ``(n, 34)``), ``tenpai`` ``(n, 3)``, ``waits``
-        ``(n, 3, 34)``, ``faan`` ``(n, 3, 8)``, ``outcome`` ``(n, 3, 3)``."""
+        ``(n, 3, 34)``, ``faan`` ``(n, 3, 8)``, ``outcome`` ``(n, 3, 3)``; with the
+        race heads also ``state`` ``(n, 3, 4)`` and ``mode`` ``(n, 3, 3)``."""
         p = self.split(out)
-        return {
+        probs = {
             "counts": torch.softmax(mask_counts(p["counts"], unseen), dim=-1),
             "tenpai": torch.sigmoid(p["tenpai"]),
             "waits": torch.sigmoid(p["waits"]),
             "faan": torch.softmax(p["faan"], dim=-1),
             "outcome": torch.softmax(p["outcome"], dim=-1),
         }
+        for name in RACE_HEADS if self.cfg.race else ():
+            probs[name] = torch.softmax(p[name], dim=-1)
+        return probs
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +164,11 @@ class BeliefNet(nn.Module):
     @staticmethod
     def load(path: Path) -> BeliefNet:
         ckpt = torch.load(path, map_location="cpu")
-        cfg = BeliefConfig(hidden=tuple(ckpt["cfg"]["hidden"]), discards=ckpt["cfg"]["discards"])
+        c = ckpt["cfg"]
+        # Checkpoints from before the race heads have no "race" entry.
+        cfg = BeliefConfig(
+            hidden=tuple(c["hidden"]), discards=c["discards"], race=c.get("race", False)
+        )
         net = BeliefNet(cfg)
         net.load_state_dict(ckpt["state"])
         return net
@@ -151,8 +179,23 @@ class BeliefNet(nn.Module):
         inputs = [("features", STATE_LEN)]
         if self.cfg.discards:
             inputs.append(("discards", DISCARD_LEN))
-        outputs = [(name, N_OPP * per_opp) for name, per_opp in HEADS.items()]
+        outputs = [(name, N_OPP * per_opp) for name, per_opp in self.cfg.heads.items()]
         write_mjnn(path, linears, inputs=inputs, outputs=outputs)
+
+
+def warm_start(net: BeliefNet, src: BeliefNet) -> None:
+    """Copies ``src``'s weights into ``net`` where they mean the same thing: the torso
+    (same widths required) and the rows of every head both have. A race network
+    warm-started from a plain belief model keeps the five heads and starts its race
+    heads fresh (``docs/race-bot.md`` §8.1 step 3: warm start from the last generation)."""
+    if net.cfg.hidden != src.cfg.hidden or net.cfg.discards != src.cfg.discards:
+        raise ValueError(f"cannot warm-start {net.cfg} from {src.cfg}")
+    with torch.no_grad():
+        net.torso.load_state_dict(src.torso.state_dict())
+        for name, sl in net.slices.items():
+            if name in src.slices:
+                net.head.weight[sl] = src.head.weight[src.slices[name]]
+                net.head.bias[sl] = src.head.bias[src.slices[name]]
 
 
 def discard_block(discards: torch.Tensor) -> torch.Tensor:
@@ -189,23 +232,34 @@ class Batch:
     waits: torch.Tensor  # (n, 3, 34) float
     faan: torch.Tensor  # (n, 3) int64 in 0..7 (faan − 3, clipped)
     outcome: torch.Tensor  # (n, 3) int64: 0 none, 1 discard win, 2 self-draw
+    # The race labels (race logs only, ``race_log`` example; None otherwise).
+    state: torch.Tensor | None = None  # (n, 3) int64: 0 far, 1 one away, 2 ready, 3 folded
+    mode: torch.Tensor | None = None  # (n, 3) int64: 0 push, 1 detour, 2 fold
 
     def __len__(self) -> int:
         return int(self.features.shape[0])
 
     def to(self, device: torch.device | str) -> Batch:
-        return Batch(**{k: v.to(device) for k, v in self.__dict__.items()})
+        return Batch(**{k: None if v is None else v.to(device) for k, v in self.__dict__.items()})
 
     def index(self, idx: torch.Tensor) -> Batch:
-        return Batch(**{k: v[idx] for k, v in self.__dict__.items()})
+        return Batch(**{k: None if v is None else v[idx] for k, v in self.__dict__.items()})
 
 
 def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:
-    """Targets and inputs from log rows (``mahjong.belief.logs``), on the CPU."""
+    """Targets and inputs from log rows (``mahjong.belief.logs``), on the CPU. A race
+    log's ``opp_state`` and ``opp_mode`` fill :attr:`Batch.state` and :attr:`Batch.mode`."""
     features = torch.from_numpy(np.ascontiguousarray(rows["features"]))
     discards = torch.from_numpy(np.ascontiguousarray(rows["discards"][:, 1:4, :]))
     faan = np.clip(rows["opp_faan_now"].astype(np.int64), FAAN_MIN, FAAN_MAX) - FAAN_MIN
+    names = rows.dtype.names or ()
+    race = {
+        key: torch.from_numpy(rows[field].astype(np.int64))
+        for key, field in (("state", "opp_state"), ("mode", "opp_mode"))
+        if field in names
+    }
     return Batch(
+        **race,
         features=features,
         discards=discards,
         unseen=unseen_from_features(features),
@@ -222,7 +276,8 @@ def losses(net: BeliefNet, out: torch.Tensor, b: Batch) -> dict[str, torch.Tenso
 
     ``counts``: cross-entropy summed over the 34 kinds (masked logits), averaged
     over rows and opponents; ``tenpai``, ``outcome``: cross-entropy; ``waits`` and
-    ``faan``: cross-entropy over tenpai opponents only (zero weight otherwise).
+    ``faan``: cross-entropy over tenpai opponents only (zero weight otherwise); with
+    the race heads and labels, ``state`` and ``mode``: cross-entropy.
     """
     p = net.split(out)
     n = out.shape[0]
@@ -237,12 +292,15 @@ def losses(net: BeliefNet, out: torch.Tensor, b: Batch) -> dict[str, torch.Tenso
     faan_nll = F.cross_entropy(p["faan"].reshape(-1, N_FAAN), b.faan.reshape(-1), reduction="none")
     loss_faan = (faan_nll.reshape(n, N_OPP) * weight).sum() / denom
     loss_outcome = F.cross_entropy(p["outcome"].reshape(-1, N_OUTCOME), b.outcome.reshape(-1))
-    total = loss_counts + loss_tenpai + loss_waits + loss_faan + loss_outcome
-    return {
+    parts = {
         "counts": loss_counts,
         "tenpai": loss_tenpai,
         "waits": loss_waits,
         "faan": loss_faan,
         "outcome": loss_outcome,
-        "total": total,
     }
+    if net.cfg.race and b.state is not None and b.mode is not None:
+        parts["state"] = F.cross_entropy(p["state"].reshape(-1, N_STATES), b.state.reshape(-1))
+        parts["mode"] = F.cross_entropy(p["mode"].reshape(-1, N_MODES), b.mode.reshape(-1))
+    parts["total"] = sum(parts.values(), torch.zeros((), device=out.device))
+    return parts

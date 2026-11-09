@@ -7,7 +7,11 @@
 //! * `counts`: per opponent and tile kind, a categorical over 0–4 copies, with
 //!   copies beyond what the observer has not seen masked out (the same mask as
 //!   `mask_counts` in `python/mahjong/belief/model.py`);
-//! * `tenpai`, `waits`: sigmoids; `faan`, `outcome`: softmaxes.
+//! * `tenpai`, `waits`: sigmoids; `faan`, `outcome`: softmaxes;
+//! * optional, the race heads (`models/race-belief.mjnn`, `docs/race-bot.md` §6–7):
+//!   `state` (far / one away / ready / folded) and `mode` (the opponent's last discard:
+//!   push / detour / fold), softmaxes. A file without them (`models/belief.mjnn`)
+//!   loads as before and leaves [`OpponentBelief::state`] and `mode` empty.
 //!
 //! The network reads [`crate::features::encode`], which describes the decision of
 //! the **player to act**, so a belief is always from that seat's point of view.
@@ -38,6 +42,10 @@ pub const MAX_COPIES: usize = 5;
 pub const OPPONENTS: usize = 3;
 /// Outcome classes: no win, wins on a discard, self-draws (before the hand ends).
 pub const OUTCOMES: usize = 3;
+/// Classes of the race `state` head: far, one away, ready, folded.
+pub const STATES: usize = 4;
+/// Classes of the race `mode` head: push, detour, fold.
+pub const MODE_CLASSES: usize = 3;
 /// Entries kept in the per-state cache.
 const CACHE_SIZE: usize = 64;
 
@@ -54,6 +62,11 @@ pub struct OpponentBelief {
     pub faan: [f64; FAAN_BUCKETS],
     /// P(no win), P(wins on a discard), P(self-draws), before the hand ends.
     pub outcome: [f64; OUTCOMES],
+    /// P(far), P(one away), P(ready), P(folded), when the file has the race heads.
+    pub state: Option<[f64; STATES]>,
+    /// P(push), P(detour), P(fold) for the opponent's last discard, when the file has
+    /// the race heads.
+    pub mode: Option<[f64; MODE_CLASSES]>,
 }
 
 /// The model's output for one decision: the acting seat's three opponents.
@@ -81,6 +94,8 @@ pub struct BeliefModel {
     waits: Range<usize>,
     faan: Range<usize>,
     outcome: Range<usize>,
+    state: Option<Range<usize>>,
+    mode: Option<Range<usize>>,
     cache: Mutex<Vec<(u64, Arc<BeliefOutput>)>>,
 }
 
@@ -166,30 +181,43 @@ impl BeliefModel {
         Self::from_mlp(Mlp::load(path)?).map_err(|e| format!("{}: {e}", path.display()))
     }
 
-    /// Wraps a loaded network; it must name the five heads with their sizes.
+    /// Wraps a loaded network; it must name the five heads with their sizes. The race
+    /// heads `state` and `mode` are optional (both or neither), with their sizes checked.
     pub fn from_mlp(net: Mlp) -> Result<BeliefModel, String> {
-        let head = |name: &str, per_opp: usize| {
-            let r = net
-                .output(name)
-                .ok_or_else(|| format!("not a belief model: no {name:?} output slice"))?;
-            if r.len() != OPPONENTS * per_opp {
-                return Err(format!(
-                    "output slice {name:?} has {} values, expected {}",
-                    r.len(),
-                    OPPONENTS * per_opp
-                ));
-            }
-            Ok(r)
+        let optional = |name: &str, per_opp: usize| match net.output(name) {
+            None => Ok(None),
+            Some(r) if r.len() == OPPONENTS * per_opp => Ok(Some(r)),
+            Some(r) => Err(format!(
+                "output slice {name:?} has {} values, expected {}",
+                r.len(),
+                OPPONENTS * per_opp
+            )),
         };
+        let head = |name: &str, per_opp: usize| {
+            optional(name, per_opp)?
+                .ok_or_else(|| format!("not a belief model: no {name:?} output slice"))
+        };
+        let state = optional("state", STATES)?;
+        let mode = optional("mode", MODE_CLASSES)?;
+        if state.is_some() != mode.is_some() {
+            return Err("a race model needs both the \"state\" and \"mode\" heads".into());
+        }
         Ok(BeliefModel {
             counts: head("counts", NUM_KINDS * MAX_COPIES)?,
             tenpai: head("tenpai", 1)?,
             waits: head("waits", NUM_KINDS)?,
             faan: head("faan", FAAN_BUCKETS)?,
             outcome: head("outcome", OUTCOMES)?,
+            state,
+            mode,
             net,
             cache: Mutex::new(Vec::with_capacity(CACHE_SIZE)),
         })
+    }
+
+    /// Whether the file has the race heads `state` and `mode`.
+    pub fn has_race_heads(&self) -> bool {
+        self.state.is_some()
     }
 
     /// The model's beliefs for the player to act in `state` (cached).
@@ -225,6 +253,8 @@ impl BeliefModel {
                 waits: [0.0; NUM_KINDS],
                 faan: [0.0; FAAN_BUCKETS],
                 outcome: [0.0; OUTCOMES],
+                state: None,
+                mode: None,
             };
             let counts = &y[self.counts.start + r * NUM_KINDS * MAX_COPIES..];
             for t in Tile::all_kinds() {
@@ -241,6 +271,17 @@ impl BeliefModel {
             softmax(&y[f..f + FAAN_BUCKETS], |_| true, &mut b.faan);
             let o = self.outcome.start + r * OUTCOMES;
             softmax(&y[o..o + OUTCOMES], |_| true, &mut b.outcome);
+            if let Some(head) = &self.state {
+                let mut p = [0.0; STATES];
+                softmax(&y[head.start + r * STATES..][..STATES], |_| true, &mut p);
+                b.state = Some(p);
+            }
+            if let Some(head) = &self.mode {
+                let mut p = [0.0; MODE_CLASSES];
+                let at = head.start + r * MODE_CLASSES;
+                softmax(&y[at..at + MODE_CLASSES], |_| true, &mut p);
+                b.mode = Some(p);
+            }
             b
         });
         BeliefOutput { me, opponents }

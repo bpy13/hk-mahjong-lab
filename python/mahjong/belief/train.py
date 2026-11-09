@@ -4,7 +4,10 @@
 
     python -m mahjong.belief.train --logs runs/logs/train --out models/belief.pt --epochs 5
         [--holdout runs/logs/holdout] [--discards] [--resume] [--ckpt-dir runs/belief]
-        [--log runs/belief/train.log]
+        [--log runs/belief/train.log] [--race] [--init models/belief.pt]
+
+``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
+``race_log`` example); ``--init`` warm-starts from an earlier model (``warm_start``).
 
 Each epoch visits every chunk once, in a fresh random order, loading ``--group``
 chunks at a time and shuffling the rows inside the group (a chunk is 500 hands,
@@ -30,7 +33,14 @@ import numpy as np
 import torch
 
 from mahjong.belief.logs import LogDir
-from mahjong.belief.model import Batch, BeliefConfig, BeliefNet, batch_from_rows, losses
+from mahjong.belief.model import (
+    Batch,
+    BeliefConfig,
+    BeliefNet,
+    batch_from_rows,
+    losses,
+    warm_start,
+)
 
 
 def load_group(log: LogDir, chunks: list[int]) -> Batch:
@@ -38,7 +48,12 @@ def load_group(log: LogDir, chunks: list[int]) -> Batch:
     parts = [batch_from_rows(log.chunk(c)) for c in chunks]
     if len(parts) == 1:
         return parts[0]
-    return Batch(**{k: torch.cat([getattr(p, k) for p in parts]) for k in parts[0].__dict__})
+    return Batch(
+        **{
+            k: None if getattr(parts[0], k) is None else torch.cat([getattr(p, k) for p in parts])
+            for k in parts[0].__dict__
+        }
+    )
 
 
 def evaluate_loss(net: BeliefNet, batch: Batch, device: torch.device, bs: int) -> dict[str, float]:
@@ -73,8 +88,11 @@ def train(args: argparse.Namespace) -> BeliefNet:
     device = torch.device(args.device)
     log = LogDir(args.logs)
     holdout = LogDir(args.holdout) if args.holdout and Path(args.holdout).exists() else None
-    cfg = BeliefConfig(hidden=tuple(args.hidden), discards=args.discards)
-    net = BeliefNet(cfg).to(device)
+    cfg = BeliefConfig(hidden=tuple(args.hidden), discards=args.discards, race=args.race)
+    net = BeliefNet(cfg)
+    if args.init:
+        warm_start(net, BeliefNet.load(Path(args.init)))
+    net = net.to(device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
     steps_per_epoch = max(1, log.rows // args.batch)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs * steps_per_epoch)
@@ -182,6 +200,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="also feed the discard-order block (docs/belief.md §5)",
     )
+    p.add_argument(
+        "--race",
+        action="store_true",
+        help="add the race heads state and mode (needs a race_log log; docs/race-bot.md §7)",
+    )
+    p.add_argument("--init", default=None, help="warm-start from this .pt (torso and shared heads)")
     p.add_argument("--group", type=int, default=4, help="chunks loaded and shuffled together")
     p.add_argument(
         "--max-chunks", type=int, default=0, help="use only the first N chunks (smoke runs)"
