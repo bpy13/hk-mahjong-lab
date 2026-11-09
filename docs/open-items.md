@@ -126,6 +126,15 @@ with their defaults.
   table either, unless players watch which copy). States built from a position have no kong
   events in their log, so a re-deal there misses a lock from a passed kong rob (rare).
   Job 32 (race v0 match) now runs with the rule on, since the Python extension was rebuilt.
+- **Tasks 14–15 findings (67cbf71).** (1) Risk-taking does not predict hand value in this
+  self-play field (value multipliers within 4 % of 1): Brian's "how hard they push narrows
+  what they aim to win" is not seen yet; it predicts ready-or-not and fold only. Refit after
+  the race loop, whose players weigh value. (2) The fold multipliers are not monotone (near-zero
+  risk bins fold least); used as fitted. (3) The 換章 test reads exposed melds only, so a
+  concealed flush never resets passed-tile safety. (4) Refit all tables after Task 18
+  (`cargo run --release -p mahjong-search --example fit_passed -- --belief ...`).
+  (5) 換章 as "a middle tile 3–7" carried no information (39.0 % changed vs 39.5 % for any
+  入章); "a tile of their visible flush suit" did (55 %).
 - **Requeue the poker benchmark after all hk-games tasks** (Brian, 2026-11-09). Job 28 was
   cancelled before it started (no progress lost) to unblock jobs 29–32. Requeue it unchanged:
   `hkq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
