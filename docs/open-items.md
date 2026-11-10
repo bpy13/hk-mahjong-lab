@@ -128,6 +128,44 @@ with their defaults.
   `features`, so it does not see the passed block yet; extend it before distilling;
   (2) the danger tables and `PASSED_FACTOR` refit on the new logs (`fit_danger`, `fit_passed`);
   (3) `features::encode` speed after the fix is not measured (no benchmark while jobs ran).
+- **Task 18, training half (2026-11-10).** Jobs: 41 distill (gpu, 13:09–13:21; Dou Dizhu job 39
+  cancelled after a 28-minute-old save and requeued as job 42), 43 refit (cpu), 44 match (cpu).
+  (1) Distilled network `models/cnn-distill-v2.*` (passed block, labels-v2 from belief-v2's
+  teacher, `experiments/task18-data/distill.ps1`, 12 epochs): held-out top-1 agreement with its
+  teacher 0.917 (old network with its teacher: 0.924), target 0.988 (0.989), value MSE 1.185
+  (1.255), int8 vs fp32 0.992 (0.996). `runs/distill-v2/result.json`.
+  (2) Danger tables: refitted with the rule (`fit_danger 8000`, `runs/task18-refit/`). Calibration
+  on 2,000 hands is the same as today's tables (every bucket within 0.1–0.6 points of the old
+  row; both over-predict the 4–7 % and 10–20 % buckets a little). `defensive` against three
+  `value` on the same walls: -1.77 ± 0.94 new vs -1.86 ± 0.95 old (unpaired). **Not adopted:**
+  the encoding reads the tables (danger plane, threat scalars), so new tables would shift the
+  input of belief-v2 and cnn-distill-v2, which were trained on the old tables; no gain was
+  measured. The refitted file is kept in `runs/task18-refit/danger_tables-refit.rs`.
+  (3) Belief danger calibration (`danger_check --belief`, 2,000 hands): every bucket within its
+  interval for both the old model and belief-v2; belief-v2's expected loss is closer in buckets
+  3–4 (0.290 vs observed 0.289; old 0.273).
+  (4) `fit_passed --belief models/belief-v2.mjnn` (8,000 hands): the factor is 1.0 for N ≥ 1
+  (belief-v2 already reads the passed tiles); N = 0 stays 0 (true rate 0 against an estimate of
+  0.0018). If the race bot moves to belief-v2, set `PASSED_FACTOR_MODEL` to [0, 1, 1, 1, 1].
+  (5) Duplicate match (job 44, 1,000 walls × 4 seatings, seed 2026, wall-paired bootstrap):
+  cnn-distill-v2 minus cnn-distill head to head -0.642 [-2.016, +0.802]; solo against three
+  `value`: +0.576 [-0.246, +1.454] new, +0.458 [-0.414, +1.414] old.
+  Teacher (belief-PIMC-64) with belief-v2 minus with the old belief model, head to head:
+  -0.098 [-1.782, +1.670] (`runs/matches/task18-*.json`).
+  Reading (measured): neither retrained model is shown weaker or stronger; both point
+  estimates are slightly below zero. **The hk-games pin was not moved:** the app loads no
+  belief model or network (its review, drills and bots use the danger tables, which stay
+  unchanged), so no retrained model would reach the app anyway.
+- **Task 18: switch the lab's default models to the retrained ones?**
+  **What it is:** the labeller, the race bot and later loops read `models/belief.mjnn` and
+  `models/cnn-distill.mjnn`; the retrained `-v2` files sit beside them. **Example:** the race
+  loop (Tasks 8–9) would start from `belief-v2` and `cnn-distill-v2` (passed-tile input).
+  **Why it matters:** the match shows no difference (intervals above), but only the v2 files
+  match today's encoding (`faan_shanten` fix, passed block). **Options:** (a) use the v2
+  files from now on; (b) keep the old ones. **Default: (a)** for new lab work; nothing in the
+  app changes either way.
+  Separately, the hk-games pin still sits before the `faan_shanten` fix (ba47227); moving it
+  changes the review's grading and needs the drills re-solved (orchestrator's call).
 - **Task 18: label with the old belief model now, or wait for the retrained one?** Decided: wait (Brian, 2026-11-10: "4 ok"; hk-games D74).
   **What it is:** the teacher that writes the distillation labels (64-sample search) and the
   three other seats read a belief model, a network that guesses opponents' hidden tiles.

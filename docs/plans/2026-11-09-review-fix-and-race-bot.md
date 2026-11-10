@@ -242,6 +242,11 @@ version on deals).
     half"): `faan_shanten` fix, `features::encode_passed` in the logs and the belief model's
     `--passed`; self-play logs queued (`experiments\task18-data\selfplay.ps1`); labels script
     ready, waiting for the retrained belief model. Training, refits and matches remain.
+  - Status (2026-11-10, training half): belief-v2 (job 38), labels-v2 (job 40), cnn-distill-v2
+    (job 41, top-1 0.917), refits (job 43: danger tables refitted but not adopted, calibration
+    unchanged), duplicate match (job 44): network -0.642 [-2.02, +0.80], teacher -0.098
+    [-1.78, +1.67]. Not weaker by a measured margin, not stronger; the app loads neither
+    model, so the hk-games pin stays. Open-items "Task 18, training half" has the details.
 - Phase 4's loop (job 33) waits for this phase: its logger and features add the passed-tile
   record and the risk-taking read, and it is requeued after Task 16.
 
