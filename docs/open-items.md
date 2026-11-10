@@ -198,3 +198,11 @@ with their defaults.
   `hkq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
   with script arguments `-TsOnly` (check `hkq.ps1` usage for how it passes them).
 - `fast` is about 10–15 % slower per hand after Tasks 1–2 (noisy timings).
+- **Task 18 not ticked: belief calibration reads "not within" in most buckets (slot 1, 2026-11-10).**
+  I read the raw results (`runs/belief-v2/eval.json`, `runs/belief/eval.json`, `runs/distill-v2/result.json`,
+  `runs/matches/task18-*.json` in the standalone checkout). They match the notes above:
+  distill top-1 0.917 (old 0.924), matches inside noise, danger calibration within intervals.
+  But `eval.json` marks tenpai calibration `within: false` in 5 of 6 buckets for belief-v2
+  (old belief: 6 of 6) and deal_in `within: false` in 2 of 6 for both. belief-v2 is no worse than the
+  old model, but the strict "within" check is not passed by either. Missing: a decision whether
+  "passes its existing checks" means "no worse than the old model" (then tick) or "every bucket within".
