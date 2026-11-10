@@ -18,7 +18,7 @@ pub fn waits(tiles_json: &str) -> String {
     .to_string()
 }
 
-fn parse_tile(v: &Value) -> Option<Tile> {
+pub(crate) fn parse_tile(v: &Value) -> Option<Tile> {
     let s = v.as_str()?;
     let t = s.parse::<Tile>().ok().or_else(|| {
         // Also accept the `tile.*` display keys.

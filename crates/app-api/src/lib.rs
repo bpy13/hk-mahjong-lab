@@ -8,6 +8,7 @@
 //! The shapes, keys and numbers are documented in `README.md`.
 
 pub mod api;
+pub mod discards;
 pub mod reasons;
 pub mod shapes;
 pub mod solver;
@@ -115,6 +116,12 @@ pub mod python {
             crate::waits::waits(tiles_json)
         }
 
+        /// Each discard of a hand of 5, 8, 11 or 14 tiles, best chance of winning first;
+        /// `seen_json` lists tiles seen elsewhere, may be empty (stateless).
+        pub fn best_discards(&self, tiles_json: &str, seen_json: &str) -> String {
+            crate::discards::best_discards(tiles_json, seen_json)
+        }
+
         pub fn drop_game(&mut self, game_id: &str) -> String {
             self.inner.drop_game(game_id)
         }
@@ -219,6 +226,12 @@ pub mod wasm {
         /// Tiles that complete a concealed hand of 4, 7, 10 or 13 tiles (stateless).
         pub fn waits(&self, tiles_json: &str) -> String {
             crate::waits::waits(tiles_json)
+        }
+
+        /// Each discard of a hand of 5, 8, 11 or 14 tiles, best chance of winning first;
+        /// `seen_json` lists tiles seen elsewhere, may be empty (stateless).
+        pub fn best_discards(&self, tiles_json: &str, seen_json: &str) -> String {
+            crate::discards::best_discards(tiles_json, seen_json)
         }
 
         pub fn drop_game(&mut self, game_id: &str) -> String {
