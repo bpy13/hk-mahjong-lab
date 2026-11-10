@@ -6,7 +6,9 @@ use mahjong_games::{play_out, Game, Policy};
 use mahjong_hk::{RuleSet, State};
 use mahjong_search::agent::DEFAULT_LEAF_DEPTH;
 use mahjong_search::cnn::{OUTPUT_LEN, POLICY_LEN, TARGET_LEN, UNUSED_TARGET};
-use mahjong_search::features::{encode, PLANES, STATE_LEN};
+use mahjong_search::features::{
+    encode, encode_passed, PASSED_LEN, PASSED_PLANES, PLANES, STATE_LEN,
+};
 use mahjong_search::net::top_actions;
 use mahjong_search::pimc::VALUE_LOG_SCALE;
 use mahjong_search::{
@@ -31,13 +33,18 @@ fn name(b: &mut Vec<u8>, s: &str) {
     b.extend(s.as_bytes());
 }
 
-fn tensor_list() -> Vec<(String, Vec<usize>)> {
+fn tensor_list(passed: bool) -> Vec<(String, Vec<usize>)> {
+    let (rest, planes) = if passed {
+        (REST + PASSED_PLANES * 7 + 12, PLANES + PASSED_PLANES)
+    } else {
+        (REST, PLANES)
+    };
     let mut t: Vec<(String, Vec<usize>)> = vec![
-        ("honour1.weight".into(), vec![HH, REST]),
+        ("honour1.weight".into(), vec![HH, rest]),
         ("honour1.bias".into(), vec![HH]),
         ("honour2.weight".into(), vec![HH, HH]),
         ("honour2.bias".into(), vec![HH]),
-        ("stem.weight".into(), vec![C, PLANES, K]),
+        ("stem.weight".into(), vec![C, planes, K]),
         ("stem.bias".into(), vec![C]),
     ];
     for i in 0..BLOCKS {
@@ -67,11 +74,33 @@ fn tensor_list() -> Vec<(String, Vec<usize>)> {
 /// A v3 file with pseudo-random weights; `int8` stores matrices as int8.
 /// `edit` may change the tensor list before writing (malformed-file tests).
 fn file(int8: bool, arch: &str, edit: impl Fn(&mut Vec<(String, Vec<usize>)>)) -> Vec<u8> {
+    file_with(int8, arch, Passed::No, edit)
+}
+
+/// Whether a test file reads the passed block (plan 2026-11-09 Task 18), and how.
+#[derive(Clone, Copy, PartialEq)]
+enum Passed {
+    No,
+    Yes,
+    /// The hyper-parameter and tensors of a passed network, but no `passed` slice.
+    NoSlice,
+}
+
+fn file_with(
+    int8: bool,
+    arch: &str,
+    passed: Passed,
+    edit: impl Fn(&mut Vec<(String, Vec<usize>)>),
+) -> Vec<u8> {
     let mut rng = SmallRng::seed_from_u64(5);
     let mut b = b"MJNN".to_vec();
     b.extend(3u32.to_le_bytes());
+    let mut inputs = vec![("features", 0, STATE_LEN)];
+    if passed == Passed::Yes {
+        inputs.push(("passed", STATE_LEN, PASSED_LEN));
+    }
     for slices in [
-        vec![("features", 0, STATE_LEN)],
+        inputs,
         vec![
             ("policy", 0, POLICY_LEN),
             ("target", POLICY_LEN, TARGET_LEN),
@@ -86,7 +115,7 @@ fn file(int8: bool, arch: &str, edit: impl Fn(&mut Vec<(String, Vec<usize>)>)) -
         }
     }
     name(&mut b, arch);
-    let hp = [
+    let mut hp = vec![
         ("channels", C),
         ("blocks", BLOCKS),
         ("kernel", K),
@@ -94,12 +123,15 @@ fn file(int8: bool, arch: &str, edit: impl Fn(&mut Vec<(String, Vec<usize>)>)) -
         ("merge", M),
         ("value_hidden", VH),
     ];
+    if passed != Passed::No {
+        hp.push(("passed", 1));
+    }
     b.extend((hp.len() as u32).to_le_bytes());
     for (n, v) in hp {
         name(&mut b, n);
         b.extend((v as u32).to_le_bytes());
     }
-    let mut tensors = tensor_list();
+    let mut tensors = tensor_list(passed != Passed::No);
     edit(&mut tensors);
     b.extend((tensors.len() as u32).to_le_bytes());
     for (n, dims) in tensors {
@@ -280,6 +312,76 @@ fn malformed_files_are_errors() {
         t.push(("oracle_value.weight".into(), vec![VH, 136]));
     });
     assert!(Mlp::from_bytes(&ok).is_ok());
+}
+
+// --- Plan 2026-11-09 Task 18: the passed block as more input planes -----------
+
+#[test]
+fn a_passed_network_reads_the_passed_block() {
+    let net = Mlp::from_bytes(&file_with(false, "suitcnn-1", Passed::Yes, |_| {})).unwrap();
+    assert_eq!(net.input_len(), STATE_LEN + PASSED_LEN);
+    let names: Vec<&str> = net.inputs().iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["features", "passed"]);
+    let mut changed = 0;
+    for s in live_states(30, 8) {
+        let x = net.encode_input(&s);
+        let mut want = vec![0.0; PASSED_LEN];
+        encode_passed(&s, &mut want);
+        assert_eq!(&x[STATE_LEN..], &want[..]);
+        let y = net.forward(&x);
+        assert_eq!(y, net.forward_state(&s));
+        let v: f32 = y[POLICY_LEN + TARGET_LEN..].iter().sum();
+        assert!(v.abs() < 1e-4, "values sum to {v}");
+        // Zeroing the block changes the outputs when the block is not empty.
+        if want.iter().any(|&v| v != 0.0) && net.forward(&x[..STATE_LEN]) != y {
+            changed += 1;
+        }
+    }
+    assert!(changed > 0, "the passed block never changed an output");
+
+    // Swapping suits in the features and the passed planes swaps the outputs.
+    let perm = [1, 2, 0];
+    for s in live_states(5, 9) {
+        let x = net.encode_input(&s);
+        let mut g = x.clone();
+        for (base, planes) in [(0, PLANES), (STATE_LEN, PASSED_PLANES)] {
+            for p in 0..planes {
+                for t in 0..34 {
+                    g[base + p * 34 + tile_map(t, perm)] = x[base + p * 34 + t];
+                }
+            }
+        }
+        let (y, z) = (net.forward(&x), net.forward(&g));
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4 * (1.0 + a.abs());
+        for t in 0..34 {
+            assert!(close(y[t], z[tile_map(t, perm)]), "discard {t}");
+        }
+        for i in POLICY_LEN + TARGET_LEN..OUTPUT_LEN {
+            assert!(close(y[i], z[i]));
+        }
+    }
+
+    // A passed network without its `passed` slice, or with a 26-plane stem, is refused.
+    assert!(Mlp::from_bytes(&file_with(false, "suitcnn-1", Passed::NoSlice, |_| {})).is_err());
+    let narrow = file_with(false, "suitcnn-1", Passed::Yes, |t| {
+        t[4].1 = vec![C, PLANES, K];
+    });
+    assert!(Mlp::from_bytes(&narrow).is_err());
+    // int8 passed files load too.
+    assert!(Mlp::from_bytes(&file_with(true, "suitcnn-1", Passed::Yes, |_| {})).is_ok());
+}
+
+/// The distilled network trained before Task 18 still loads and reads features only.
+#[test]
+fn the_old_distilled_network_still_loads() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/cnn-distill.mjnn");
+    if !std::path::Path::new(path).exists() {
+        return;
+    }
+    let net = Mlp::load(path).unwrap();
+    assert_eq!(net.input_len(), STATE_LEN);
+    let f = &positions(1)[0];
+    assert!(net.forward(f).iter().all(|v| v.is_finite()));
 }
 
 // --- Plan Task 16: the network's value head at the leaves of PIMC -------------

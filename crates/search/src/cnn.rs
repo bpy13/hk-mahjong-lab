@@ -29,6 +29,12 @@
 //!    fixed −10⁴. The **value** head gives four relative-seat values summing to
 //!    zero (the mean is subtracted).
 //!
+//! **Passed block** (hyper-parameter `passed` = 1; plan 2026-11-09 Task 18): the
+//! input is the features followed by [`crate::features::encode_passed`]'s block
+//! (named input slice `passed`). Its 14 tile planes become channels 26–39 of the
+//! suit tower and more honour columns of the rest block, its 12 scalars follow
+//! the feature scalars. Files without the hyper-parameter read the features only.
+//!
 //! **File** (after `b"MJNN"`, `u32 3` and the v2 named input and output
 //! slices): `u32 len` + architecture name ([`ARCH`]); `u32 n` hyper-parameters
 //! as `u32 len` + name + `u32 value`; `u32 n` tensors as `u32 len` + name,
@@ -39,8 +45,9 @@
 //! when loaded, so int8 only shrinks the file.
 
 use crate::features::{
-    encode_planes, HONOUR_KINDS, PLANES, REST_LEN, STATE_LEN, SUIT_BLOCK_LEN, SUIT_LEN,
+    HONOUR_KINDS, PASSED_LEN, PASSED_PLANES, PASSED_SCALARS, PLANES, REST_LEN, STATE_LEN, SUIT_LEN,
 };
+use mahjong_tiles::NUM_KINDS;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -150,6 +157,10 @@ struct Block {
 pub struct SuitCnn {
     channels: usize,
     kernel: usize,
+    /// Reads the passed block after the features.
+    passed: bool,
+    /// Input channels of the suit tower: 26, or 40 with the passed block.
+    planes: usize,
     honour1: Dense,
     honour2: Dense,
     stem: Conv,
@@ -232,6 +243,18 @@ impl SuitCnn {
         if k % 2 == 0 || k > SUIT_LEN {
             return Err(format!("kernel {k} must be odd and at most {SUIT_LEN}"));
         }
+        let passed = match hp.get("passed").copied().unwrap_or(0) {
+            0 => false,
+            1 => true,
+            v => return Err(format!("hyper-parameter passed is {v}, expected 0 or 1")),
+        };
+        let planes = PLANES + if passed { PASSED_PLANES } else { 0 };
+        let rest_len = REST_LEN
+            + if passed {
+                PASSED_PLANES * HONOUR_KINDS + PASSED_SCALARS
+            } else {
+                0
+            };
         let n = read_u32(r)? as usize;
         if n > 4096 {
             return Err(format!("{n} tensors"));
@@ -271,9 +294,11 @@ impl SuitCnn {
         let net = SuitCnn {
             channels: c,
             kernel: k,
-            honour1: t.dense("honour1", hh, REST_LEN)?,
+            passed,
+            planes,
+            honour1: t.dense("honour1", hh, rest_len)?,
             honour2: t.dense("honour2", hh, hh)?,
-            stem: t.conv("stem", c, PLANES, k)?,
+            stem: t.conv("stem", c, planes, k)?,
             blocks: (0..blocks)
                 .map(|i| {
                     Ok(Block {
@@ -307,6 +332,41 @@ impl SuitCnn {
             return Err(format!("unexpected tensor {extra}"));
         }
         Ok(net)
+    }
+
+    /// Whether the network reads the passed block after the features.
+    pub fn reads_passed(&self) -> bool {
+        self.passed
+    }
+
+    /// Input length: [`STATE_LEN`], plus [`PASSED_LEN`] with the passed block.
+    pub fn input_len(&self) -> usize {
+        STATE_LEN + if self.passed { PASSED_LEN } else { 0 }
+    }
+
+    /// The suit block (27 suited tiles × [`Self::planes`] channels, position-major)
+    /// and the rest block (honour columns of every plane, then the scalars), as
+    /// `python/mahjong/rl/cnn.py`'s `split_planes`. Without the passed block this
+    /// is [`crate::features::encode_planes`].
+    fn split(&self, x: &[f32]) -> (Vec<f32>, Vec<f32>) {
+        let np = self.planes;
+        let mut suits = vec![0.0f32; 3 * SUIT_LEN * np];
+        let mut rest = Vec::with_capacity(self.honour1.inp);
+        let mut blocks = vec![(&x[..STATE_LEN], PLANES, 0)];
+        if self.passed {
+            blocks.push((&x[STATE_LEN..STATE_LEN + PASSED_LEN], PASSED_PLANES, PLANES));
+        }
+        for (blk, n, first) in blocks {
+            for p in 0..n {
+                let plane = &blk[p * NUM_KINDS..(p + 1) * NUM_KINDS];
+                for (k, &v) in plane[..3 * SUIT_LEN].iter().enumerate() {
+                    suits[k * np + first + p] = v;
+                }
+                rest.extend_from_slice(&plane[3 * SUIT_LEN..]);
+            }
+            rest.extend_from_slice(&blk[n * NUM_KINDS..]);
+        }
+        (suits, rest)
     }
 
     /// Learnable values used at play time.
@@ -355,13 +415,12 @@ impl SuitCnn {
     /// One forward pass: policy (134), target (45) and value (4) outputs.
     ///
     /// # Panics
-    /// Panics if `features` is not [`STATE_LEN`] long.
-    pub fn forward(&self, features: &[f32]) -> Vec<f32> {
+    /// Panics if `input` is shorter than [`Self::input_len`].
+    pub fn forward(&self, input: &[f32]) -> Vec<f32> {
         let (c, k) = (self.channels, self.kernel);
         let pad = k / 2;
-        let mut suits = vec![0.0f32; SUIT_BLOCK_LEN];
-        let mut rest = vec![0.0f32; REST_LEN];
-        encode_planes(&features[..STATE_LEN], &mut suits, &mut rest);
+        let planes = self.planes;
+        let (suits, rest) = self.split(input);
 
         let mut h1 = vec![0.0f32; self.honour1.out];
         self.honour1.apply(&rest, &mut h1, true);
@@ -371,12 +430,12 @@ impl SuitCnn {
         // Stem, per suit (shared weights).
         let padded_len = |inp: usize| (SUIT_LEN + k - 1) * inp;
         let mut y: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; SUIT_LEN * c]);
-        let mut buf = vec![0.0f32; padded_len(PLANES.max(c))];
+        let mut buf = vec![0.0f32; padded_len(planes.max(c))];
         for s in 0..3 {
-            let b = &mut buf[..padded_len(PLANES)];
+            let b = &mut buf[..padded_len(planes)];
             b.fill(0.0);
-            b[pad * PLANES..(pad + SUIT_LEN) * PLANES]
-                .copy_from_slice(&suits[s * SUIT_LEN * PLANES..(s + 1) * SUIT_LEN * PLANES]);
+            b[pad * planes..(pad + SUIT_LEN) * planes]
+                .copy_from_slice(&suits[s * SUIT_LEN * planes..(s + 1) * SUIT_LEN * planes]);
             self.stem.apply(b, SUIT_LEN, &mut y[s]);
             y[s].iter_mut().for_each(|v| *v = v.max(0.0));
         }

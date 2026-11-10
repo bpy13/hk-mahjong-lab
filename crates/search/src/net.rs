@@ -29,7 +29,8 @@
 //! **Version 3** is the suit-shared 1-D CNN of plan Task 14 ([`crate::cnn`]):
 //! the v2 named slices (input `features`; outputs `policy`, `target`, `value`)
 //! followed by the architecture, its hyper-parameters and named tensors (fp32
-//! or int8). [`Mlp`] runs it through the same methods, so `net:` and
+//! or int8). Since plan 2026-11-09 Task 18 a v3 network may also read `passed`
+//! right after `features`. [`Mlp`] runs it through the same methods, so `net:` and
 //! `netpimc:` agents take v3 files unchanged.
 
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
@@ -191,12 +192,21 @@ impl Mlp {
         };
         if version == 3 {
             let cnn = SuitCnn::read(&mut r)?;
-            if inputs.len() != 1
-                || inputs[0].name != "features"
-                || inputs[0].range != (0..STATE_LEN)
-            {
+            let mut want = vec![Slice {
+                name: "features".into(),
+                range: 0..STATE_LEN,
+            }];
+            if cnn.reads_passed() {
+                want.push(Slice {
+                    name: "passed".into(),
+                    range: STATE_LEN..STATE_LEN + PASSED_LEN,
+                });
+            }
+            if inputs != want {
                 return Err(format!(
-                    "an MJNN v3 network reads exactly `features` 0..{STATE_LEN}"
+                    "an MJNN v3 network reads exactly `features` 0..{STATE_LEN}, and \
+                     `passed` {STATE_LEN}..{} when its passed hyper-parameter is 1",
+                    STATE_LEN + PASSED_LEN
                 ));
             }
             if let Some(s) = outputs.iter().find(|s| s.range.end > OUTPUT_LEN) {
@@ -278,7 +288,7 @@ impl Mlp {
     pub fn input_len(&self) -> usize {
         match &self.body {
             Body::Dense(layers) => layers[0].inp,
-            Body::Cnn(_) => STATE_LEN,
+            Body::Cnn(c) => c.input_len(),
         }
     }
 

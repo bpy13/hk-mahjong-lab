@@ -114,13 +114,22 @@ class Data:
         return int(self.chosen.shape[0])
 
 
-def load(labels: LabelDir, chunks: list[int], device: str, clip: float) -> Data:
-    """The rows of ``chunks`` moved to ``device`` (one chunk at a time on the CPU)."""
+def load(
+    labels: LabelDir, chunks: list[int], device: str, clip: float, passed: bool = False
+) -> Data:
+    """The rows of ``chunks`` moved to ``device`` (one chunk at a time on the CPU).
+    With ``passed``, ``x`` is the features followed by the passed block (label
+    layout 2, plan 2026-11-09 Task 18)."""
     parts: dict[str, list[torch.Tensor]] = {k: [] for k in Data.__dataclass_fields__}
     for i in chunks:
         rows = labels.chunk(i)
         chosen, weight = policy_targets(rows, clip=clip)
-        parts["x"].append(torch.from_numpy(np.ascontiguousarray(rows["features"])).to(device))
+        x = rows["features"]
+        if passed:
+            if "passed" not in (rows.dtype.names or ()):
+                raise ValueError(f"{labels.path}: the labels have no passed block (layout < 2)")
+            x = np.concatenate([x, rows["passed"]], axis=1)
+        parts["x"].append(torch.from_numpy(np.ascontiguousarray(x)).to(device))
         parts["legal"].append(torch.from_numpy(rows["legal"] > 0).to(device))
         parts["chosen"].append(torch.from_numpy(chosen).to(device))
         parts["weight"].append(torch.from_numpy(weight).to(device))
@@ -134,11 +143,12 @@ class SuitSwap:
     """:func:`mahjong.rl.cnn.augment` as GPU gathers: one random suit permutation
     per row for features, legal masks, chosen codes and target classes."""
 
-    def __init__(self, device: str) -> None:
+    def __init__(self, device: str, passed: bool = False) -> None:
         def stack(f: Any) -> torch.Tensor:
             return torch.as_tensor(np.stack([f(p) for p in PERMS]), device=device)
 
-        self.feat = stack(feature_perm)  # (6, 933): new column <- old column
+        # (6, 933), or (6, 1421) with the passed block: new column <- old column.
+        self.feat = stack(lambda p: feature_perm(p, passed))
         self.act = stack(action_perm)  # (6, 134): new code <- old code
         self.act_map = stack(action_map)  # (6, 134): old code -> new code
         tm = np.stack([np.append(target_map(p), np.arange(NUM_TARGETS, 256)) for p in PERMS])
@@ -256,16 +266,17 @@ def distill(cfg: DistillConfig, resume: bool = False) -> dict[str, Any]:
     log_line(out, f"start: {len(train)} train chunks, held out {holdout}, device {device}")
 
     t0 = time.time()
-    data = load(labels, train, device, cfg.margin_clip)
-    held = load(labels, holdout, device, cfg.margin_clip)
+    cnn_cfg = CnnConfig(**cfg.cnn)
+    data = load(labels, train, device, cfg.margin_clip, cnn_cfg.passed)
+    held = load(labels, holdout, device, cfg.margin_clip, cnn_cfg.passed)
     log_line(
         out, f"loaded {len(data)} train rows, {len(held)} held-out rows in {time.time() - t0:.0f} s"
     )
 
     torch.manual_seed(cfg.seed)
-    net = SuitCNN(CnnConfig(**cfg.cnn)).to(device)
+    net = SuitCNN(cnn_cfg).to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    swap = SuitSwap(device)
+    swap = SuitSwap(device, cnn_cfg.passed)
     steps_per_epoch = max(1, len(data) // cfg.batch)
     total = steps_per_epoch * cfg.epochs
     state: dict[str, Any] = {"epoch": 0, "step": 0, "global_step": 0, "seconds": 0.0}
@@ -420,7 +431,17 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument(
+        "--passed",
+        action="store_true",
+        help="also read the passed-tile block (labels of layout 2; plan 2026-11-09 Task 18)",
+    )
+    ap.add_argument(
+        "--threads", type=int, default=0, help="CPU threads for torch (0 = torch's default)"
+    )
     a = ap.parse_args(argv)
+    if a.threads > 0:
+        torch.set_num_threads(a.threads)
     cfg = DistillConfig(
         labels=a.labels,
         out=a.out,
@@ -434,6 +455,7 @@ def main(argv: list[str] | None = None) -> None:
         lr=a.lr,
         device=a.device,
         seed=a.seed,
+        cnn={"passed": True} if a.passed else {},
     )
     distill(cfg, resume=a.resume)
 

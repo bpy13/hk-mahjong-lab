@@ -34,6 +34,13 @@ Design (the Rust side, ``crates/search/src/cnn.rs``, runs the same network):
   only (Suphx-style oracle critic, idea 5b); the exported network leaves it out,
   which equals feeding zeros.
 
+* **Passed block** (``passed=True``; plan 2026-11-09 Task 18): the input is the 933
+  features followed by the 488 values of ``features::encode_passed``. Its 14 tile
+  planes join the 26 feature planes as extra channels of the suit tower (40 in all)
+  and of the honour columns; its 12 scalars join the rest block. Suit swaps permute
+  its planes like the feature planes, so the network stays suit-equivariant.
+  Networks without it (``passed=False``, every file before Task 18) are unchanged.
+
 Defaults (C = 128, 6 blocks, 512-wide dense parts) give about 2.2 M parameters and
 about 18 M multiply-adds per position, so one forward pass on one thread stays near
 the 5 ms target; ``net_speed`` measures it. No normalisation layers: the export
@@ -72,6 +79,11 @@ ARCH = "suitcnn-1"
 #: Codes of the global actions read from the honour-and-global layer.
 GLOBAL_CODES = (34, 103, 104, 105, 106)
 
+#: ``features::encode_passed``: 14 tile planes, then 12 scalars.
+PASSED_PLANES = 14
+PASSED_SCALARS = 12
+PASSED_LEN = PASSED_PLANES * 34 + PASSED_SCALARS
+
 assert SCALARS == 49 and NUM_ACTIONS == 134
 
 
@@ -85,18 +97,30 @@ class CnnConfig:
     value_hidden: int = 256
     #: The value head also reads the oracle block (training only, never exported).
     oracle: bool = False
+    #: The input also holds the passed-tile block after the features (Task 18).
+    passed: bool = False
 
 
-def split_planes(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def input_len(passed: bool) -> int:
+    """Input width: the features, plus the passed block when the network reads it."""
+    return STATE_LEN + (PASSED_LEN if passed else 0)
+
+
+def split_planes(x: torch.Tensor, passed: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
     """``features::encode_planes``: ``(B, 933)`` -> suits ``(B, 3, 26, 9)`` and
-    rest ``(B, 231)`` (honours plane-major, then the scalars)."""
+    rest ``(B, 231)`` (honours plane-major, then the scalars). With ``passed`` the
+    input is ``(B, 1421)``; the passed planes follow as channels 26-39 of the suits,
+    and the rest block continues with their honour columns and the 12 scalars."""
     b = x.shape[0]
-    planes = x[:, : PLANES * 34].reshape(b, PLANES, 34)
-    suits = planes[:, :, : 3 * SUIT_LEN].reshape(b, PLANES, 3, SUIT_LEN).permute(0, 2, 1, 3)
-    rest = torch.cat(
-        [planes[:, :, 3 * SUIT_LEN :].reshape(b, PLANES * HONOURS), x[:, PLANES * 34 :]], 1
-    )
-    return suits, rest
+    blocks = [(x[:, :STATE_LEN], PLANES)]
+    if passed:
+        blocks.append((x[:, STATE_LEN : STATE_LEN + PASSED_LEN], PASSED_PLANES))
+    suits, rest = [], []
+    for blk, n in blocks:
+        planes = blk[:, : n * 34].reshape(b, n, 34)
+        suits.append(planes[:, :, : 3 * SUIT_LEN].reshape(b, n, 3, SUIT_LEN).permute(0, 2, 1, 3))
+        rest += [planes[:, :, 3 * SUIT_LEN :].reshape(b, n * HONOURS), blk[:, n * 34 :]]
+    return torch.cat(suits, 2), torch.cat(rest, 1)
 
 
 class Block(nn.Module):
@@ -133,9 +157,11 @@ class SuitCNN(nn.Module):
         c, k, hh, m, vh = cfg.channels, cfg.kernel, cfg.honour_hidden, cfg.merge, cfg.value_hidden
         if k % 2 == 0 or k > SUIT_LEN:
             raise ValueError(f"kernel {k} must be odd and at most {SUIT_LEN}")
-        self.honour1 = nn.Linear(REST_LEN, hh)
+        self.in_planes = PLANES + (PASSED_PLANES if cfg.passed else 0)
+        rest_len = REST_LEN + (PASSED_PLANES * HONOURS + PASSED_SCALARS if cfg.passed else 0)
+        self.honour1 = nn.Linear(rest_len, hh)
         self.honour2 = nn.Linear(hh, hh)
-        self.stem = nn.Conv1d(PLANES, c, k, padding=k // 2)
+        self.stem = nn.Conv1d(self.in_planes, c, k, padding=k // 2)
         self.blocks = nn.ModuleList([Block(c, 2 * c + hh, k) for _ in range(cfg.blocks)])
         self.merge = nn.Linear(2 * c + hh, m)
         self.zproj = nn.Linear(m, c)
@@ -151,15 +177,20 @@ class SuitCNN(nn.Module):
     def forward(
         self, x: torch.Tensor, oracle: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """``x``: features ``(B, 933)``; ``oracle``: ``(B, 136)`` or None (zeros).
+        """``x``: features ``(B, 933)``, or features and passed block ``(B, 1421)``
+        when ``cfg.passed``; ``oracle``: ``(B, 136)`` or None (zeros).
 
         Returns policy logits ``(B, 134)``, target logits ``(B, 45)`` and values
         ``(B, 4)`` (relative seats, summing to zero).
         """
         b = x.shape[0]
-        suits, rest = split_planes(x)
+        if x.shape[1] != input_len(self.cfg.passed):
+            raise ValueError(
+                f"input has {x.shape[1]} columns, expected {input_len(self.cfg.passed)}"
+            )
+        suits, rest = split_planes(x, self.cfg.passed)
         h = F.relu(self.honour2(F.relu(self.honour1(rest))))
-        y = F.relu(self.stem(suits.reshape(b * 3, PLANES, SUIT_LEN)))
+        y = F.relu(self.stem(suits.reshape(b * 3, self.in_planes, SUIT_LEN)))
         for blk in self.blocks:
             _, ctx_in = _pool(y, h)
             y = blk(y, ctx_in)
@@ -232,11 +263,16 @@ def _tile_perm(perm: tuple[int, int, int]) -> npt.NDArray[np.int64]:
     return src
 
 
-def feature_perm(perm: tuple[int, int, int]) -> npt.NDArray[np.int64]:
-    """Column order that swaps suits in a features row (``x[:, feature_perm(p)]``)."""
+def feature_perm(perm: tuple[int, int, int], passed: bool = False) -> npt.NDArray[np.int64]:
+    """Column order that swaps suits in a features row (``x[:, feature_perm(p)]``);
+    with ``passed``, in a row of features followed by the passed block."""
     t = _tile_perm(perm)
     planes = (np.arange(PLANES)[:, None] * 34 + t[None, :]).reshape(-1)
-    return np.concatenate([planes, np.arange(PLANES * 34, STATE_LEN)])
+    out = [planes, np.arange(PLANES * 34, STATE_LEN)]
+    if passed:
+        pp = STATE_LEN + (np.arange(PASSED_PLANES)[:, None] * 34 + t[None, :]).reshape(-1)
+        out += [pp, np.arange(STATE_LEN + PASSED_PLANES * 34, STATE_LEN + PASSED_LEN)]
+    return np.concatenate(out)
 
 
 def oracle_perm(perm: tuple[int, int, int]) -> npt.NDArray[np.int64]:
@@ -373,9 +409,14 @@ def export(model: SuitCNN, path: str | Path, int8: bool = False) -> int:
         "merge": cfg.merge,
         "value_hidden": cfg.value_hidden,
     }
+    inputs = [("features", 0, STATE_LEN)]
+    if cfg.passed:
+        # Only networks that read the block say so: older files stay byte-identical.
+        hp["passed"] = 1
+        inputs.append(("passed", STATE_LEN, PASSED_LEN))
     tensors = [(n, p) for n, p in model.state_dict().items() if not n.startswith("oracle")]
     out = bytearray(b"MJNN" + struct.pack("<I", 3))
-    out += _slices([("features", 0, STATE_LEN)])
+    out += _slices(inputs)
     out += _slices(
         [
             ("policy", 0, NUM_ACTIONS),

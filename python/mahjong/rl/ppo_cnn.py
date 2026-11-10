@@ -293,6 +293,9 @@ def load_init(path: Path | None, cfg: CnnConfig | None = None) -> SuitCNN:
     if path is None:
         return SuitCNN(CnnConfig(**{**asdict(cfg or CnnConfig()), "oracle": True}))
     ckpt = torch.load(path, map_location="cpu")
+    if ckpt["cfg"].get("passed"):
+        # The rollouts feed `features` only (plan 2026-11-09 Task 18 left PPO as it was).
+        raise ValueError(f"{path}: reads the passed block, which PPO does not feed yet")
     net = SuitCNN(CnnConfig(**{**ckpt["cfg"], "oracle": True}))
     missing, unexpected = net.load_state_dict(ckpt["state"], strict=False)
     if unexpected or any(not m.startswith("oracle") for m in missing):

@@ -12,6 +12,7 @@ from mahjong._core import net_forward, teacher_data
 from mahjong.rl.cnn import (
     NUM_TARGETS,
     OUTPUT_LEN,
+    PASSED_LEN,
     PERMS,
     STATE_LEN,
     CnnConfig,
@@ -95,8 +96,43 @@ def test_augment_keeps_moves_legal_and_logits_attached(model: SuitCNN, positions
 
 def _rust(path: Path, x: np.ndarray) -> np.ndarray:
     out, (inp, n_out) = net_forward(str(path), x.astype("<f4").tobytes())
-    assert (inp, n_out) == (STATE_LEN, OUTPUT_LEN)
+    assert (inp, n_out) == (x.shape[1], OUTPUT_LEN)
     return np.frombuffer(out, dtype="<f4").reshape(len(x), n_out)
+
+
+def _with_passed(f: np.ndarray, seed: int = 3) -> np.ndarray:
+    """Features followed by a random sparse passed block (values in {0, 1/4, 1/2, 1})."""
+    rng = np.random.default_rng(seed)
+    block = rng.choice([0.0, 0.0, 0.0, 0.25, 0.5, 1.0], size=(len(f), PASSED_LEN))
+    return np.concatenate([f, block.astype(np.float32)], 1)
+
+
+def test_passed_network_is_equivariant_and_runs_the_same_in_rust(positions, tmp_path) -> None:
+    """Plan 2026-11-09 Task 18: the passed block as more planes and scalars."""
+    f, _, _ = positions
+    torch.manual_seed(1)
+    net = SuitCNN(CnnConfig(channels=16, blocks=2, honour_hidden=32, merge=32, passed=True))
+    net.eval()
+    x = torch.from_numpy(_with_passed(f[:200]))
+    with pytest.raises(ValueError):
+        net(x[:, :STATE_LEN])
+    p, t, v = net(x)
+    # The block matters.
+    p0, _, _ = net(torch.cat([x[:, :STATE_LEN], torch.zeros(200, PASSED_LEN)], 1))
+    assert not torch.allclose(p, p0)
+    for perm in PERMS[1:]:
+        ps, ts, vs = net(x[:, torch.from_numpy(feature_perm(perm, passed=True))])
+        assert torch.allclose(ps, p[:, torch.from_numpy(action_perm(perm))], atol=1e-4)
+        assert torch.allclose(ts, t[:, torch.from_numpy(target_perm(perm))], atol=1e-4)
+        assert torch.allclose(vs, v, atol=1e-4)
+    path = tmp_path / "passed.mjnn"
+    export(net, path)
+    got = _rust(path, x.numpy())
+    assert np.abs(got - outputs(net, x).numpy()).max() < 1e-4
+    # A network without the block exports exactly as before (no `passed` field).
+    plain = tmp_path / "plain.mjnn"
+    export(SuitCNN(CnnConfig(channels=8, blocks=1, honour_hidden=16, merge=16)), plain)
+    assert b"passed" not in plain.read_bytes()
 
 
 def test_export_runs_the_same_in_rust(model: SuitCNN, positions, tmp_path: Path) -> None:

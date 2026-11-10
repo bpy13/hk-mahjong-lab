@@ -16,7 +16,9 @@ import pytest
 import torch
 from mahjong.rl.cnn import (
     NUM_TARGETS,
+    PASSED_LEN,
     PERMS,
+    STATE_LEN,
     action_map,
     action_perm,
     feature_perm,
@@ -117,6 +119,62 @@ def test_distill_trains_exports_and_resumes(tmp_path: Path) -> None:
     cfg.epochs = 2
     longer = distill(cfg, resume=True)
     assert [h["epoch"] for h in longer["history"]] == [0, 1]
+
+
+def test_suit_swap_with_the_passed_block() -> None:
+    rng = np.random.default_rng(1)
+    n = 12
+    x = rng.random((n, STATE_LEN + PASSED_LEN)).astype(np.float32)
+    which = np.arange(n) % len(PERMS)
+    swap = SuitSwap("cpu", passed=True)
+    tx, _, _, _ = swap.apply(
+        torch.from_numpy(which),
+        torch.from_numpy(x),
+        torch.zeros((n, 134), dtype=torch.bool),
+        torch.zeros(n, dtype=torch.int64),
+        torch.zeros(n, dtype=torch.int64),
+    )
+    for r in range(n):
+        assert np.array_equal(tx[r].numpy(), x[r, feature_perm(PERMS[which[r]], passed=True)])
+
+
+def test_distill_with_the_passed_block(tmp_path: Path) -> None:
+    """Plan 2026-11-09 Task 18: a passed network trains on layout-2 labels and its
+    export runs in Rust (the int8 check reads the 1,421-wide input)."""
+    src = ROOT / "runs" / "labels-v2"
+    if not (src / "chunk-00000.bin").exists():
+        pytest.skip("no layout-2 labels")
+    labels = _small_label_dir(src, tmp_path / "labels")
+    cfg = DistillConfig(
+        labels=str(labels),
+        out=str(tmp_path / "distill"),
+        models=str(tmp_path / "models"),
+        name="tiny-passed",
+        epochs=1,
+        minutes=5,
+        batch=64,
+        warmup_steps=2,
+        device="cpu",
+        int8_check_rows=100,
+        cnn={
+            "channels": 8,
+            "blocks": 1,
+            "honour_hidden": 16,
+            "merge": 16,
+            "value_hidden": 8,
+            "passed": True,
+        },
+    )
+    res = distill(cfg)
+    assert res["train_rows"] == 200
+    assert 0.0 <= res["int8_top1_agreement_with_fp32"] <= 1.0
+    # Old labels (layout 1) have no passed block: refused, not silently zero.
+    old = _labels()
+    if old is not None and "passed" not in (LabelDir(old).dtype.names or ()):
+        cfg.labels = str(_small_label_dir(old, tmp_path / "old"))
+        cfg.out = str(tmp_path / "o2")
+        with pytest.raises(ValueError):
+            distill(cfg)
 
 
 def test_distill_refuses_overlapping_chunks(tmp_path: Path) -> None:
