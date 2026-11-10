@@ -250,6 +250,25 @@ version on deals).
 - Phase 4's loop (job 33) waits for this phase: its logger and features add the passed-tile
   record and the risk-taking read, and it is requeued after Task 16.
 
+## Phase 7 – Strength checks (opus; added 2026-11-10 on Brian's word "Yes, add all three")
+Every strength number so far is measured against our own `value` bot. No public bot or game
+records exist for Hong Kong rules (Mortal plays Japanese rules only). Two checks follow. The
+first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 22 of
+`2026-10-29-mahjong-bot-build.md`, waiting on his hands; nothing new is planned for it.
+
+- [ ] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]**
+  - What: train one seat from fresh weights with `train-core` PPO (2026-10-29 plan, Task 17)
+    while three seats play the bot the app ships as its top mahjong level, frozen. The attacker
+    looks only for that bot's weaknesses.
+  - Files: `experiments/exploiter/run.ps1` (`hkq.ps1 add -Lane gpu`; resumes from its latest
+    checkpoint); a frozen-opponents option in the PPO trainer if it lacks one, with a short test;
+    `docs/study-results/exploiter.md`.
+  - Done when: the results file names the bot attacked and its spec string, and records the
+    attacker's gain per hand against it in a 24-seating duplicate match with a 95 % interval.
+    It also records a check that the attacker learns at all: a 2-hour attacker gains more
+    against three `value` than against the shipped bot. No bar is set: a gain whose interval
+    excludes 0 goes to `docs/open-items.md` and to Brian.
+
 ## Shared resources
 `crates/search/src/bots.rs` (Tasks 1, 2, 6: serial), the job queue (Tasks 4, 7, 8, 9), the GPU
 lane (Task 8, after Dou Dizhu's block), `models/` (Task 8 adds a file; nothing is replaced).
