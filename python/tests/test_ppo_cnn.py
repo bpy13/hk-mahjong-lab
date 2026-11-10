@@ -180,3 +180,15 @@ def test_unpaired_run_with_random_init(tmp_path: Path) -> None:
     )
     state = json.loads((out / "state.json").read_text())
     assert state["iteration"] == 2 and state["anchor_weight"] == 0.0
+
+
+def test_frozen_opponents_run(tmp_path: Path) -> None:
+    """An exploiter run: the three other seats are a frozen Rust agent."""
+    out = tmp_path / "exploiter"
+    main(
+        ["--init", "none", "--minutes", "5", "--out", str(out), "--envs", "16"]
+        + ["--device", "cpu", "--hands-per-iter", "8", "--opponents", "value"]
+        + ["--max-iterations", "2"]
+    )
+    log = json.loads((out / "log.json").read_text())
+    assert len(log) == 2 and all(np.isfinite(e["policy_loss"]) for e in log)

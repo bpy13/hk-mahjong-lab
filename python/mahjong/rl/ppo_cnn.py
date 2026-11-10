@@ -189,6 +189,9 @@ class PpoCnnConfig:
     log_seconds: float = 60.0
     resume: bool = False
     torch_threads: int = 1
+    #: Agent spec (e.g. ``pimc:samples=96,candidates=4``) for the three other seats, played
+    #: frozen in Rust in both copies of a paired game; None = the usual self/baseline play.
+    opponents: str | None = None
     #: Stop after this many iterations (tests); None = run until the time is up.
     max_iterations: int | None = None
 
@@ -385,9 +388,11 @@ class Trainer:
         env_seed = cfg.seed * 7919 + self.iteration
         if cfg.paired:
             base = None if cfg.baseline == "init" else cfg.baseline
-            self.env = HkVecEnv(cfg.envs, env_seed, paired=True, baseline=base, min_faan=0)
+            self.env = HkVecEnv(
+                cfg.envs, env_seed, opponents=cfg.opponents, paired=True, baseline=base, min_faan=0
+            )
         else:
-            self.env = HkVecEnv(cfg.envs, env_seed, min_faan=0)
+            self.env = HkVecEnv(cfg.envs, env_seed, opponents=cfg.opponents, min_faan=0)
         self.buffer = Buffer(cfg.envs)
 
     # --- Checkpoints ------------------------------------------------------------
@@ -819,6 +824,11 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--eval-minutes", type=float, default=120.0)
     ap.add_argument("--eval-walls", type=int, default=200)
     ap.add_argument("--max-iterations", type=int, default=None)
+    ap.add_argument(
+        "--opponents",
+        default=None,
+        help="agent spec for the three other seats, frozen (an exploiter run)",
+    )
     ap.add_argument("--torch-threads", type=int, default=1)
     ap.add_argument(
         "--priority",
@@ -866,6 +876,7 @@ def main(argv: list[str] | None = None) -> None:
         resume=args.resume,
         max_iterations=args.max_iterations,
         torch_threads=args.torch_threads,
+        opponents=args.opponents,
     )
     train(cfg)
 
