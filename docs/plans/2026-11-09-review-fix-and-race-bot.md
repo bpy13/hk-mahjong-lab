@@ -231,7 +231,7 @@ version on deals).
     positions, a ui string in three languages saying why Win is not offered.
   - Done when: `npm test`, `npm run build`, server `pytest` pass; a browser check of a hand
     where the player passes a win and then cannot win on the same tile.
-- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu)
+- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu) (waiting: Brian, does a recorded miss count as done; belief-v2 tenpai calibration is outside its interval in 5 of 6 buckets, the old model in 6 of 6; open-items)
   - Files: feature encoding (add the passed-tile record and 摸打 / 入章), labels, the belief
     model, the danger tables, the teacher's distilled network; the `faan_shanten` fix from
     open-items rides along (it also changes the encoding).
