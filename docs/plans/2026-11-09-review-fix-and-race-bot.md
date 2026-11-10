@@ -256,7 +256,7 @@ records exist for Hong Kong rules (Mortal plays Japanese rules only). Two checks
 first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 22 of
 `2026-10-29-mahjong-bot-build.md`, waiting on his hands; nothing new is planned for it.
 
-- [ ] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]** (waiting: queue job 54, gpu lane; code, test and job done, results go in docs/study-results/exploiter.md)
+- [ ] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]** (waiting: queue job 70 (was 54, re-queued 2026-11-11), gpu lane; code, test and job done, results go in docs/study-results/exploiter.md)
   - What: train one seat from fresh weights with `train-core` PPO (2026-10-29 plan, Task 17)
     while three seats play the bot the app ships as its top mahjong level, frozen. The attacker
     looks only for that bot's weaknesses.
