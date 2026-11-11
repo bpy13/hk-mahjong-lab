@@ -181,3 +181,28 @@ a smaller margin (`calm=10` -5.30, `calm=40,power=4` -3.11, `calm=40,power=2` -1
 remaining gap is in the race value's mid-game and claim choices, not measured here.
 The loop is re-queued in the gpu lane (job 97, `experiments/race_loop.ps1 -Repo <this clone>
 -Root runs\race-t20`, because it trains `race-belief` heads and refits the tables on the new bot).
+
+## Task 21: taking or passing a win
+
+Method: `cargo run --release -p mahjong-search --example pass_win -- 1000` (new). Each of 1,000
+walls is played four times (race seat rotated) against three `value` bots, once with `race`
+(passing a win allowed, `docs/race-bot.md` §4.5) and once with `race:passwin=off`, same random
+stream; hands without a pass are identical, so the paired difference is what the passes earned.
+
+| | Result |
+|---|---|
+| With passing | -2.92 ± 1.10 per hand (95 %) |
+| Without passing | -2.89 ± 1.09 per hand |
+| Paired difference | **-0.03 ± 0.16** per hand (no measurable effect) |
+| Hands with a pass | 33 of 4,000 (0.8 %), 35 passes; mean win value passed 30.3 points |
+| Those 33 hands | with passing +24.2 ± 19.8 (I won 17); without +28.1 ± 7.0 (I won 33); paired -3.9 ± 18.9 |
+
+Reading: the bot passes a win in under 1 % of hands, because it needs a much bigger wait still
+live and every opponent far. Where it passes it wins half as often as when it takes the win,
+and the points are lower on average, but the interval (±18.9 over 33 hands) includes zero, so
+passing neither helps nor hurts measurably. The default stays on, as Brian asked
+(2026-11-11); `passwin=off` is the safe setting. (The match with passing is -2.92, not the
+Task 20 figure -1.97: that was a different set of walls, 1,000 walls seeded 1 there, 1000+ here.)
+Unit tests (`crates/search/tests/race_bot.rs`): a 5-faan discard win with an 8-faan wait live,
+60 tiles left, every opponent far: passed; same hand with an opponent 90 % ready, or 6 tiles
+left: taken; after the pass the tile is locked for seat 0 while seat 2 is on turn.

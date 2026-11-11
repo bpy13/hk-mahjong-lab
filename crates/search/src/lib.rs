@@ -57,7 +57,7 @@ pub use pimc::{
     pimc, pimc_anchored, pimc_with, pimc_with_leaf, shortlist, shortlist_anchored, ActionStats,
     Analysis, LeafValue, PimcConfig, Rollout,
 };
-pub use race::{Mode, RaceBot, RaceConfig, RaceDecision, RaceTerms};
+pub use race::{Mode, RaceBot, RaceConfig, RaceDecision, RaceTerms, WinChoice};
 pub use reasons::{Reason, ReasonArgs, ReasonKey};
 pub use solo::{solo, SoloStats};
 pub use tournament::{

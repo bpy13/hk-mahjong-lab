@@ -303,7 +303,7 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
     seats rotated) is reported with its interval; the loop is re-queued in the cpu lane through
     `hkq.ps1` only if the match beats today's -9.4 by more than its interval. Post the match
     result to the inbox (checkpoint) whether or not it wins.
-- [ ] **Task 21: The race bot decides whether to take a win or pass it for a bigger hand** (fable: method open) needs: Task 20 (taken: slot 2, 2026-11-11 15:00)
+- [x] **Task 21: The race bot decides whether to take a win or pass it for a bigger hand** (fable: method open) needs: Task 20 (-0.03 ± 0.16 vs no passing, 33 of 4,000 hands pass; study-results/race-bot.md Task 21)
   - Why: today `race.rs` takes every legal win (`docs/race-bot.md` Â§4.5). Brian, 2026-11-11:
     "Yes, that's the whole point"; "So yes the race bot should also learn whether to take the win or pass it up more greedily especially when it is obviously ahead of other players (so almost no defensive consideration)".
   - What: score a pass of a discard win or a self-draw win as one more candidate. Win now:

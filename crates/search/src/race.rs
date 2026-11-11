@@ -152,6 +152,9 @@ pub struct RaceConfig {
     pub calm_margin: f64,
     /// Exponent of the calm weight.
     pub calm_power: f64,
+    /// Task 21: a legal win is one more candidate, valued against the race value of
+    /// passing it (§4.5). Off: every legal win is taken. Spec `passwin=on|off`.
+    pub pass_win: bool,
     /// `τ_threat`: an unfolded opponent with `p_O + p_R` above it gets a mode (§5.1).
     pub threat: f64,
     /// `a_o`: an opponent's chance per round to move far → one away, per wall bucket
@@ -202,6 +205,7 @@ impl Default for RaceConfig {
             tie_margin: 0.5,
             calm_margin: 100.0,
             calm_power: 1.0,
+            pass_win: true,
             threat: 0.2,
             opp_a: FIT_A,
             opp_b: FIT_B,
@@ -247,7 +251,7 @@ impl RaceConfig {
                 return Ok(());
             }
             "q" => return probabilities(k, v).map(|x| self.q = x),
-            "passed" | "risk" => {
+            "passed" | "risk" | "passwin" => {
                 let on = match v {
                     "on" => true,
                     "off" => false,
@@ -255,6 +259,8 @@ impl RaceConfig {
                 };
                 if k == "passed" {
                     self.passed = on;
+                } else if k == "passwin" {
+                    self.pass_win = on;
                 } else {
                     self.risk = on;
                 }
@@ -366,8 +372,22 @@ pub struct RaceTerms {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RaceDecision {
     pub action: Action,
-    /// Every candidate valued, best `equity` first (empty when a win was declared).
+    /// Every candidate valued, best `equity` first (empty when a win was taken
+    /// without valuing a pass, i.e. `passwin=off`).
     pub candidates: Vec<RaceTerms>,
+    /// Task 21: when a win was legal, its payment now (points) and the equity of the
+    /// best way to pass it; `None` when no win was legal or passing was not valued.
+    pub win_choice: Option<WinChoice>,
+}
+
+/// A legal win weighed against passing it (Task 21).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WinChoice {
+    /// What the win pays me: points per share × shares.
+    pub win: f64,
+    /// Equity of the best pass (a pass of the claim window, or the best discard after
+    /// a self-draw).
+    pub pass: f64,
 }
 
 // ----- The bot. -----
@@ -915,13 +935,15 @@ impl RaceBot {
     }
 
     fn decide_among(&self, state: &State, legal: &[Action]) -> RaceDecision {
-        if let Some(&w) = legal
+        let win = legal
             .iter()
-            .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
-        {
+            .copied()
+            .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin));
+        if let (Some(w), false) = (win, self.config.pass_win) {
             return RaceDecision {
                 action: w,
                 candidates: Vec::new(),
+                win_choice: None,
             };
         }
         let me = state.current_player().expect("the hand is not over");
@@ -1047,7 +1069,42 @@ impl RaceBot {
                 .find(|c| c.action == a)
                 .map_or(f64::NEG_INFINITY, |c| c.equity)
         };
-        let action = if state.in_claim() || state.in_rob() {
+        let mut win_choice = None;
+        let action = if let Some(w) = win {
+            // §4.5: win now against the best pass. Only a pass worth more than the
+            // win by `tie_margin` is taken.
+            let score = if w == Action::Win {
+                state.claim_score(me)
+            } else {
+                state.self_drawn_score()
+            };
+            let faan = score.map_or(state.rules().min_faan, |s| s.faan);
+            let shares = if w == Action::Win && table.liable_me.is_none() {
+                1.0
+            } else {
+                3.0
+            };
+            let now = points(state.rules(), faan) * shares;
+            let best_discard = terms
+                .iter()
+                .filter(|c| matches!(c.action, Action::Discard(_)))
+                .max_by(|a, b| a.equity.total_cmp(&b.equity));
+            let pass = if w == Action::Win {
+                eq(Action::Pass)
+            } else {
+                best_discard.map_or(f64::NEG_INFINITY, |c| c.equity)
+            };
+            win_choice = Some(WinChoice { win: now, pass });
+            if pass > now + margin {
+                if w == Action::Win {
+                    Action::Pass
+                } else {
+                    best_discard.map_or(w, |c| c.action)
+                }
+            } else {
+                w
+            }
+        } else if state.in_claim() || state.in_rob() {
             let pass = eq(Action::Pass);
             match terms.iter().find(|c| c.action != Action::Pass) {
                 Some(c) if c.equity > pass + margin => c.action,
@@ -1088,6 +1145,7 @@ impl RaceBot {
         RaceDecision {
             action,
             candidates: terms,
+            win_choice,
         }
     }
 

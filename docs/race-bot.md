@@ -224,7 +224,20 @@ concealed tile, reserve 0).
 A claim is valued as `max_d E(Discard(d))` over the hand after the claim (`after_claim`,
 `bots.rs`), with the turn order after the claim (my draws `n_me` shrink or grow). A pass
 keeps the hand and the current order. Kongs as in `ev-bot.md` §2.1 (replacement draw adds
-nothing). A legal win is always taken.
+nothing).
+
+**A legal win is one more candidate** (Task 21, `passwin=on`, the default; `passwin=off` takes
+every legal win as before). Win now is what the win pays: `points(faan) × shares`, with the
+faan of the actual win (`claim_score` / `self_drawn_score`, so a self-draw includes its +1)
+and one share for a discard win (three when I am liable, §8.3) or three for a self-draw.
+Pass is the race value of the hand kept: for a discard win the `Pass` candidate of the claim
+window; for a self-draw the best discard of the 14 tiles. The win is taken unless the pass is
+worth more than `win + tie_margin`. Nothing special is added for "far ahead": the race's own
+terms do it. When the opponents are far, their loss terms are small and the pass is judged on
+my chances; when one is likely ready, or the wall is short, the pass loses its later wins and
+the win is taken. The engine enforces the lock on a passed discard win (`crates/hk` Task 12);
+the race value of the kept hand still counts the passed tile among its waits, which only
+matters when copies of it are live (none are in the test hand).
 
 ### 4.6 Honour tiles that give faan
 

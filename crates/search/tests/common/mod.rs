@@ -83,6 +83,16 @@ pub struct Setup<'a> {
 }
 
 pub fn build(s: Setup) -> State {
+    build_with(s, None)
+}
+
+/// Like [`build`], but seat 0 holds 13 tiles and decides on `tile` just discarded by
+/// seat `from` (`last_drawn` is ignored).
+pub fn build_claim(s: Setup, tile: &str, from: usize) -> State {
+    build_with(s, Some((t(tile), from)))
+}
+
+fn build_with(s: Setup, claim: Option<(Tile, usize)>) -> State {
     let mut used = [0u8; NUM_KINDS];
     let mut hands = [TileCounts::new(); 4];
     for (p, hand) in hands.iter_mut().enumerate() {
@@ -99,6 +109,9 @@ pub fn build(s: Setup) -> State {
         for x in parse_tiles(h).unwrap() {
             used[x.index() as usize] += 1;
         }
+    }
+    if let Some((x, _)) = claim {
+        used[x.index() as usize] += 1;
     }
     let keep: Vec<Tile> = parse_tiles(s.keep).unwrap();
     // Kinds in fill order: the ones not kept first.
@@ -131,6 +144,9 @@ pub fn build(s: Setup) -> State {
     for (i, x) in take(river_len, &mut used).into_iter().enumerate() {
         river.push(((i + 1) % 4, x, false));
     }
+    if let Some((x, from)) = claim {
+        river.push((from, x, false));
+    }
     let bonus = [
         vec![],
         parse_tiles("F1 F2 F3").unwrap(),
@@ -144,8 +160,11 @@ pub fn build(s: Setup) -> State {
         river,
         wall_remaining: s.wall,
         to_move: 0,
-        phase: PositionPhase::Turn,
-        last_drawn: Some(t(s.last_drawn)),
+        phase: match claim {
+            Some((tile, from)) => PositionPhase::Claim { tile, from },
+            None => PositionPhase::Turn,
+        },
+        last_drawn: claim.map_or_else(|| Some(t(s.last_drawn)), |_| None),
         kong_chain: 0,
         liable: s.liable,
         passed_wins: Default::default(),

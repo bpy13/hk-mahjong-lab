@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{build, position_2, seat, t, Setup, Stub};
+use common::{build, build_claim, position_2, seat, t, Setup, Stub};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
 use mahjong_search::race::{Mode, RaceBot, RaceConfig, RaceDecision};
@@ -307,4 +307,62 @@ fn the_race_spec_parses_and_plays_a_tournament() {
     };
     let res = tournament(&agents, &config);
     assert_eq!(res.hands.len(), 8);
+}
+
+/// Task 21 (`docs/race-bot.md` §4.5): seat 0 holds `123m 456m 789m 33m EE`. Seat 3's 3m
+/// completes a half flush worth 5 faan now (24 points); the E that is still live wins
+/// 8 faan. `opp` is each opponent's tenpai chance.
+fn win_or_pass(wall: usize, opp: f64) -> (State, RaceDecision) {
+    let state = build_claim(
+        Setup {
+            hands: [Some("123m 456m 789m 33m EE"), None, None, None],
+            melds: Default::default(),
+            claimed: vec![],
+            last_drawn: "5s",
+            wall,
+            liable: [None; 4],
+            keep: "",
+        },
+        "3m",
+        1,
+    );
+    let far = || seat(opp, 0.9, &[], 0.1, 3);
+    let beliefs = Beliefs {
+        seats: [SeatBelief::quiet(), far(), far(), far()],
+    };
+    let bot = RaceBot::new(RaceConfig::default(), Arc::new(Stub(beliefs)));
+    let d = bot.decide(&state);
+    eprintln!("wall {wall} opp {opp}: {:?} -> {}", d.win_choice, d.action);
+    (state, d)
+}
+
+/// (a) A 3-plus-faan discard win with a bigger wait still live, many tiles left and
+/// every opponent far from winning: passed. (c) The passed tile is then locked.
+#[test]
+fn passes_a_small_win_when_far_ahead_and_the_wall_is_deep() {
+    let (mut s, d) = win_or_pass(60, 0.02);
+    assert!(s.legal_actions_vec().contains(&Action::Win));
+    assert_eq!(d.action, Action::Pass);
+    let w = d.win_choice.expect("a win was legal");
+    assert!(w.pass > w.win, "{w:?}");
+    s.apply(Action::Pass);
+    // Everyone else passes too, ending the window.
+    while s.in_claim() {
+        s.apply(Action::Pass);
+    }
+    // Seat 2 is on turn: until my next turn the passed tile cannot be won on (rules §4.4).
+    assert_eq!(s.current_player(), Some(2));
+    assert!(s.passed_win_locked(0, t("3m")));
+    assert!(s.passed_win_lock(0).contains(&t("3m")));
+}
+
+/// (b) The same hand is won when an opponent is likely ready, or few tiles are left.
+#[test]
+fn takes_the_win_when_an_opponent_is_ready_or_the_wall_is_short() {
+    assert_eq!(win_or_pass(60, 0.9).1.action, Action::Win);
+    assert_eq!(win_or_pass(6, 0.02).1.action, Action::Win);
+    // `passwin=off` always takes it.
+    let mut c = RaceConfig::default();
+    c.set("passwin", "off").unwrap();
+    assert!(!c.pass_win);
 }
