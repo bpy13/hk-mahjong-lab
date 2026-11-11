@@ -131,8 +131,9 @@ fn fitted_tables_parse_from_the_spec() {
     assert!(parse_spec(&[("a", "0.1/0.2")]).is_err());
     assert!(parse_spec(&[("q", "0.1/0.2/1.5")]).is_err());
     assert!(Agent::parse("race:q=0.08/0.04/0.01,a=0.15/0.15/0.15/0.15/0.15/0.15").is_ok());
-    // The defaults are v0's constants.
-    let d = RaceBot::default();
-    assert_eq!(d.config.opp_a, [0.15; 6]);
-    assert_eq!(d.config.q, [0.08, 0.04, 0.01]);
+    // v0's untuned constants stay in `RaceConfig::v0()`; since Task 20 the defaults are the fitted tables.
+    let v0 = mahjong_search::RaceConfig::v0();
+    assert_eq!(v0.opp_a, [0.15; 6]);
+    assert_eq!(v0.q, [0.08, 0.04, 0.01]);
+    assert_ne!(RaceBot::default().config.opp_a, v0.opp_a);
 }
