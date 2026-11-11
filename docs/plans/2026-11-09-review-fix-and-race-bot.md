@@ -137,7 +137,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
 
 ## Phase 4 – Learned estimates and the self-play loop (opus; GPU training through the queue)
 
-- [ ] **Task 8: Labels and heads** (ready: queue job 90, race loop, ended 2026-11-11 15:50 with exit 0; code done, the loop trains the heads)
+- [ ] **Task 8: Labels and heads** (ready: queue job 90, race loop, ended 2026-11-11 15:50 with exit 0; code done, the loop trains the heads) (taken: slot 1, 2026-11-11 16:00)
   - Files: self-play logger (extend `examples/selfplay_log.rs` or a new example); Python
     training under `python/mahjong/belief/` (new heads: state, mode); `models/race-belief.mjnn`.
   - Done when: the logger writes, per decision and opponent, the true state, the mode label
