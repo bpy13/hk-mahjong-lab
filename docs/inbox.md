@@ -5,6 +5,8 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 ## Open
 
+## Answered
+
 - **Should milestone 2 train five copies of the belief model to give honest confidence ranges?**
   - What it is: Task 18c's cheap confidence range (a last-layer Laplace approximation on
     `belief-v2`) failed its check: the observed rate fell inside mean ± 1 sd in 26 % of probability
@@ -16,5 +18,5 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) add "train five copies of belief-v2 and use their spread" to milestone 2 (about 5 × 6 GPU
     minutes plus an evaluation); (b) drop the confidence ranges.
   - Default: (a), as you said.
+  - Brian (2026-11-11, before the result, D101): "(a), and if fails add to Milestone 2". Recorded as (a): milestone 2 line added in hk-games `docs/milestones.md`.
 
-## Answered
