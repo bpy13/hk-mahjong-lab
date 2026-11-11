@@ -7,7 +7,7 @@
 #     with models\belief.mjnn
 # Solo rows (each network against three `value`) give absolute points per hand.
 # 1,000 walls x 4 seatings, seed 2026, passed-win rule on. Rebuilds the extension first.
-# Queue:  powershell -NoProfile -File <hkq.ps1> add -Lane cpu -Script <this file> -Label task18-match
+# Queue:  powershell -NoProfile -File <jobq.ps1> add -Lane cpu -Script <this file> -Label task18-match
 # Output: runs\matches\task18-*.json. A rerun skips finished files.
 # Check:  Get-ChildItem C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab\runs\matches\task18-*.json
 param([int]$Deals = 1000, [int]$TeacherDeals = 1000, [switch]$SkipBuild)

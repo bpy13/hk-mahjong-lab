@@ -195,8 +195,8 @@ with their defaults.
   入章); "a tile of their visible flush suit" did (55 %).
 - **Requeue the poker benchmark after all hk-games tasks** (Brian, 2026-11-09). Job 28 was
   cancelled before it started (no progress lost) to unblock jobs 29–32. Requeue it unchanged:
-  `hkq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
-  with script arguments `-TsOnly` (check `hkq.ps1` usage for how it passes them).
+  `jobq.ps1 add -Lane quiet -Script C:\Users\brian\OneDrive\Documents\workspace\repo\holdem\scripts\jobs\flop-h2h.ps1 -Label holdem-flop-h2h-ts`
+  with script arguments `-TsOnly` (check `jobq.ps1` usage for how it passes them).
 - `fast` is about 10–15 % slower per hand after Tasks 1–2 (noisy timings).
 - **Task 18 not ticked: belief calibration reads "not within" in most buckets (slot 1, 2026-11-10).**
   I read the raw results (`runs/belief-v2/eval.json`, `runs/belief/eval.json`, `runs/distill-v2/result.json`,

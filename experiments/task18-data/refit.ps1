@@ -9,7 +9,7 @@
 #   4. rebuild; the same checks with the new tables; danger_check --belief for the old and
 #      the retrained belief model; fit_passed --belief models\belief-v2.mjnn (8,000 hands)
 # Output: runs\task18-refit\*.txt. The tables file is left changed for review (git diff).
-# Queue:  powershell -NoProfile -File <hkq.ps1> add -Lane cpu -Script <this file> -Label task18-refit
+# Queue:  powershell -NoProfile -File <jobq.ps1> add -Lane cpu -Script <this file> -Label task18-refit
 # Check:  Get-ChildItem C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab\runs\task18-refit
 (Get-Process -Id $PID).ProcessorAffinity = [IntPtr]0xFFFF0
 $repo = 'C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab'

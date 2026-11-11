@@ -369,7 +369,7 @@ race-bot mode. Faan-aware shanten before and after is observable for any player.
 
 Generation `g` has a race bot `R_g` (the formula of §2–5 with estimate heads `θ_g`; `R_0` is
 v0 with the existing belief and the heuristics of §6). Steps, all through the job queue
-(B26/B27, `bot-stream\tools\queue\hkq.ps1`; cpu lane for play, gpu lane for training; the
+(B26/B27, `.claude\job-queue\jobq.ps1`; cpu lane for play, gpu lane for training; the
 GPU lane is Dou Dizhu's until about 2026-11-12):
 
 1. **Play** (cpu lane): 100,000 hands with full-information logging (§7). Seats drawn from a

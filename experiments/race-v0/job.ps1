@@ -1,6 +1,6 @@
 # Plan 2026-11-09 Task 7 (AC5): race bot v0 (trained belief) against three `value` bots,
 # 1,000 walls x 4 seatings, seed 2026, through the job queue's cpu lane:
-#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add -Lane cpu -Script <this file>
+#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add -Lane cpu -Script <this file>
 # Output: runs\matches\race-v0-belief.json (rerun overwrites; about 16 s per 1,000 walls for ev,
 # so minutes). Check: Test-Path runs\matches\race-v0-belief.json
 param([int]$Deals = 1000, [string]$Out = 'runs\matches\race-v0-belief.json')

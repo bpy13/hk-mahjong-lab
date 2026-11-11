@@ -1,7 +1,7 @@
 # Plan 2026-11-09 Task 18: retrain the belief model on the passed-win-rule logs (runs\logs-v2),
 # with the passed-tile block (--passed). Writes models\belief-v2.pt / .mjnn (the current
 # models\belief.* stay untouched), then the hold-out evaluation. GPU lane; about 6 GPU minutes.
-# Queue:  powershell -NoProfile -File <hkq.ps1> add -Lane gpu -Script <this file> -Label task18-belief
+# Queue:  powershell -NoProfile -File <jobq.ps1> add -Lane gpu -Script <this file> -Label task18-belief
 # Check:  Get-Content C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab\runs\belief-v2\train.log -Tail 3
 (Get-Process -Id $PID).ProcessorAffinity = [IntPtr]0xFFFF0
 $repo = 'C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab'

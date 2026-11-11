@@ -10,7 +10,7 @@ Done when:
 - Every task in `docs/plans/2026-11-09-review-fix-and-race-bot.md` is ticked.
 
 Rules from hk-games: GPU or long CPU jobs go through the job queue
-(`C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add`), never
+(`C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add`), never
 started directly. Never touch the standalone checkout `repo\hk-mahjong-lab` (Brian and the
 hk-games sessions work there, and queue jobs run from it); workers use the clone
 `repo\.worktrees\hk-mahjong-lab-workers` and its worktrees only. The trained models

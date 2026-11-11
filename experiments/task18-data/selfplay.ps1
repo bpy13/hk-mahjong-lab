@@ -7,7 +7,7 @@
 #    not change a queued or resumed job:
 #      powershell -NoProfile -File <this file> -Freeze
 # 2. Queue it on the cpu lane:
-#      powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add -Lane cpu -Script <this file> -Label task18-selfplay
+#      powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add -Lane cpu -Script <this file> -Label task18-selfplay
 #
 # Output: runs\logs-v2\train (25,000 hands, seed 1) then runs\logs-v2\holdout (5,000 hands,
 # field holdout, seed 2). Resumable: add the job again; each log continues after its last

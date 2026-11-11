@@ -41,7 +41,7 @@ one away never defends). The sampler itself deals the hidden tiles correctly (ch
 **Constraints (bot-stream and hk-games decisions).** Engines return keys, never display text
 (D42). Edit this repo only in its standalone checkout; hk-games moves the pin and rebuilds
 `app/src/engine/wasm/mahjong/` in the same commit. CPU- or GPU-heavy jobs go through the job
-queue (`bot-stream\tools\queue\hkq.ps1`, B26); Dou Dizhu holds the GPU lane until about
+queue (`.claude\job-queue\jobq.ps1`, B26); Dou Dizhu holds the GPU lane until about
 2026-11-12. The app-api's `PimcConfig` literal names every field (a new field breaks it).
 The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s per decision.
 
@@ -275,7 +275,7 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
   - What: train one seat from fresh weights with `train-core` PPO (2026-10-29 plan, Task 17)
     while three seats play the bot the app ships as its top mahjong level, frozen. The attacker
     looks only for that bot's weaknesses.
-  - Files: `experiments/exploiter/run.ps1` (`hkq.ps1 add -Lane gpu`; resumes from its latest
+  - Files: `experiments/exploiter/run.ps1` (`jobq.ps1 add -Lane gpu`; resumes from its latest
     checkpoint); a frozen-opponents option in the PPO trainer if it lacks one, with a short test;
     `docs/study-results/exploiter.md`.
   - Done when: the results file names the bot attacked and its spec string, and records the

@@ -6,7 +6,7 @@
 # Once, before queueing (freezes the code so later edits to the tree do not change the job):
 #   powershell -NoProfile -File <this file> -Freeze
 # Queue:
-#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add -Lane gpu -Script <this file>
+#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add -Lane gpu -Script <this file>
 # Resume (after a restart or a failure): add the same job again. Logs resume by chunk,
 # training from its newest epoch checkpoint, matches by chunk; finished steps are skipped.
 # A finished loop (runs\race\done.json) exits at once.

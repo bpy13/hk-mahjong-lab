@@ -1,6 +1,6 @@
 # Plan 2026-11-09 Task 16 (Phase 6): what the passed-win rule and the race bot's passed-tile
 # safety (Task 14) and risk read (Task 15) are worth. Queue it AFTER the review-fix jobs:
-#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add -Lane cpu -Script <this file> -Label passed-tiles -After 32
+#   powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add -Lane cpu -Script <this file> -Label passed-tiles -After 32
 # Steps: (1) rebuild the extension so the CLI has Tasks 12-15 (pip install -e, a few minutes);
 # (2) race-bot matches, 1,000 walls x 4 seatings, seed 2026; (3) the teacher sanity rows;
 # (4) summary.py writes runs\matches\passed-summary.json.

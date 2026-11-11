@@ -10,7 +10,7 @@
 # 1. Freeze the labeller once (a build, outside the queue):
 #      powershell -NoProfile -File <this file> -Freeze
 # 2. Queue it on the cpu lane (resumable: add it again after a failure or restart):
-#      powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1 add -Lane cpu -Script <this file> -Label task18-labels -ScriptArgs "-Belief 'models/belief.mjnn'"
+#      powershell -NoProfile -File C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1 add -Lane cpu -Script <this file> -Label task18-labels -ScriptArgs "-Belief 'models/belief.mjnn'"
 #
 # Output: runs\labels-v2 (chunks, meta.json, progress.txt). A rerun with a different
 # -Belief into the same folder is refused by the labeller (one teacher per folder).

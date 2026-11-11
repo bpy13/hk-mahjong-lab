@@ -4,7 +4,7 @@
 # at most 110 minutes, last chunk held out). Writes models\cnn-distill-v2.pt / -fp32.mjnn /
 # .mjnn (the current models\cnn-distill.* stay untouched) and runs\distill-v2\result.json.
 # GPU lane; about 25 GPU minutes. Resumable: a checkpoint every 15 minutes, --resume picks it up.
-# Queue:  powershell -NoProfile -File <hkq.ps1> add -Lane gpu -Script <this file> -Label task18-distill
+# Queue:  powershell -NoProfile -File <jobq.ps1> add -Lane gpu -Script <this file> -Label task18-distill
 # Check:  Get-Content C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab\runs\distill-v2\train.log -Tail 3
 (Get-Process -Id $PID).ProcessorAffinity = [IntPtr]0xFFFF0
 $repo = 'C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab'

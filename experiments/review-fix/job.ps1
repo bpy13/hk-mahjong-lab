@@ -1,6 +1,6 @@
 # Plan 2026-11-09 Task 4 (AC3) through the job queue (cpu lane). One job per variant, then
 # a compare job after both:
-#   $hkq = 'C:\Users\brian\OneDrive\Documents\workspace\repo\bot-stream\tools\queue\hkq.ps1'
+#   $hkq = 'C:\Users\brian\OneDrive\Documents\workspace\repo\.claude\job-queue\jobq.ps1'
 #   powershell -NoProfile -File $hkq add -Lane cpu -Script <this file> -ScriptArgs "-Variant old"
 #   powershell -NoProfile -File $hkq add -Lane cpu -Script <this file> -ScriptArgs "-Variant new"
 #   powershell -NoProfile -File $hkq add -Lane cpu -Script <this file> -ScriptArgs "-Compare" -After '<old id>,<new id>'
