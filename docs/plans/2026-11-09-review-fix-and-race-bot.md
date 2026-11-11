@@ -298,7 +298,8 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
   - Files: `crates/search/src/race.rs`, the Phase 4 fitting code it uses, their tests,
     `docs/race-bot.md` (a deviations note), `docs/study-results/race-bot.md` (a new section).
   - Done when: the hazard check puts the observed rate inside its interval in at least 4 of 6
-    wall buckets; a duplicate match of the fixed race bot against three `value` bots (4,000 hands,
+    wall buckets; on 1,000 held-out early-hand positions where every opponent is most likely two or
+    more tiles from winning, the race bot picks the same discard as the pure-offence ranking`rank_discards` at least 95 % of the time (Brian, 2026-11-11: "Sounds good, go"); a duplicate match of the fixed race bot against three `value` bots (4,000 hands,
     seats rotated) is reported with its interval; the loop is re-queued in the cpu lane through
     `hkq.ps1` only if the match beats today's -9.4 by more than its interval. Post the match
     result to the inbox (checkpoint) whether or not it wins.
