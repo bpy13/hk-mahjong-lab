@@ -231,7 +231,7 @@ version on deals).
     positions, a ui string in three languages saying why Win is not offered.
   - Done when: `npm test`, `npm run build`, server `pytest` pass; a browser check of a hand
     where the player passes a win and then cannot win on the same tile.
-- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu) (Brian 2026-11-11: a recorded calibration miss counts as done and blocks nothing; record each bucket's predicted and observed rate) (taken: slot 1, 2026-11-11 12:00) (taken: slot 2, 2026-11-11 12:00)
+- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu) (Brian 2026-11-11: a recorded calibration miss counts as done and blocks nothing; record each bucket's predicted and observed rate) (taken: slot 1, 2026-11-11 12:00)
   - Files: feature encoding (add the passed-tile record and 摸打 / 入章), labels, the belief
     model, the danger tables, the teacher's distilled network; the `faan_shanten` fix from
     open-items rides along (it also changes the encoding).
@@ -256,7 +256,7 @@ records exist for Hong Kong rules (Mortal plays Japanese rules only). Two checks
 first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 22 of
 `2026-10-29-mahjong-bot-build.md`, waiting on his hands; nothing new is planned for it.
 
-- [ ] **Task 18c: A confidence range on each belief guess** `[parallel-ok]`
+- [ ] **Task 18c: A confidence range on each belief guess** `[parallel-ok]` (taken: slot 2, 2026-11-11 12:05)
   - Why: Brian, 2026-11-11, wants each guess to carry its own confidence (hk-games D100, D101):
     "(a), and if fails add to Milestone 2. Honestly just from the number I think the guess is quite close, so it should not block subsequent mahjong tasks".
   - What: a Laplace approximation on today's `models/belief-v2.pt` (no retraining): fit the
