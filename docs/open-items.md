@@ -224,3 +224,10 @@ with their defaults.
   | deal_in | 5 | 22670 | 3.48% | 3.75% | False | 3.46% / 3.71% |
 
   Tenpai is over-predicted in buckets 3-5 (by 1-3 points) and inside its interval in 1 of 6; deal-in is inside in 4 of 6 (the misses are buckets 0 and 5, off by under 0.3 points). Distilled network top-1 0.917 (old 0.924); matches inside noise (see above). Nothing else waits on this.
+
+## From the race loop (Tasks 8-9, 2026-11-11)
+- The race bot's chance that an opponent wins is 3–20× the observed rate in every wall bucket
+  (hazard check flags all six for refit), and the bot wins only 0.2–0.3 % of hands: it is far
+  too defensive. Four generations gain nothing measurable (gen 3 vs gen 2 +0.18 [-0.08, +0.44]);
+  -9.4 vs three `value`. Fixing `hazard` before more loops is the likeliest gain. Details:
+  `docs/study-results/race-bot.md` (Tasks 8 and 9).
