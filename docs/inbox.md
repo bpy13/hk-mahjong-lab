@@ -11,6 +11,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Why it matters: it beats -9.4 by far more than the interval, so the loop was re-queued as job 97 (gpu lane, runs from the worker clone, `runs/race-t20`); it is still behind `value`, and Task 21 (taking or passing a win) builds on this.
   - Options: (a) keep job 97 queued; (b) cancel it and go on to Task 21 with the hand-built tables.
   - Default: (a).
+  - Card sent 2026-11-11 (orchestrator checked the match, agreement and hazard numbers in `docs/study-results/race-bot.md`; job 97 is in the gpu lane behind jobs 68, 69 and 70, and the safety check refused the orchestrator's move to the cpu lane, where job 90 ran).
 
 ## Answered
 
