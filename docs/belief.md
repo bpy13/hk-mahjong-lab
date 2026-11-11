@@ -215,3 +215,33 @@ table (part 1 of the same run) over-predicts in its 4–20 % buckets.
   `selfplay_log --bestof 64` (the rows are byte-identical to `runs/logs/holdout`), plus
   the `bestof-NNNNN.bin` histograms the best-of-K baseline is read from.
 - `runs/belief/ablation/`, `runs/belief/long/`: the discard-block and 15-epoch runs.
+
+## 8. Confidence ranges: a last-layer Laplace approximation (plan 2026-11-09, Task 18c)
+
+`python/mahjong/belief/laplace.py` gives each tenpai, deal-in and outcome guess of
+`models/belief-v2.pt` a mean and a standard deviation, without retraining. The torso is fixed;
+the head's weights get a Gaussian posterior whose precision is the generalised Gauss-Newton
+curvature of the training loss (3 chunks of `runs/logs-v2/train`, 125k rows, scaled up to the
+2.09 M rows) plus a prior precision of 1. Tenpai and wait logits are logistic, the outcome head
+is a softmax; the logit variance is `φᵀ H⁻¹ φ`; probability mean and sd follow by the probit
+moderation and the delta method. Deal-in is `1 − Π(1 − tenpai · wait)` with the variances combined
+across opponents. Run: `python -m mahjong.belief.evaluate --logs <holdout> --model models/belief-v2.pt
+--laplace <train logs>`; test `python/tests/test_laplace.py`; results `runs/belief-v2/eval-laplace.json`.
+
+**Result (hold-out, 5,000 hands; groups by stated probability, 16 log-spaced ranges, groups under
+1,000 guesses not scored; resampling whole hands, 1,000 times).** Share of groups whose observed
+rate lies in mean ± 1 sd (68 % expected, pass 60–76 %):
+
+| Guess | Share inside | 95 % interval |
+|---|---|---|
+| tenpai | 0.133 | [0.000, 0.267] |
+| deal-in | 0.643 | [0.357, 0.714] |
+| outcome: discard win | 0.000 | [0.000, 0.100] |
+| outcome: self-draw | 0.143 | [0.000, 0.143] |
+| **overall** | **0.261** | **[0.130, 0.304]** |
+
+**Fail.** The standard deviations are tiny (0.0001–0.01): the 2 M training rows pin the last layer,
+so the approximation measures weight uncertainty only. The model's miss against the observed rate
+(the over-prediction in `eval.json`: tenpai 5–12 % relative, outcome heads 0.01–0.04 absolute) is
+bias the last-layer posterior cannot see; an ensemble of trained copies would. Deal-in, where the
+miss is small, passes at 64 %.

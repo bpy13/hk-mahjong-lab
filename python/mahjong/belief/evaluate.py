@@ -315,6 +315,97 @@ def print_report(r: dict[str, Any]) -> None:
     print(f"AC3: {r['ac3']}")
 
 
+def evaluate_laplace(args: argparse.Namespace) -> dict[str, Any]:
+    """Fits the Laplace approximation (``mahjong.belief.laplace``) on ``--laplace-chunks``
+    chunks of the training log ``--laplace``, then groups the hold-out guesses by their
+    stated probability and reports how often the observed rate lies in mean ± 1 sd."""
+    from mahjong.belief import laplace as lp
+
+    net = BeliefNet.load(Path(args.model)).eval()
+    train = LogDir(args.laplace)
+    n_chunks = min(args.laplace_chunks, len(train))
+    sample_rows = sum(int(train.meta["chunks"][i]["rows"]) for i in range(n_chunks))
+    device = args.device
+    lap = lp.fit(
+        net,
+        (batch_from_rows(train.chunk(i)) for i in range(n_chunks)),
+        total_rows=train.rows,
+        prior_precision=args.prior_precision,
+        device=device,
+    )
+    net = net.cpu()
+    tables = {
+        k: lp.GroupTable()
+        for k in ("tenpai", "deal_in", "outcome_discard_win", "outcome_self_draw")
+    }
+    for rows in LogDir(args.logs).chunks():
+        game = rows["hand"].astype(np.int64)
+        b = batch_from_rows(rows)
+        res: dict[str, list[Any]] = {}
+        for i in range(0, len(b), 4096):
+            part = b.index(torch.arange(i, min(i + 4096, len(b))))
+            out = lp.predict(lap, net, part)
+            for k, v in out.items():
+                res.setdefault(k, []).append(v)
+        r: dict[str, Any] = {k: torch.cat(v).numpy().astype(np.float64) for k, v in res.items()}
+        rep = np.repeat(game, N_OPP)
+        tables["tenpai"].add(
+            rep,
+            r["tenpai_p"].ravel(),
+            r["tenpai_mean"].ravel(),
+            r["tenpai_sd"].ravel(),
+            b.tenpai.numpy().ravel().astype(np.float64),
+        )
+        outcome = b.outcome.numpy().ravel()
+        for name, cls in (("outcome_discard_win", 1), ("outcome_self_draw", 2)):
+            tables[name].add(
+                rep,
+                r["outcome_p"][:, :, cls].ravel(),
+                r["outcome_mean"][:, :, cls].ravel(),
+                r["outcome_sd"][:, :, cls].ravel(),
+                (outcome == cls) * 1.0,
+            )
+        idx, tile, _ = recover_discards(rows)
+        if len(idx):
+            sub = b.index(torch.from_numpy(idx))
+            d = lp.predict(lap, net, sub, tiles=torch.from_numpy(tile))
+            observed = rows["opp_waits"][idx, :, tile].any(axis=1)
+            tables["deal_in"].add(
+                game[idx],
+                d["deal_p"].numpy().astype(np.float64),
+                d["deal_mean"].numpy().astype(np.float64),
+                d["deal_sd"].numpy().astype(np.float64),
+                observed * 1.0,
+            )
+    return {
+        "model": str(args.model),
+        "logs": str(args.logs),
+        "curvature_logs": str(args.laplace),
+        "curvature_rows": sample_rows,
+        "curvature_scaled_to": train.rows,
+        "prior_precision": args.prior_precision,
+        "min_group": lp.MIN_GROUP,
+        "tables": {k: t.table() for k, t in tables.items()},
+        "coverage": lp.coverage(tables),
+    }
+
+
+def print_laplace(r: dict[str, Any]) -> None:
+    for name, table in r["tables"].items():
+        print(f"\n{name}: stated range, n, observed, mean, sd, inside ±1 sd")
+        for row in table:
+            flag = "" if row["scored"] else " (too few, not scored)"
+            print(
+                f"  [{row['low']:.4f}, {row['high']:.4f})  {row['n']:>8}  {row['observed']:.5f}"
+                f"  {row['mean']:.5f}  {row['sd']:.5f}  {'yes' if row['inside'] else 'NO'}{flag}"
+            )
+    for k, v in r["coverage"].items():
+        if isinstance(v, dict):
+            print(
+                f"{k}: share inside {v['share_inside']:.3f} [{v['ci_low']:.3f}, {v['ci_high']:.3f}]"
+            )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -325,6 +416,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--bestof", default=None, help="log dir written with selfplay_log --bestof K")
     p.add_argument("--alpha", type=float, default=0.5, help="add-alpha smoothing of best-of-K")
     p.add_argument("--batch", type=int, default=8192)
+    p.add_argument(
+        "--laplace",
+        default=None,
+        metavar="TRAIN_LOGS",
+        help="also fit a last-layer Laplace approximation on a sample of this training log "
+        "and write the confidence-range table (mahjong.belief.laplace) to --laplace-out",
+    )
+    p.add_argument("--laplace-out", default=None, help="default: eval-laplace.json beside --out")
+    p.add_argument(
+        "--laplace-chunks", type=int, default=3, help="training chunks for the curvature"
+    )
+    p.add_argument("--prior-precision", type=float, default=1.0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args(argv)
 
@@ -337,6 +440,12 @@ def main(argv: list[str] | None = None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(f"written {out}")
+    if args.laplace:
+        lap_out = Path(args.laplace_out) if args.laplace_out else out.with_name("eval-laplace.json")
+        lap = evaluate_laplace(args)
+        lap_out.write_text(json.dumps(lap, indent=2), encoding="utf-8")
+        print_laplace(lap)
+        print(f"written {lap_out}")
 
 
 if __name__ == "__main__":
