@@ -801,3 +801,27 @@ bot uses `RISK_MODEL`, fitted with `--belief` against that model's estimates (re
 5. Fitted on the heuristic belief and the rule-based field plus `race` v0; Task 18's
    retrained models should see the record and the score as features, and Task 16 measures
    the two reads in a match before anything is trusted.
+
+## 14. Deviations in Task 20: calm margin, fitted tables, hazard multiplier
+
+Code: `crates/search/src/race.rs` (`RaceConfig::calm_margin`, `calm_power`, `hz`, `FIT_*`,
+`offence_discard`); evidence in `docs/study-results/race-bot.md` (Task 20).
+
+1. **Deviation: discards use a wider tie margin when no opponent is likely close.** The tie
+   rule of §11 item 10 keeps `tie_margin` (0.5 points); for discards the margin becomes
+   `tie_margin + calm_margin × w^calm_power`, `w = Π_o (1 − P(ready_o) − P(one away_o))`
+   (defaults 100 and 1). Candidates within the margin of the best go to `rank_discards`.
+   Defence is still weighted by each opponent's chance of being close, with no switch
+   (Brian, D107). Reason: the far-hand model of §11 item 7 (acceptance-driven) made the bot
+   disagree with pure offence in 75 % of calm early positions. Claims and kongs keep
+   `tie_margin`.
+2. **Deviation: `hz`**, a multiplier per wall bucket on each opponent's per-round win
+   hazard (all three parts, so the loss terms stay consistent), fitted by comparing
+   predicted and observed win chances on held-out hands against `value`.
+3. **The defaults are now the fitted tables** (`FIT_A`, `FIT_B`, `FIT_Q`, `FIT_HZ`, from the
+   `value` field with `belief.mjnn`); v0's constants stay as `OPP_STEP`, `Q`.
+   Spec: `calm=`, `calm_power=`, `hz=x0/…/x5`.
+4. **Limit:** the tables describe `value`-like opponents. Against other styles the check was
+   not run.
+5. `RaceConfig::v0()` returns v0's constants; the hand-built scenarios of
+   `crates/search/tests/race_bot.rs` use it, as they were designed against them.

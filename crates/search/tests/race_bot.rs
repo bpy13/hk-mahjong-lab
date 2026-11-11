@@ -146,7 +146,7 @@ fn brians_pung_hand_values_pung_at_least_pass() {
 #[test]
 fn still_deals_into_the_small_hand_to_stop_the_big_self_draw() {
     let (state, beliefs) = position_2(false);
-    let bot = RaceBot::new(RaceConfig::default(), Arc::new(Stub(beliefs)));
+    let bot = RaceBot::new(RaceConfig::v0(), Arc::new(Stub(beliefs)));
     let d = bot.decide(&state);
     print(&d);
     assert_eq!(d.action, Action::Discard(t("2m")));
@@ -174,7 +174,7 @@ fn two_threats(b_fold: Option<f64>) -> RaceDecision {
             seat(0.0, 0.0, &[], 0.0, 3),
         ],
     };
-    let mut bot = RaceBot::new(RaceConfig::default(), Arc::new(Stub(beliefs)));
+    let mut bot = RaceBot::new(RaceConfig::v0(), Arc::new(Stub(beliefs)));
     bot.fold_override[2] = b_fold;
     let d = bot.decide(&state);
     print(&d);
@@ -217,7 +217,7 @@ fn a_decision_takes_under_5_ms_on_one_thread() {
     let budget = if cfg!(debug_assertions) { 200.0 } else { 5.0 };
     let calls = if cfg!(debug_assertions) { 20 } else { 500 };
     let (state, beliefs) = position_2(false);
-    let stubbed = RaceBot::new(RaceConfig::default(), Arc::new(Stub(beliefs)));
+    let stubbed = RaceBot::new(RaceConfig::v0(), Arc::new(Stub(beliefs)));
     let brian = brian_at(85);
     let mut rng = SmallRng::seed_from_u64(1);
     for (name, b, s) in [

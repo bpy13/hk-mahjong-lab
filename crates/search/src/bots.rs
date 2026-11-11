@@ -561,6 +561,7 @@ impl Policy<State> for RandomBot {
 
 /// Any of the bots, chosen at run time.
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Bot {
     Random(RandomBot),
     Efficiency(Efficiency),

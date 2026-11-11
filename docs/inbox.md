@@ -5,6 +5,13 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 ## Open
 
+- **Task 20 is done: the race bot now scores -1.97 per hand against three `value` bots (was -9.4). Should the loop stay queued?**
+  - What it is: the "3-20 times too high" win chance came from measuring in race-versus-race logs, where nobody wins; against `value` the old constants were nearly right. The real cause was that in quiet early hands the race bot picked pure offence's discard in only 25 % of positions (target 95 %). It now takes a wider tie margin when no opponent is likely close (smooth, no switch), and `a`, `b`, `q` and a hazard multiplier were refitted on the `value` field. Details: `docs/study-results/race-bot.md` (Task 20), `docs/race-bot.md` §14.
+  - Example: 4,000-hand duplicate match vs three `value`: -1.97 ± 1.16 (win 16.4 %, `value` 25.6 %). Offence agreement on 1,000 calm early positions: 1000 of 1000. Hazard check on 24,000 fresh hands: 5 of 6 buckets inside the interval.
+  - Why it matters: it beats -9.4 by far more than the interval, so the loop was re-queued as job 97 (gpu lane, runs from the worker clone, `runs/race-t20`); it is still behind `value`, and Task 21 (taking or passing a win) builds on this.
+  - Options: (a) keep job 97 queued; (b) cancel it and go on to Task 21 with the hand-built tables.
+  - Default: (a).
+
 ## Answered
 
 - **Should milestone 2 train five copies of the belief model to give honest confidence ranges?**

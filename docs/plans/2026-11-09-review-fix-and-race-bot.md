@@ -286,7 +286,7 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
 
 ## Phase 8 - Fix the race bot's over-folding (Brian, 2026-11-11: "Ok, need fixing then")
 
-- [ ] **Task 20: Calibrate the race bot's win chances, then rerun the loop** (fable: calibration method open) `(checkpoint)` (taken: slot 1, 2026-11-11 17:00)
+- [x] **Task 20: Calibrate the race bot's win chances, then rerun the loop** (fable: calibration method open) `(checkpoint)` (hazard check 5 of 6 buckets on 24,000 fresh hands; offence agreement 1000/1000; match -1.97 ± 1.16 vs 3 value, was -9.4; loop re-queued as job 97; inbox checkpoint posted; study-results/race-bot.md Task 20)
   - Why: the race loop (Tasks 8-9, job 90) showed each opponent's per-turn win chance is
     3-20 times the observed rate in all six wall buckets; the bot folds far too often, wins
     0.2-0.3 % of hands and trails three `value` bots by 9.4 points per hand

@@ -13,12 +13,15 @@
 # Check:  Get-Content runs\race\progress.txt; Get-Content runs\race\run.log -Tail 5;
 #         runs\race\report.md
 # Smoke test (minutes, CPU, separate folder): <this file> -Root runs\race-smoke\loop -Freeze; <this file> -Root runs\race-smoke\loop -Smoke
-param([string]$Root = 'runs\race', [switch]$Freeze, [switch]$Smoke)
+# -Repo: the checkout the job runs in (Task 20 reruns it from a worker clone, so the code that
+# is frozen is the worker's, not the standalone checkout's).
+param([string]$Root = 'runs\race', [switch]$Freeze, [switch]$Smoke,
+    [string]$Repo = 'C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab')
 
 # CPUs 0-3 stay free for the desktop; children inherit the mask. Normal priority.
 (Get-Process -Id $PID).ProcessorAffinity = [IntPtr]0xFFFF0
 
-$repo = 'C:\Users\brian\OneDrive\Documents\workspace\repo\hk-mahjong-lab'
+$repo = $Repo
 $job = Join-Path $repo $Root
 $pkg = Join-Path $job 'pkg'
 $log = Join-Path $job 'run.log'

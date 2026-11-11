@@ -122,3 +122,62 @@ rate in every bucket (e.g. bucket 3: predicted 0.048, observed 0.0124; bucket 0:
 0.0014); every bucket is flagged `refit`. The loop refits `a`, `b`, `q` per generation, but
 this prediction stays far too high, so the bot overrates every opponent and plays far too
 defensively, which fits its tiny win rate. Not fixed here.
+
+## Task 20: why the race bot folded, the fix, and the strength check (2026-11-11)
+
+Method: `race_log` logs of 20,000 to 24,000 hands, one race seat against three `value` bots
+(`--fixed value --shares 0,0,100`), `belief.mjnn`; the hazard check as in §8.2 but with
+intervals that resample whole hands (rows of one hand are not independent; the old per-row
+intervals are about 3 times too narrow). Scripts: `crates/search/examples/race_offence.rs`
+(new), `race_log`, `compare`. Fit logs and held-out logs use different seeds (7; 11-16).
+
+**1. The "3-20 times too high" reading was an artifact of where it was measured.** The loop's
+hold-out logs are 60 % race-versus-race hands, and race bots almost never win (0.3 % of hands),
+so the opponents' observed win rate was close to zero whatever the model said. Against `value`
+opponents, the observed share of "opponent wins within the horizon":
+
+| Bot | b0 obs / pred | b1 | b2 | b3 | b4 | b5 |
+|---|---|---|---|---|---|---|
+| v0 defaults, vs value | .023 / .149 | .082 / .155 | .167 / .188 | .235 / .234 | .232 / .235 | .135 / .118 |
+| generation 3 tables, vs value | .025 / .018 | .081 / .038 | .168 / .096 | .238 / .169 | .234 / .186 | .131 / .083 |
+| v0 defaults, vs race (self-play) | .0002 / .149 | .0005 / .154 | .001 / .168 | .002 / .184 | .003 / .152 | .002 / .051 |
+
+Inputs: v0's constants are right from bucket 2 on and too high in buckets 0 and 1 (opponents
+far from ready early); the fitted generation-3 tables, which were fitted on race self-play,
+are too low everywhere against real opponents. The state chain `a`, `b` and the feed rates
+`q` therefore do not inflate the chance; the self-play data they were fitted on were the problem.
+
+**2. The real cause of the folding: far-hand discards.** On 1,000 early positions (wall at
+least 70, every opponent with P(ready) + P(one away) < 0.5) the race bot picked the
+`rank_discards` (pure offence) discard in only **25.3 %** (21.6 % with generation-3 tables).
+In the cases checked, offence's discard lowers faan-aware shanten by one with few accepting
+tiles; the race value prefers a discard that keeps shanten but accepts 40 to 80 tiles, because
+its far-hand model (§11 item 7) rewards acceptance count and gains of 5 to 20 points swamp
+any danger term (deal-in terms are under 0.01 points early). Hence a bot that plays nearly
+at random early, folds late, and wins 0.1 %.
+
+**3. The fix** (`docs/race-bot.md` §14): (a) discard decisions take a tie margin of
+`0.5 + 100 × w` points, `w = Π_o (1 − P(ready_o) − P(one away_o))` (spec `calm=100,calm_power=1`),
+so offence decides when no opponent is likely close and the margin shrinks smoothly as any
+opponent's chance of being close grows (no switch; claims keep 0.5); (b) `a`, `b`, `q`
+refitted on the `value` field and a per-bucket hazard multiplier `hz` fitted until the
+predicted win chance matches (defaults in `RaceConfig`).
+
+**4. Checks (fresh seeds, never used for fitting).**
+
+| Check | Result |
+|---|---|
+| Offence agreement, 1,000 calm early positions, seeds 5 and 99 (belief and heuristic) | 1000 / 1000 (was 253 / 1000); test `calm_positions_take_the_offence_discard` ≥ 95 of 100 |
+| Hazard check, seed 16, 24,000 hands, hands resampled | observed inside the interval in **5 of 6** buckets (b3 observed .2207 vs predicted .2175, difference interval [+.0012, +.0052]) |
+| Same check on the earlier fit rounds (12,000 hands, seeds 13, 14) | 3 of 6 and 2 of 6: the multiplier was tuned in 3 rounds; 12,000 hands give a ±5 % ratio, so one round of fitting is noise-limited |
+| Duplicate match, 1,000 walls × 4 seatings = 4,000 hands vs 3 `value` | **-1.97 ± 1.16 per hand** (95 %), win 16.4 %, deal-in 16.5 %; the same tables with `calm=0`: -9.94 ± 0.63 (win 0.2 %); `calm=100` with v0 tables: -1.39 ± 1.11 |
+
+Reading: the bot was -9.4 [-10.0, -8.8] (job 90 best generation) and is now -1.97
+[-3.13, -0.81]: better by 7.4 points, far outside either interval, but still behind `value`
+(who score +1.1 to +2.2 in those matches; win 25.6 % against 16.4 %). The calibration alone
+does not move the score (`calm=0` stays at -9.9); the offence margin does it. Also tried:
+a smaller margin (`calm=10` -5.30, `calm=40,power=4` -3.11, `calm=40,power=2` -1.93,
+`calm=1000` -1.4), so the gain saturates near -1.4 to -2.0 once early offence is restored; the
+remaining gap is in the race value's mid-game and claim choices, not measured here.
+The loop is re-queued in the gpu lane (job 97, `experiments/race_loop.ps1 -Repo <this clone>
+-Root runs\race-t20`, because it trains `race-belief` heads and refits the tables on the new bot).

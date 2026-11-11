@@ -57,6 +57,7 @@ use std::time::Duration;
 
 /// A player: a rule-based bot, the PIMC solver, a network, or network + search.
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Agent {
     Bot(Bot),
     /// PIMC with best-of-K determinizations.

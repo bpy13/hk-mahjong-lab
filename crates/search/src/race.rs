@@ -147,6 +147,11 @@ pub struct RaceConfig {
     /// Points below which two candidates tie; ties go to `rank_discards`, as in
     /// the `ev` bot (`ev-bot.md` §2.2).
     pub tie_margin: f64,
+    /// Task 20: extra tie margin (points) when no opponent is likely close, scaled by
+    /// `w^calm_power`, `w = Π_o (1 − P(ready_o) − P(one away_o))`. Spec `calm=`, `calm_power=`.
+    pub calm_margin: f64,
+    /// Exponent of the calm weight.
+    pub calm_power: f64,
     /// `τ_threat`: an unfolded opponent with `p_O + p_R` above it gets a mode (§5.1).
     pub threat: f64,
     /// `a_o`: an opponent's chance per round to move far → one away, per wall bucket
@@ -154,6 +159,10 @@ pub struct RaceConfig {
     pub opp_a: [f64; PROGRESS_BUCKETS],
     /// `b_o`: one away → ready, per wall bucket. Spec `b=...`.
     pub opp_b: [f64; PROGRESS_BUCKETS],
+    /// Task 20: multiplier on every opponent's per-round win hazard, per wall bucket,
+    /// fitted so the predicted chance matches the observed one against `value`
+    /// (`docs/race-bot.md` §14). Spec `hz=x0/…/x5`.
+    pub hz: [f64; PROGRESS_BUCKETS],
     /// `q(m)` for push, detour, fold. Spec `q=push/detour/fold`.
     pub q: [f64; 3],
     /// Passed-tile safety (Task 14, §13). Spec `passed=on|off`.
@@ -162,15 +171,42 @@ pub struct RaceConfig {
     pub risk: bool,
 }
 
+/// Task 20 (`docs/race-bot.md` §14): `a`, `b`, `q` fitted by `race_fit` on 20,000 hands of
+/// this bot's offence against three `value` bots (belief `models/belief.mjnn`), and the
+/// hazard multiplier `hz` that makes the predicted chance match the observed one on
+/// held-out hands of the same field. v0's untuned values are `OPP_STEP` and `Q`.
+const FIT_A: [f64; PROGRESS_BUCKETS] = [0.005566, 0.02946, 0.06625, 0.09255, 0.0976, 0.0906];
+const FIT_B: [f64; PROGRESS_BUCKETS] = [0.1227, 0.1589, 0.1773, 0.1925, 0.1877, 0.1859];
+const FIT_Q: [f64; 3] = [0.03929, 0.01852, 0.009969];
+const FIT_HZ: [f64; PROGRESS_BUCKETS] = [1.44, 1.675, 1.43, 1.307, 1.584, 2.078];
+
+impl RaceConfig {
+    /// v0's untuned constants (`OPP_STEP`, `Q`, no hazard multiplier, no calm margin): what
+    /// the hand-built scenarios of `tests/race_bot.rs` were designed against.
+    pub fn v0() -> RaceConfig {
+        RaceConfig {
+            opp_a: [OPP_STEP; PROGRESS_BUCKETS],
+            opp_b: [OPP_STEP; PROGRESS_BUCKETS],
+            hz: [1.0; PROGRESS_BUCKETS],
+            q: Q,
+            calm_margin: 0.0,
+            ..RaceConfig::default()
+        }
+    }
+}
+
 impl Default for RaceConfig {
     fn default() -> Self {
         RaceConfig {
             horizon: 8,
             tie_margin: 0.5,
+            calm_margin: 100.0,
+            calm_power: 1.0,
             threat: 0.2,
-            opp_a: [OPP_STEP; PROGRESS_BUCKETS],
-            opp_b: [OPP_STEP; PROGRESS_BUCKETS],
-            q: Q,
+            opp_a: FIT_A,
+            opp_b: FIT_B,
+            hz: FIT_HZ,
+            q: FIT_Q,
             passed: true,
             risk: true,
         }
@@ -200,6 +236,16 @@ impl RaceConfig {
         match k {
             "a" => return probabilities(k, v).map(|x| self.opp_a = x),
             "b" => return probabilities(k, v).map(|x| self.opp_b = x),
+            "hz" => {
+                let xs = v
+                    .split('/')
+                    .map(|x| x.trim().parse::<f64>().ok().filter(|x| *x >= 0.0))
+                    .collect::<Option<Vec<f64>>>()
+                    .and_then(|v| <[f64; PROGRESS_BUCKETS]>::try_from(v).ok())
+                    .ok_or_else(|| format!("bad hz {v:?}"))?;
+                self.hz = xs;
+                return Ok(());
+            }
             "q" => return probabilities(k, v).map(|x| self.q = x),
             "passed" | "risk" => {
                 let on = match v {
@@ -225,6 +271,8 @@ impl RaceConfig {
                     .ok_or_else(|| format!("bad horizon {v:?}"))?
             }
             "tie_margin" => self.tie_margin = num()?,
+            "calm" => self.calm_margin = num()?,
+            "calm_power" => self.calm_power = num()?,
             "threat" => self.threat = num()?.min(1.0),
             _ => return Err(format!("unknown race option {k:?}")),
         }
@@ -451,6 +499,8 @@ struct Table {
     /// `a_o`, `b_o` in this decision's wall bucket, and `q(m)`.
     step_far: f64,
     step_one: f64,
+    /// Opponent hazard multiplier in this wall bucket.
+    hz: f64,
     q: [f64; 3],
 }
 
@@ -509,6 +559,7 @@ impl Table {
             fold_override: fold,
             step_far: bot.config.opp_a[bucket],
             step_one: bot.config.opp_b[bucket],
+            hz: bot.config.hz[bucket],
             q: bot.config.q,
         };
         for e in state.events() {
@@ -981,7 +1032,15 @@ impl RaceBot {
             first
         });
 
+        // Task 20: with no opponent likely close the race terms of a far hand are
+        // noise, so offence decides; each opponent's chance of being close pulls the
+        // margin back down smoothly (no switch). Discards only: claims keep `tie_margin`.
+        let calm: f64 = (0..4)
+            .filter(|&o| o != me)
+            .map(|o| (1.0 - table.states[o][0] - table.states[o][1]).clamp(0.0, 1.0))
+            .product();
         let margin = self.config.tie_margin;
+        let discard_margin = margin + self.config.calm_margin * calm.powf(self.config.calm_power);
         let eq = |a: Action| {
             terms
                 .iter()
@@ -1009,7 +1068,7 @@ impl RaceBot {
             let tied: Vec<Tile> = discards
                 .iter()
                 .copied()
-                .filter(|&t| eq(Action::Discard(t)) >= best - margin)
+                .filter(|&t| eq(Action::Discard(t)) >= best - discard_margin)
                 .collect();
             let mut chosen = if tied.is_empty() {
                 legal[0]
@@ -1353,7 +1412,7 @@ impl RaceBot {
                     .map(|j| opp.q[j])
                     .sum();
                 let mine_part = ready * my_feed[o];
-                parts[o] = [ready * sd, mine_part, ready * others];
+                parts[o] = [ready * sd * t.hz, mine_part * t.hz, ready * others * t.hz];
                 h[o] = parts[o].iter().sum();
             }
             // My hazard: fed by the seats that act this round, then my draw.
@@ -1538,6 +1597,22 @@ pub enum TrueState {
     Ready = 2,
     /// Folded: from the turn after a fold-labelled discard until a push label.
     Folded = 3,
+}
+
+/// The discard pure offence picks among `legal` (`rank_discards`, faan-aware): the bar
+/// the race bot is held to when no opponent is likely close (plan Task 20).
+pub fn offence_discard(view: &SeatView, legal: &[Action]) -> Option<Tile> {
+    let kinds: Vec<Tile> = legal
+        .iter()
+        .filter_map(|a| match a {
+            Action::Discard(t) => Some(*t),
+            _ => None,
+        })
+        .collect();
+    if kinds.is_empty() {
+        return None;
+    }
+    Some(rank_discards(view, &kinds, Metric::Faan)[0].0)
 }
 
 /// Faan-aware shanten of `view`'s concealed hand; for a hand that must discard
@@ -1760,6 +1835,64 @@ impl mahjong_games::Policy<State> for RaceBot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Task 20 (Brian, D107): early positions where every opponent is most likely two or
+    /// more tiles from winning get the pure-offence discard at least 95 % of the time.
+    #[test]
+    fn calm_positions_take_the_offence_discard() {
+        use mahjong_games::{Game, Policy};
+        use rand::rngs::SmallRng;
+        use rand::SeedableRng;
+        let bot = parse_spec(&[]).unwrap();
+        let value = crate::Agent::parse("value").unwrap();
+        let (mut n, mut same, mut legal) = (0usize, 0usize, Vec::new());
+        let mut hand = 0u64;
+        while n < 100 {
+            let mut rng = SmallRng::seed_from_u64(900 + hand);
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            let seat = (hand % 4) as usize;
+            hand += 1;
+            while let Some(me) = s.current_player() {
+                s.legal_actions(&mut legal);
+                let a = if me == seat && legal.len() > 1 {
+                    let d = bot.decide(&s);
+                    let calm = d.candidates.first().is_some_and(|c| {
+                        (1..4).all(|r| {
+                            let o = (me + r) % 4;
+                            c.tenpai[o] + c.one_away[o] < 0.5
+                        })
+                    });
+                    if !s.in_claim() && !s.in_rob() && s.wall_remaining() >= 70 && calm && n < 100 {
+                        if let (Some(off), Action::Discard(t)) =
+                            (offence_discard(&SeatView::of(&s, me), &legal), d.action)
+                        {
+                            n += 1;
+                            same += usize::from(off == t);
+                        }
+                    }
+                    d.action
+                } else {
+                    value.choose(&s, &legal, &mut rng)
+                };
+                s.apply(a);
+            }
+        }
+        assert!(
+            same >= 95,
+            "offence discard in {same} of {n} calm positions"
+        );
+    }
+
+    #[test]
+    fn calm_and_hazard_options() {
+        let mut c = RaceConfig::default();
+        assert_eq!((c.calm_margin, c.calm_power), (100.0, 1.0));
+        c.set("calm", "0").unwrap();
+        c.set("hz", "1/1/1/1/1/1").unwrap();
+        assert_eq!((c.calm_margin, c.hz), (0.0, [1.0; PROGRESS_BUCKETS]));
+        assert!(c.set("hz", "1/1").is_err());
+        assert!(c.set("hz", "1/1/1/1/1/-1").is_err());
+    }
 
     #[test]
     fn options_parse_and_reject() {
