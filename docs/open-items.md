@@ -206,3 +206,21 @@ with their defaults.
   (old belief: 6 of 6) and deal_in `within: false` in 2 of 6 for both. belief-v2 is no worse than the
   old model, but the strict "within" check is not passed by either. Missing: a decision whether
   "passes its existing checks" means "no worse than the old model" (then tick) or "every bucket within".
+- **Task 18 closed on Brian's ruling (slot 1, 2026-11-11).** A recorded calibration miss counts as done (hk-games reply 2026-11-11). Held-out calibration of belief-v2 (old belief model in brackets), predicted vs observed per wall-progress bucket (uns/belief-v2/eval.json; within = observed inside the 95 % interval of the prediction):
+
+  | head | bucket | n | predicted | observed | within | old: predicted / observed |
+  |---|---|---|---|---|---|---|
+  | tenpai | 0 | 266658 | 0.10% | 0.03% | False | 0.11% / 0.03% |
+  | tenpai | 1 | 294567 | 0.70% | 0.68% | True | 0.77% / 0.70% |
+  | tenpai | 2 | 271521 | 4.28% | 4.19% | False | 4.46% / 4.26% |
+  | tenpai | 3 | 227463 | 13.82% | 11.85% | False | 13.31% / 11.90% |
+  | tenpai | 4 | 156246 | 23.23% | 20.51% | False | 22.45% / 20.50% |
+  | tenpai | 5 | 87690 | 30.52% | 28.85% | False | 29.43% / 28.73% |
+  | deal_in | 0 | 68730 | 0.01% | 0.00% | False | 0.01% / 0.00% |
+  | deal_in | 1 | 77626 | 0.06% | 0.07% | True | 0.07% / 0.07% |
+  | deal_in | 2 | 73422 | 0.42% | 0.45% | True | 0.45% / 0.46% |
+  | deal_in | 3 | 61806 | 1.40% | 1.32% | True | 1.38% / 1.32% |
+  | deal_in | 4 | 42021 | 2.55% | 2.53% | True | 2.52% / 2.47% |
+  | deal_in | 5 | 22670 | 3.48% | 3.75% | False | 3.46% / 3.71% |
+
+  Tenpai is over-predicted in buckets 3-5 (by 1-3 points) and inside its interval in 1 of 6; deal-in is inside in 4 of 6 (the misses are buckets 0 and 5, off by under 0.3 points). Distilled network top-1 0.917 (old 0.924); matches inside noise (see above). Nothing else waits on this.
