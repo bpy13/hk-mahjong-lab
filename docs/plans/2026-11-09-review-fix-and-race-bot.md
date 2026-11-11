@@ -144,7 +144,7 @@ The app's review budget stays 12 s per hand (`REVIEW_BUDGET_MS`), 0.2–1.5 s pe
     (Task 5's definition), waits and hand value; the extended network trains in the gpu lane
     and reports held-out calibration per wall-progress bucket for state and mode.
 
-- [ ] **Task 9: The loop** (ready: queue job 90, race loop, ended 2026-11-11 15:50 with exit 0; code done, a worker records the report and ticks Tasks 8 and 9 after it ends)
+- [ ] **Task 9: The loop** (ready: queue job 90, race loop, ended 2026-11-11 15:50 with exit 0; code done, a worker records the report and ticks Tasks 8 and 9 after it ends) (taken: slot 2, 2026-11-11 16:10)
   - Files: `experiments/race_loop.ps1` (queue job, resumable), `docs/study-results/race-bot.md`.
   - Done when: AC6: at least three generations (play → label → train → new bot), each gated by
     a duplicate match against the previous generation and the teacher, with a league of older
