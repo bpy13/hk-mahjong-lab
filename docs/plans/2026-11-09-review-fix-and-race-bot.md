@@ -284,6 +284,24 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
     against three `value` than against the shipped bot. No bar is set: a gain whose interval
     excludes 0 goes to `docs/open-items.md` and to Brian.
 
+## Phase 8 - Fix the race bot's over-folding (Brian, 2026-11-11: "Ok, need fixing then")
+
+- [ ] **Task 20: Calibrate the race bot's win chances, then rerun the loop** (fable: calibration method open) `(checkpoint)`
+  - Why: the race loop (Tasks 8-9, job 90) showed each opponent's per-turn win chance is
+    3-20 times the observed rate in all six wall buckets; the bot folds far too often, wins
+    0.2-0.3 % of hands and trails three `value` bots by 9.4 points per hand
+    (`docs/study-results/race-bot.md`, open-items). Brian, 2026-11-11, on the point that
+    folding raises the opponents' chances: "Ok, need fixing then".
+  - What: find which input inflates the chance (the state chain `a`/`b`, the feed rates `q`,
+    `tenpai_o` from the belief, or the round-1 deal-in term); fix it so the predicted and
+    observed win rates agree; measure on held-out self-play, never on the hands it was fitted on.
+  - Files: `crates/search/src/race.rs`, the Phase 4 fitting code it uses, their tests,
+    `docs/race-bot.md` (a deviations note), `docs/study-results/race-bot.md` (a new section).
+  - Done when: the hazard check puts the observed rate inside its interval in at least 4 of 6
+    wall buckets; a duplicate match of the fixed race bot against three `value` bots (4,000 hands,
+    seats rotated) is reported with its interval; the loop is re-queued in the cpu lane through
+    `hkq.ps1` only if the match beats today's -9.4 by more than its interval. Post the match
+    result to the inbox (checkpoint) whether or not it wins.
 ## Shared resources
 `crates/search/src/bots.rs` (Tasks 1, 2, 6: serial), the job queue (Tasks 4, 7, 8, 9), the GPU
 lane (Task 8, after Dou Dizhu's block), `models/` (Task 8 adds a file; nothing is replaced).
