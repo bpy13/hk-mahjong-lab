@@ -5,6 +5,8 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 ## Open
 
+## Answered
+
 - **Task 20 is done: the race bot now scores -1.97 per hand against three `value` bots (was -9.4). Should the loop stay queued?**
   - What it is: the "3-20 times too high" win chance came from measuring in race-versus-race logs, where nobody wins; against `value` the old constants were nearly right. The real cause was that in quiet early hands the race bot picked pure offence's discard in only 25 % of positions (target 95 %). It now takes a wider tie margin when no opponent is likely close (smooth, no switch), and `a`, `b`, `q` and a hazard multiplier were refitted on the `value` field. Details: `docs/study-results/race-bot.md` (Task 20), `docs/race-bot.md` §14.
   - Example: 4,000-hand duplicate match vs three `value`: -1.97 ± 1.16 (win 16.4 %, `value` 25.6 %). Offence agreement on 1,000 calm early positions: 1000 of 1000. Hazard check on 24,000 fresh hands: 5 of 6 buckets inside the interval.
@@ -12,8 +14,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) keep job 97 queued; (b) cancel it and go on to Task 21 with the hand-built tables.
   - Default: (a).
   - Card sent 2026-11-11 (orchestrator checked the match, agreement and hazard numbers in `docs/study-results/race-bot.md`; job 97 is in the gpu lane behind jobs 68, 69 and 70, and the safety check refused the orchestrator's move to the cpu lane, where job 90 ran).
-
-## Answered
+  - Brian (2026-11-11): "default" (accepts (a): keep the loop). Orchestrator: Brian moved it to the cpu lane himself; it runs as job 98 since 17:54.
 
 - **Should milestone 2 train five copies of the belief model to give honest confidence ranges?**
   - What it is: Task 18c's cheap confidence range (a last-layer Laplace approximation on
