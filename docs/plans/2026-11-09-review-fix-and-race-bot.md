@@ -256,7 +256,7 @@ records exist for Hong Kong rules (Mortal plays Japanese rules only). Two checks
 first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 22 of
 `2026-10-29-mahjong-bot-build.md`, waiting on his hands; nothing new is planned for it.
 
-- [ ] **Task 18c: A confidence range on each belief guess** `[parallel-ok]`
+- [ ] **Task 18c: A confidence range on each belief guess** `[parallel-ok]` (taken: slot 2, 2026-11-11 12:05)
   - Why: Brian, 2026-11-11, wants each guess to carry its own confidence (hk-games D100, D101):
     "(a), and if fails add to Milestone 2. Honestly just from the number I think the guess is quite close, so it should not block subsequent mahjong tasks".
   - What: a Laplace approximation on today's `models/belief-v2.pt` (no retraining): fit the
