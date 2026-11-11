@@ -231,7 +231,7 @@ version on deals).
     positions, a ui string in three languages saying why Win is not offered.
   - Done when: `npm test`, `npm run build`, server `pytest` pass; a browser check of a hand
     where the player passes a win and then cannot win on the same tile.
-- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu) (waiting: Brian, does a recorded miss count as done; belief-v2 tenpai calibration is outside its interval in 5 of 6 buckets, the old model in 6 of 6; open-items)
+- [ ] **Task 18: Retrain the existing models with the rule** (opus; gpu lane after Dou Dizhu) (Brian 2026-11-11: a recorded calibration miss counts as done and blocks nothing; record each bucket's predicted and observed rate)
   - Files: feature encoding (add the passed-tile record and 摸打 / 入章), labels, the belief
     model, the danger tables, the teacher's distilled network; the `faan_shanten` fix from
     open-items rides along (it also changes the encoding).
@@ -256,6 +256,21 @@ records exist for Hong Kong rules (Mortal plays Japanese rules only). Two checks
 first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 22 of
 `2026-10-29-mahjong-bot-build.md`, waiting on his hands; nothing new is planned for it.
 
+- [ ] **Task 18c: A confidence range on each belief guess** `[parallel-ok]`
+  - Why: Brian, 2026-11-11, wants each guess to carry its own confidence (hk-games D100, D101):
+    "(a), and if fails add to Milestone 2. Honestly just from the number I think the guess is quite close, so it should not block subsequent mahjong tasks".
+  - What: a Laplace approximation on today's `models/belief-v2.pt` (no retraining): fit the
+    curvature of the training loss at the trained weights (last layer, or diagonal, whichever
+    fits in memory), then give each tenpai, deal-in and outcome guess a mean and a standard
+    deviation of the probability.
+  - Files: `python/mahjong/belief/laplace.py`, its test, `evaluate.py` (`--laplace`: a
+    table that groups held-out guesses by their stated probability and reports how often the
+    observed rate falls inside mean Â± 1 standard deviation, with intervals that resample whole
+    games), `runs/belief-v2/eval-laplace.json`, `docs/belief.md` (a short section).
+  - Done when: the table exists for tenpai, deal-in and outcome; the share inside Â±1 standard
+    deviation is reported per group. Pass: between 60 % and 76 % overall (68 % expected). On a
+    fail, record the numbers here and post one inbox question proposing five trained copies
+    in milestone 2 (Brian: "if fails add to Milestone 2"). Either way nothing else waits on it.
 - [ ] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]** (waiting: queue job 70 (was 54, re-queued 2026-11-11), gpu lane; code, test and job done, results go in docs/study-results/exploiter.md)
   - What: train one seat from fresh weights with `train-core` PPO (2026-10-29 plan, Task 17)
     while three seats play the bot the app ships as its top mahjong level, frozen. The attacker
