@@ -43,6 +43,12 @@ pub mod python {
             self.inner.meta()
         }
 
+        /// Sets the belief model (bytes of a `.mjnn` file) that hint, review and the
+        /// expert bot deal their guesses with.
+        pub fn set_belief(&mut self, bytes: &[u8]) -> String {
+            self.inner.set_belief(bytes)
+        }
+
         pub fn new_game(&mut self, config: &str) -> String {
             self.inner.new_game(config)
         }
@@ -169,6 +175,12 @@ pub mod wasm {
 
         pub fn meta(&self) -> String {
             self.inner.meta()
+        }
+
+        /// Sets the belief model (bytes of a `.mjnn` file) that hint, review and the
+        /// expert bot deal their guesses with.
+        pub fn set_belief(&mut self, bytes: &[u8]) -> String {
+            self.inner.set_belief(bytes)
         }
 
         pub fn new_game(&mut self, config: &str) -> String {

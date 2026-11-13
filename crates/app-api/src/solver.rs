@@ -7,7 +7,10 @@
 
 use mahjong_games::Game;
 use mahjong_hk::{Action, State};
-use mahjong_search::{pimc_with, shortlist, Analysis, PimcConfig, Rollout};
+use mahjong_search::pimc::pimc_with_sampler;
+use mahjong_search::world::{default_tilt, WorldSampler, BELIEF_DRAWS};
+use mahjong_search::{shortlist, Analysis, BeliefModel, PimcConfig, Rollout};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Determinizations of a hint when the budget allows (the lab UI's default).
@@ -23,6 +26,21 @@ pub const EXPERT_CANDIDATES: usize = 4;
 /// How many standard errors the expert bot needs before it leaves the heuristic
 /// baseline ([`Analysis::choose`]).
 pub const EXPERT_Z: f64 = 2.0;
+
+/// The teacher's settings when a belief model is set (`pimc:samples=64,candidates=4,
+/// belief=models/belief.mjnn,weights=1`): the expert bot uses these.
+pub const TEACHER_SAMPLES: usize = 64;
+pub const TEACHER_CANDIDATES: usize = 4;
+
+/// The teacher's world sampler: the belief model with importance weights.
+pub fn teacher_sampler(model: &Arc<BeliefModel>) -> WorldSampler {
+    WorldSampler::Belief {
+        model: Arc::clone(model),
+        weights: true,
+        draws: BELIEF_DRAWS,
+        tilt: default_tilt(true),
+    }
+}
 
 /// The share of `budget_ms` handed to the search. PIMC checks the clock only
 /// between batches of samples, so the rest covers the last batch and the study
@@ -58,7 +76,8 @@ pub fn single_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
 /// PIMC for the player to move: the engine's shortlist (every special action,
 /// the best `candidates` discards and the heuristic baseline) plus `extra`
 /// (the move actually played, so a review can score it on the same samples),
-/// up to `samples` determinizations within `time_limit`.
+/// up to `samples` determinizations within `time_limit`. With `belief` the
+/// determinizations come from the belief model, else from best-of-K.
 pub fn analysis(
     state: &State,
     samples: usize,
@@ -66,6 +85,7 @@ pub fn analysis(
     time_limit: Option<Duration>,
     seed: u64,
     extra: Option<Action>,
+    belief: Option<&Arc<BeliefModel>>,
 ) -> Analysis {
     let seat = state.current_player().expect("the hand is not over");
     let (mut list, baseline) = shortlist(state, candidates.max(1));
@@ -81,7 +101,17 @@ pub fn analysis(
         seed,
         z: EXPERT_Z,
     };
-    single_thread(|| pimc_with(state, &config, list, baseline, &Rollout::for_seat(seat)))
+    let sampler = belief.map_or(WorldSampler::BestOfK, teacher_sampler);
+    single_thread(|| {
+        pimc_with_sampler(
+            state,
+            &config,
+            &sampler,
+            list,
+            baseline,
+            &Rollout::for_seat(seat),
+        )
+    })
 }
 
 /// Grade buckets in expected points (the solver's `mean`): `good` under 1 point,

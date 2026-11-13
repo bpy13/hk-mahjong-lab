@@ -867,3 +867,112 @@ fn views_carry_the_discard_record_and_the_own_passed_win_lock() {
         .to_string();
     assert_eq!(ok(&api.view(&copy, 1))["river"], river);
 }
+
+// -- the belief model (Task 22) ---------------------------------------------------
+
+/// The teacher's belief model, copied read-only into `models/`; the tests that need it skip
+/// when it is missing (the file is not in git).
+fn belief_bytes() -> Option<Vec<u8>> {
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/belief.mjnn");
+    std::fs::read(p).ok()
+}
+
+/// Plays `hard` bots from `seed` until seat 0 has a real choice after `min_moves` actions.
+fn mid_hand(api: &mut Api, seed: u64, min_moves: usize) -> String {
+    let id = new_game(api, seed);
+    let mut n = 0;
+    loop {
+        let view = ok(&api.view(&id, 0));
+        assert!(!view["over"].as_bool().unwrap(), "hand ended early");
+        let legal = ok(&api.legal_actions(&id));
+        if n >= min_moves
+            && view["your_turn"] == true
+            && legal["actions"].as_array().unwrap().len() > 2
+        {
+            return id;
+        }
+        let action = ok(&api.bot_action(&id, "hard", 0));
+        ok(&api.apply(&id, &action.to_string()));
+        n += 1;
+    }
+}
+
+#[test]
+fn a_bad_belief_blob_is_an_error_and_hints_keep_working() {
+    let (_cpu, mut api) = shared();
+    assert_eq!(
+        error_code(&api.set_belief(b"not a network")),
+        "error.bad_belief"
+    );
+    assert_eq!(error_code(&api.set_belief(&[])), "error.bad_belief");
+    let id = new_game(&mut api, 9);
+    let h = ok(&api.hint_with_samples(&id, 0, 0, 8));
+    assert!(!h["moves"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn hint_and_expert_work_with_the_belief_model_set() {
+    let Some(bytes) = belief_bytes() else {
+        eprintln!("models/belief.mjnn missing: skipped");
+        return;
+    };
+    let (_cpu, mut api) = shared();
+    let v = ok(&api.set_belief(&bytes));
+    assert_eq!(v["belief"], true);
+    let id = mid_hand(&mut api, 5, 20);
+    let legal = ok(&api.legal_actions(&id));
+    let legal: Vec<Value> = legal["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["code"].clone())
+        .collect();
+    let h = ok(&api.hint_with_samples(&id, 0, 0, 16));
+    assert!(h["samples"].as_u64().unwrap() > 0);
+    for m in h["moves"].as_array().unwrap() {
+        assert!(
+            legal.contains(&m["action"]["code"]),
+            "hint move {m} is not legal"
+        );
+    }
+    let a = ok(&api.bot_action(&id, "expert", 0));
+    let mut played = a.clone();
+    played.as_object_mut().unwrap().remove("budget_used_ms");
+    assert!(
+        legal.contains(&played["code"]),
+        "expert move {played} is not legal"
+    );
+    ok(&api.apply(&id, &played.to_string()));
+    let r = ok(&api.review(&id, 0, 3000));
+    assert!(!r["items"].as_array().unwrap().is_empty());
+}
+
+/// `cargo test -p mahjong-app-api --release -- --ignored --nocapture belief_timing`.
+#[test]
+#[ignore]
+fn belief_timing() {
+    let bytes = belief_bytes().expect("models/belief.mjnn");
+    let (_cpu, mut api) = exclusive();
+    let ids: Vec<String> = (0..20).map(|s| mid_hand(&mut api, 100 + s, 25)).collect();
+    let samples = 32;
+    let run = |api: &Api| {
+        let (mut ms, mut n) = (0u64, 0u64);
+        for id in &ids {
+            let h = ok(&api.hint_with_samples(id, 0, 0, samples));
+            ms += h["budget_used_ms"].as_u64().unwrap();
+            n += h["samples"].as_u64().unwrap();
+        }
+        (ms, n)
+    };
+    let (ms0, n0) = run(&api);
+    ok(&api.set_belief(&bytes));
+    let (ms1, n1) = run(&api);
+    println!(
+        "without model: {ms0} ms for {n0} samples = {:.2} ms/sample",
+        ms0 as f64 / n0 as f64
+    );
+    println!(
+        "with model:    {ms1} ms for {n1} samples = {:.2} ms/sample",
+        ms1 as f64 / n1 as f64
+    );
+}

@@ -13,17 +13,19 @@ use crate::shapes::{
 };
 use crate::solver::{
     analysis, grade_for, search_budget, EXPERT_CANDIDATES, EXPERT_SAMPLES, EXPERT_Z,
-    HINT_CANDIDATES, HINT_SAMPLES, REVIEW_CANDIDATES, REVIEW_SAMPLES,
+    HINT_CANDIDATES, HINT_SAMPLES, REVIEW_CANDIDATES, REVIEW_SAMPLES, TEACHER_CANDIDATES,
+    TEACHER_SAMPLES,
 };
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
-use mahjong_search::{ActionStats, Analysis, Bot};
+use mahjong_search::{ActionStats, Analysis, BeliefModel, Bot, Mlp};
 use mahjong_tiles::Tile;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 use web_time::Instant;
 
 /// Bot levels, weakest first (`GameMeta.bot_levels`).
@@ -187,10 +189,22 @@ impl GameEntry {
 }
 
 /// The engine as the app sees it: hands by id, JSON in and out.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Api {
     games: HashMap<String, GameEntry>,
     next_id: u64,
+    /// The belief model `hint`, `review` and the expert bot deal their guesses
+    /// with (`set_belief`); `None` keeps the hand-written best-of-K sampler.
+    belief: Option<Arc<BeliefModel>>,
+}
+
+impl std::fmt::Debug for Api {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Api")
+            .field("games", &self.games.len())
+            .field("belief", &self.belief.is_some())
+            .finish()
+    }
 }
 
 /// Serializes a successful result with `"api": 0`, or the error.
@@ -239,6 +253,22 @@ fn must_be_to_move(state: &State, seat: usize) -> ApiResult<()> {
 impl Api {
     pub fn new() -> Api {
         Api::default()
+    }
+
+    /// Sets the belief model (the bytes of a `.mjnn` file): from now on `hint`,
+    /// `review` and the `expert` bot deal their guesses with it (the teacher's
+    /// sampler). A bad blob returns an error and leaves the earlier setting.
+    /// `grade` never uses it.
+    pub fn set_belief(&mut self, bytes: &[u8]) -> String {
+        respond(
+            Mlp::from_bytes(bytes)
+                .and_then(BeliefModel::from_mlp)
+                .map_err(|e| ApiError::new("error.bad_belief", e))
+                .map(|m| {
+                    self.belief = Some(Arc::new(m));
+                    json!({"belief": true})
+                }),
+        )
     }
 
     // -- the calls ------------------------------------------------------------
@@ -391,13 +421,19 @@ impl Api {
             let bot = Bot::by_name(name).expect("a known engine bot");
             bot.choose(&g.state, &legal, &mut g.rng(level_index))
         } else {
+            let (samples, candidates) = if self.belief.is_some() {
+                (TEACHER_SAMPLES, TEACHER_CANDIDATES)
+            } else {
+                (EXPERT_SAMPLES, EXPERT_CANDIDATES)
+            };
             analysis(
                 &g.state,
-                EXPERT_SAMPLES,
-                EXPERT_CANDIDATES,
+                samples,
+                candidates,
                 search_budget(budget_ms),
                 g.decision_seed(level_index),
                 None,
+                self.belief.as_ref(),
             )
             .choose(EXPERT_Z)
         };
@@ -453,6 +489,7 @@ impl Api {
                 search_budget(budget_ms),
                 g.decision_seed(0xA1),
                 None,
+                self.belief.as_ref(),
             );
             let moves = a
                 .moves
@@ -529,6 +566,7 @@ impl Api {
                 item_limit,
                 g.seed.wrapping_add(*turn as u64),
                 Some(*played),
+                self.belief.as_ref(),
             );
             if a.samples > 0 {
                 ms_per_sample = Some(a.elapsed.as_secs_f64() * 1000.0 / a.samples as f64);
@@ -797,6 +835,7 @@ fn grade_inner(position: &str, action: &str, budget_ms: u32) -> ApiResult<Value>
         search_budget(budget_ms),
         g.decision_seed(0xA1),
         Some(played),
+        None,
     );
     let study = Study::of(&g.state, seat);
     let (mut item, best) = compare(&g.state, &study, &legal, &a, played);
