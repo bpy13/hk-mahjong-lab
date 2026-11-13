@@ -326,7 +326,7 @@ with `WorldSampler::BestOfK` (a hand-written rule). The teacher (`pimc:samples=6
 belief=models/belief.mjnn,weights=1`) deals them with the belief model. This phase gives the app
 the teacher's guesses. hk-games then ships it (its milestone-1 plan, Task T1).
 
-- [ ] **Task 22: The app-api can deal its guesses with the belief model**
+- [ ] **Task 22: The app-api can deal its guesses with the belief model** (taken: slot 1, 2026-11-13 17:52)
   - Files: `crates/app-api/src/solver.rs`, `api.rs`, `lib.rs` (wasm and Python bindings),
     `crates/app-api/tests/api.rs`; `crates/search` only if `BELIEF_DRAWS`, `default_tilt` or
     `BeliefModel::from_mlp` need exporting.
