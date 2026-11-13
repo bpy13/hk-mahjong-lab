@@ -271,7 +271,7 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
     deviation is reported per group. Pass: between 60 % and 76 % overall (68 % expected). On a
     fail, record the numbers here and post one inbox question proposing five trained copies
     in milestone 2 (Brian: "if fails add to Milestone 2"). Either way nothing else waits on it.
-- [ ] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]** (ready 2026-11-14: queue job 70 finished 06:33, exit 0; its results are in `C:\Users\brian\OneDrive\Documents\workspace\repo\.worktrees\.worktrees\hk-mahjong-lab-2\runs\exploiter` (`matches\*.json`, `main\log.json`); write docs/study-results/exploiter.md from them and tick) (taken: slot 1, 2026-11-14 07:00)
+- [x] **Task 19: An attacker bot trained against the shipped bot** `[parallel-ok]` **[GPU: 10 h, job queue gpu lane]** (job 70; main attacker -12.24 [-14.37, -10.23] vs 3 shipped `pimc:samples=96,candidates=4`, 0 wins of 960; learns-at-all check FAILED, no exploit found; study-results/exploiter.md)
   - What: train one seat from fresh weights with `train-core` PPO (2026-10-29 plan, Task 17)
     while three seats play the bot the app ships as its top mahjong level, frozen. The attacker
     looks only for that bot's weaknesses.
