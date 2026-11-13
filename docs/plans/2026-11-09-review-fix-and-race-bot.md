@@ -318,6 +318,38 @@ first is Brian playing his 400 fixed walls (AC6 tooling, Task 12): that is Task 
     taken; (c) a passed tile is never won on before my next turn. A duplicate match (4,000 hands,
     seats rotated) of the race bot with and without passing, reported with its interval in
     `docs/study-results/race-bot.md`, plus how often it passed and what those passes earned.
+## Phase 4 - The teacher in the app, for now (sonnet)
+Brian, 2026-11-13: "just swap in the teacher model for now, it will get changed later during
+Milestone 1, I need to better see for myself how it performs". Today the app's hint, review and
+expert bot run plain PIMC: `crates/app-api/src/solver.rs` calls `pimc_with`, which deals guesses
+with `WorldSampler::BestOfK` (a hand-written rule). The teacher (`pimc:samples=64,candidates=4,
+belief=models/belief.mjnn,weights=1`) deals them with the belief model. This phase gives the app
+the teacher's guesses. hk-games then ships it (its milestone-1 plan, Task T1).
+
+- [ ] **Task 22: The app-api can deal its guesses with the belief model**
+  - Files: `crates/app-api/src/solver.rs`, `api.rs`, `lib.rs` (wasm and Python bindings),
+    `crates/app-api/tests/api.rs`; `crates/search` only if `BELIEF_DRAWS`, `default_tilt` or
+    `BeliefModel::from_mlp` need exporting.
+  - What: a new call `set_belief(bytes)` on the Api (wasm: `&[u8]`; Python: `bytes`) builds
+    `BeliefModel::from_mlp(Mlp::from_bytes(bytes))` and keeps it; it returns the usual JSON
+    (ok, or an error key for a bad blob). While a model is set, `hint`, `review` and the
+    `expert` bot use `WorldSampler::Belief { weights: true, draws: BELIEF_DRAWS, tilt:
+    default_tilt(true) }` (the teacher's `weights=1`) through `pimc_with_sampler`. The expert
+    bot then uses the teacher's 64 samples and 4 candidates; hint and review keep their sample
+    caps, candidates and time budgets. `grade` (drills) and every call without a model set stay
+    exactly as today (`BestOfK`), so drills, the server module and the replay checks do not change.
+    No model file goes into git here: hk-games ships the file and passes its bytes in.
+  - Done when: tests: (a) a bad blob gives an error and hints keep working on `BestOfK`;
+    (b) with a model set (a tiny test MLP with the five belief heads, or `models/belief.mjnn`
+    copied read-only from `repo\hk-mahjong-lab\models\` when the test is `#[ignore]`d), `hint`
+    and an `expert` move return legal answers; (c) every existing app-api test passes unchanged.
+    `cargo test -p mahjong-app-api` and clippy pass. A native timing on 20 mid-hand positions,
+    one thread: hint milliseconds per sample with and without the model (via
+    `hint_with_samples`), written in `docs/study-results/teacher-in-app.md`. If
+    `models/belief.mjnn` (the teacher's measured model, 2026-10-29) no longer loads with today's
+    feature encoding, use `belief-v2.mjnn` and say so in that file.
+  - Push to main. The hk-games task needs this task's commit hash: write it in the tick note.
+
 ## Shared resources
 `crates/search/src/bots.rs` (Tasks 1, 2, 6: serial), the job queue (Tasks 4, 7, 8, 9), the GPU
 lane (Task 8, after Dou Dizhu's block), `models/` (Task 8 adds a file; nothing is replaced).
