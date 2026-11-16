@@ -173,7 +173,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Notes: add the gpu job with `jobq.ps1 add -Lane gpu`; it waits behind job 120 by itself.
     Estimate from the watch session: about 2 hours on the graphics card.
 
-- [ ] **Task 4b: imitation start again, on the strict bot** (checkpoint) `[parallel-ok]` — needs: Task 2b, Task 9 (jobs 165 and 166 ended exit 0, 17 Nov 00:48: held-out top-1 93.1 %, -0.11 +- 0.71 per hand against three strict `stage` over 4,000 deals, read by the orchestrator: both checks pass; write the results up, tick; old outputs are in `runs\rl-stage\labels-gate0`, `imitation-gate0`, `models\stage-imitation-gate0.*`; finish: read `runs\rl-stage\imitation\result.json` and `vs-stage.txt`, add the strict row to docs/study-results/self-play-network.md and the board)
+- [ ] **Task 4b: imitation start again, on the strict bot** (checkpoint) `[parallel-ok]` — needs: Task 2b, Task 9 (jobs 165 and 166 ended exit 0, 17 Nov 00:48: held-out top-1 93.1 %, -0.11 +- 0.71 per hand against three strict `stage` over 4,000 deals, read by the orchestrator: both checks pass; write the results up, tick; old outputs are in `runs\rl-stage\labels-gate0`, `imitation-gate0`, `models\stage-imitation-gate0.*`; finish: read `runs\rl-stage\imitation\result.json` and `vs-stage.txt`, add the strict row to docs/study-results/self-play-network.md and the board) (taken: slot 1, 2026-11-17 09:00)
   - Why: Brian, 2026-11-16: "use strict version as default" (Task 9), then, asked whether to
     hold the 48-hour run and redo its start on the strict bot at a cost of about 35 minutes
     of preparation: "that's fine". Task 4's network copies the old bot (now `stage-gate0`).
