@@ -24,3 +24,9 @@ The graphics card is used after Dou Dizhu's training job. Plan:
 ## Not decided
 Putting the bot or the network into the game; defence for the rule bot; the one-from-ready
 scoring gap (see `docs/study-results/three-stage-bot.md` once Task 1 has copied it).
+
+## Stage 3 gate (2026-11-16)
+
+- Stage 3 of the three-stage bot gets the extra requirement of stage 2: no tile outside the leading line. Two test bots were planned (plan Task 9). (Brian, 2026-11-16, to the Mahjong watch session: "then make phase 3 the extra requirement that is found in phase 2 as well, no irrelevant tile for top priority route")
+- The strict version becomes the default bot `stage`, decided before the match results exist; the old behaviour stays as `stage-gate0` for comparison. (Brian, 2026-11-16, to the Mahjong watch session: "use strict version as default")
+- Open: the 48-hour self-play run (job 154) and its imitation network were made with the old `stage`. Whether they are redone on the new bot is asked of Brian (orchestrator, 2026-11-16 21:40).

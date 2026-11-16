@@ -267,6 +267,14 @@ watch session's plain work copy into this repository first, so the work has a hi
     requirement that is found in phase 2 as well, no irrelevant tile for top priority route".
     Full brief (read it first): `C:\Users\brian\.orchestrator\mahjong-watch\brief-stage3-gate.md`. Today
     `11123456789s1m5p` enters stage 3 while it still holds 1m and 5p.
+  - CHANGE 2026-11-16 21:40 (overrides the lines below where they differ). Brian, to the
+    Mahjong watch session: "use strict version as default". So bot `stage`,
+    `StageBot::default()` and `StageBot::new(3, 1)` use the gate 1 rule; today's behaviour
+    stays as bot `stage-gate0`; `stage-gate2` as below. Matches: `stage` (new),
+    `stage-gate0` (must reproduce +2.54 +- 0.21 digit for digit) and `stage-gate2`, each
+    against three value bots, and one table `stage stage-gate0 stage-gate2 stage-gate0`.
+    Tests that pin the old moves move to `stage-gate0`. Job 154 runs from a frozen package
+    and keeps the old bot; whether it is redone on the new bot is Brian's decision (asked).
   - Files: `crates/search/src/stage.rs`, the bot name list (`bots.rs`), tests beside them,
     `experiments/stage/` for the job scripts, `docs/study-results/stage3-gate.md` (new).
   - Build: add a third switch to `StageBot`. Gate 0 = today's rule, and `StageBot::new(3, 1)`,
