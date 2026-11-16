@@ -26,8 +26,7 @@
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
 use mahjong_search::route::{
-    Route, RouteBot, RouteKey, RouteTable, HELPER_BANDS, NEEDED_BANDS, ROUTES,
-    ROUTE_CELLS,
+    Route, RouteBot, RouteKey, RouteTable, HELPER_BANDS, NEEDED_BANDS, ROUTES, ROUTE_CELLS,
 };
 use mahjong_search::target_value::TILES_LEFT_BUCKETS;
 use mahjong_search::{Agent, SeatView};

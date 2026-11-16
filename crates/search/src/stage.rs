@@ -189,7 +189,7 @@ fn connection(hand: &TileCounts, t: Tile) -> i32 {
     n
 }
 
-/// An edge pair (Brian, 2026-11-16: "lone-pair is 邊張, 1 or 9, 2 or 8 when 1 or 9
+/// An edge pair (Brian, 2026-11-16: "lone-pair is é‚Šå¼µ, 1 or 9, 2 or 8 when 1 or 9
 /// absent respectively"): a pair of 1s or 9s, or of 2s with no 1 in the hand, or of 8s
 /// with no 9 in the hand. "Absent" is read as absent from the own hand (my reading).
 fn edge_pair(hand: &TileCounts, t: Tile) -> bool {
@@ -432,7 +432,13 @@ impl StageBot {
                 .iter()
                 .enumerate()
                 .filter(|(_, (_, k))| k.0 <= self.ready)
-                .map(|(i, &(t, _))| (stage3_value(&discard(view, t), self.ready, &memo), Reverse(i), t))
+                .map(|(i, &(t, _))| {
+                    (
+                        stage3_value(&discard(view, t), self.ready, &memo),
+                        Reverse(i),
+                        t,
+                    )
+                })
                 .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
                 .expect("a candidate");
             let note = Note {
@@ -527,7 +533,7 @@ impl StageBot {
                 .fold(0f32, f32::max);
             key.2 = -(helpers * 100.0) as i32;
         }
-        keyed.sort_by(|a, b| a.1.cmp(&b.1));
+        keyed.sort_by_key(|a| a.1);
         let note = Note {
             stage: if stage1 { 1 } else { 2 },
             line: Some(lead),
@@ -548,7 +554,10 @@ impl StageBot {
         };
         // Stage 3: claim when the 1-step and 2-step count is higher afterwards.
         if faan_dist(view) <= self.ready {
-            let mut best = (stage3_value(view, self.ready, &Memo::default()), Action::Pass);
+            let mut best = (
+                stage3_value(view, self.ready, &Memo::default()),
+                Action::Pass,
+            );
             for &a in legal.iter().filter(melds) {
                 let Some(after) = after_claim(view, a, tile, from) else {
                     continue;
@@ -763,24 +772,55 @@ mod tests {
         assert_eq!(v.concealed.total(), 13);
         let pung = [Action::Pass, Action::Pung];
         // 77s is no edge pair (version 2 passes); 22s, 77s and EE are three pairs (version 3 claims).
-        assert_eq!(StageBot::new(2, 1).claim(&v, t("7s"), 0, &pung), Action::Pass);
-        assert_eq!(StageBot::new(3, 1).claim(&v, t("7s"), 0, &pung), Action::Pung);
-        assert_eq!(StageBot::default().claim(&v, t("2s"), 0, &pung), Action::Pung);
-        assert_eq!(StageBot::default().claim(&v, t("E"), 0, &pung), Action::Pung);
+        assert_eq!(
+            StageBot::new(2, 1).claim(&v, t("7s"), 0, &pung),
+            Action::Pass
+        );
+        assert_eq!(
+            StageBot::new(3, 1).claim(&v, t("7s"), 0, &pung),
+            Action::Pung
+        );
+        assert_eq!(
+            StageBot::default().claim(&v, t("2s"), 0, &pung),
+            Action::Pung
+        );
+        assert_eq!(
+            StageBot::default().claim(&v, t("E"), 0, &pung),
+            Action::Pung
+        );
         // A lone pair in the second kept suit is claimed; one in the third suit is not.
-        assert_eq!(StageBot::default().claim(&view("22s7789sEEN22m9m3p"), t("2m"), 0, &pung), Action::Pung);
+        assert_eq!(
+            StageBot::default().claim(&view("22s7789sEEN22m9m3p"), t("2m"), 0, &pung),
+            Action::Pung
+        );
         let v = view("22s789sEE2345m33p");
-        assert_eq!(StageBot::default().claim(&v, t("3p"), 0, &pung), Action::Pass);
+        assert_eq!(
+            StageBot::default().claim(&v, t("3p"), 0, &pung),
+            Action::Pass
+        );
         // Edge pairs only: 44s is no edge pair; 22s with a 1s is none; 99s always is.
         let three = view("44s99sEEN2m5m9m3p7p1p");
-        assert_eq!(StageBot::new(2, 1).claim(&three, t("4s"), 0, &pung), Action::Pass);
+        assert_eq!(
+            StageBot::new(2, 1).claim(&three, t("4s"), 0, &pung),
+            Action::Pass
+        );
         // Version 3: 44s, 99s and EE are three pairs for the flush, so 4s is claimed.
-        assert_eq!(StageBot::new(3, 1).claim(&three, t("4s"), 0, &pung), Action::Pung);
-        assert_eq!(StageBot::new(3, 1).claim(&view("44s9sEENW2m5m9m3p7p1p"), t("4s"), 0, &pung), Action::Pass);
-        assert_eq!(StageBot::default().claim(&view("44s99sEEN2m5m9m3p7p1p"), t("9s"), 0, &pung), Action::Pung);
-        assert_eq!(StageBot::new(2, 1).claim(&view("122s99sEEN2m5m9m3p7p"), t("2s"), 0, &pung), Action::Pass);
-
-
+        assert_eq!(
+            StageBot::new(3, 1).claim(&three, t("4s"), 0, &pung),
+            Action::Pung
+        );
+        assert_eq!(
+            StageBot::new(3, 1).claim(&view("44s9sEENW2m5m9m3p7p1p"), t("4s"), 0, &pung),
+            Action::Pass
+        );
+        assert_eq!(
+            StageBot::default().claim(&view("44s99sEEN2m5m9m3p7p1p"), t("9s"), 0, &pung),
+            Action::Pung
+        );
+        assert_eq!(
+            StageBot::new(2, 1).claim(&view("122s99sEEN2m5m9m3p7p"), t("2s"), 0, &pung),
+            Action::Pass
+        );
     }
 
     #[test]
@@ -799,7 +839,10 @@ mod tests {
         // One honour pair fewer: the count is 6, so pass.
         let v = view("1357sEEWN2m5m9m3p8p");
         let legal = [Action::Pass, Action::Chow(t("5s"))];
-        assert_eq!(StageBot::default().claim(&v, t("6s"), 0, &legal), Action::Pass);
+        assert_eq!(
+            StageBot::default().claim(&v, t("6s"), 0, &legal),
+            Action::Pass
+        );
     }
 
     #[test]
@@ -835,7 +878,10 @@ mod tests {
             assert_eq!(stage3_value(&v, 2, &Memo::default()), one, "{hand}");
         }
         // Three or more from ready: 0 under both.
-        assert_eq!(stage3_value(&view("147m258p369sESWN"), 2, &Memo::default()), 0.0);
+        assert_eq!(
+            stage3_value(&view("147m258p369sESWN"), 2, &Memo::default()),
+            0.0
+        );
     }
 
     #[test]
@@ -873,9 +919,14 @@ mod tests {
             for d in v.concealed.kinds() {
                 let g = Goals::of(&discard(&v, d));
                 let all = g.dists(&Suit::ALL);
-                for i in 0..4 { best[i] = best[i].min(all[i]); }
+                for i in 0..4 {
+                    best[i] = best[i].min(all[i]);
+                }
             }
-            println!("{hand}: flush {} pungs {} orphans {} chows {}", best[0], best[1], best[2], best[3]);
+            println!(
+                "{hand}: flush {} pungs {} orphans {} chows {}",
+                best[0], best[1], best[2], best[3]
+            );
         }
     }
 }

@@ -245,3 +245,7 @@ its test tools were merged from the Mahjong watch work copy. Left out on purpose
   `wasm`, `register_stage.py`, …) and its `positions` and `runs` folders; the bot builds without them.
 - The work copy's `features.rs` and `cnn.rs`: identical to this checkout's (no difference found).
 - `chain2` and `route` need the env vars `ROUTE_HELPERS` / `ROUTE_TABLE` pointing at files that stay in the work copy; they panic without them. `stage` does not.
+
+## Task 2b of the self-play plan (2026-11-16)
+- `models/race-belief.mjnn` in the worker clone: the race loop's file of 11 Nov (md5 `b480cdce79f90794f3cea46a60c9de61`) is kept as `race-belief.mjnn.loop-2026-11-11`; the standalone checkout's file (md5 `9b3ca693f04416879f0ac579c1200e34`) is now `race-belief.mjnn`, and `model_files.rs` passes with it.
+- Not done: pointing the shared `mahjong` env's `mahjong.pth` back at `hk-mahjong-lab-workers\python`. The permission check refused the write; the orchestrator said to skip it (job 154 runs from `hk-mahjong-lab-3`). It still points at `hk-mahjong-lab-3\python`; harmless while every job sets `PYTHONPATH` and checks `mahjong.__file__`.

@@ -82,7 +82,8 @@ fn class(t: Tile) -> usize {
 /// Plays one hand; `stage_seat` holds the three-stage bot. Returns `[stage, value]`.
 fn play(rules: &RuleSet, deal_seed: u64, stage_seat: usize) -> [Agg; 2] {
     let mut state = State::new_deal(rules.clone(), &mut ChaCha8Rng::seed_from_u64(deal_seed));
-    let mut rng = ChaCha8Rng::seed_from_u64(deal_seed.wrapping_mul(4).wrapping_add(stage_seat as u64));
+    let mut rng =
+        ChaCha8Rng::seed_from_u64(deal_seed.wrapping_mul(4).wrapping_add(stage_seat as u64));
     let value = Bot::by_name("value").expect("the value bot");
     let mut out = [Agg::default(), Agg::default()];
     let mut last = [Rec::default(); 4];
@@ -158,7 +159,13 @@ fn main() {
     let rules = RuleSet::default();
     let total = (0..deals * 4)
         .into_par_iter()
-        .map(|i| play(&rules, seed.wrapping_mul(1_000_003).wrapping_add(i / 4), (i % 4) as usize))
+        .map(|i| {
+            play(
+                &rules,
+                seed.wrapping_mul(1_000_003).wrapping_add(i / 4),
+                (i % 4) as usize,
+            )
+        })
         .reduce(
             || [Agg::default(), Agg::default()],
             |mut a, b| {
