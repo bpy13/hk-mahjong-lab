@@ -19,7 +19,7 @@
 //! the flush suit, with 8 or more flush tiles and paired honours, and only when
 //! the flush is closer afterwards.
 
-use crate::bots::{after_claim, live_winning_tiles, rank_discards, Metric};
+use crate::bots::{after_claim, live_winning_tiles, rank_discards, Key as RankKey, Metric};
 use crate::ev::after_own_kong;
 use crate::route::{helpers_of, Route, RouteTarget};
 use crate::view::SeatView;
@@ -400,10 +400,26 @@ pub struct Note {
 /// first build; default), 2 = two from ready (Brian, 2026-11-16: "I mean 2 from
 /// ready, not 2 from winning"; the scoring there is the builder's reading, see
 /// [`stage3_value`]).
+///
+/// `gate` decides whether a hand within `ready` may enter stage 3 while the flush
+/// leads and the hand still holds a tile outside the kept suits (the `off` check
+/// of stage 2):
+/// 0 = it may (the first build, measured at +2.54 against three value bots; bot
+///     `stage-gate0`);
+/// 1 = it may not, even when ready: it plays stage 1 (Brian, 2026-11-16: "make
+///     phase 3 the extra requirement that is found in phase 2 as well, no
+///     irrelevant tile for top priority route"; and "use strict version as
+///     default": the default, set by [`StageBot::new`]);
+/// 2 = like 1, but a ready hand stays in stage 3 (the watch session's variant, for
+///     comparison; not Brian's words).
+///
+/// Leads other than the flush have no outside tile, so stage 3 starts there as
+/// with gate 0 (the watch session's reading).
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
     pub ready: i8,
+    pub gate: u8,
 }
 
 impl Default for StageBot {
@@ -413,8 +429,28 @@ impl Default for StageBot {
 }
 
 impl StageBot {
+    /// A bot with the strict stage 3 gate (gate 1).
     pub const fn new(pung: u8, ready: i8) -> StageBot {
-        StageBot { pung, ready }
+        StageBot {
+            pung,
+            ready,
+            gate: 1,
+        }
+    }
+
+    /// The same bot with another stage 3 gate (0, 1 or 2).
+    pub const fn with_gate(self, gate: u8) -> StageBot {
+        StageBot { gate, ..self }
+    }
+
+    /// Whether the gate lets a hand with an outside tile into stage 3 anyway:
+    /// always with gate 0, when ready (`dist` 0) with gate 2, never with gate 1.
+    fn gate_open(&self, dist: i8) -> bool {
+        match self.gate {
+            0 => true,
+            2 => dist == 0,
+            _ => false,
+        }
     }
 
     /// The discard from a 14-tile view among `candidates`.
@@ -425,27 +461,11 @@ impl StageBot {
         rng: &mut R,
     ) -> (Tile, Note) {
         let ranked = rank_discards(view, candidates, Metric::Faan);
-        // Stage 3: within `ready` steps of ready after the best discard.
-        if ranked[0].1 .0 <= self.ready {
-            let memo = Memo::default();
-            let best = ranked
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, k))| k.0 <= self.ready)
-                .map(|(i, &(t, _))| {
-                    (
-                        stage3_value(&discard(view, t), self.ready, &memo),
-                        Reverse(i),
-                        t,
-                    )
-                })
-                .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
-                .expect("a candidate");
-            let note = Note {
-                stage: 3,
-                line: None,
-            };
-            return (best.2, note);
+        // Stage 3: within `ready` steps of ready after the best discard (and,
+        // with a gate, no tile outside the flush; checked below).
+        let near = ranked[0].1 .0 <= self.ready;
+        if near && self.gate == 0 {
+            return self.stage3_discard(view, &ranked);
         }
         let after: Vec<(Tile, SeatView, Goals)> = candidates
             .iter()
@@ -472,14 +492,7 @@ impl StageBot {
         };
         let lines = order(LINES.map(best_of));
         let lead = lines[0];
-        if best_of(lead) >= FAR {
-            // No line is feasible: play like the value bot.
-            let note = Note {
-                stage: 0,
-                line: None,
-            };
-            return (ranked[0].0, note);
-        }
+        let feasible = best_of(lead) < FAR;
         let kept = if lead == Line::Flush {
             kept_suits(view, &suits)
         } else {
@@ -488,12 +501,64 @@ impl StageBot {
         let off: Vec<Tile> = candidates
             .iter()
             .copied()
-            .filter(|&t| lead == Line::Flush && !fits(t, &kept))
+            .filter(|&t| feasible && lead == Line::Flush && !fits(t, &kept))
             .collect();
+        if near && (off.is_empty() || self.gate_open(ranked[0].1 .0)) {
+            return self.stage3_discard(view, &ranked);
+        }
+        if !feasible {
+            // No line is feasible: play like the value bot.
+            let note = Note {
+                stage: 0,
+                line: None,
+            };
+            return (ranked[0].0, note);
+        }
+        self.line_discard(view, &after, &suits, &lines, &kept, &off, candidates, rng)
+    }
+
+    /// Stage 3 discard: the best 1-step and 2-step count among the discards
+    /// within `ready` (`ranked` from [`rank_discards`], best first).
+    fn stage3_discard(&self, view: &SeatView, ranked: &[(Tile, RankKey)]) -> (Tile, Note) {
+        let memo = Memo::default();
+        let best = ranked
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, k))| k.0 <= self.ready)
+            .map(|(i, &(t, _))| {
+                (
+                    stage3_value(&discard(view, t), self.ready, &memo),
+                    Reverse(i),
+                    t,
+                )
+            })
+            .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .expect("a candidate");
+        let note = Note {
+            stage: 3,
+            line: None,
+        };
+        (best.2, note)
+    }
+
+    /// Stage 1 or 2 discard on the leading line `lines[0]`.
+    #[allow(clippy::too_many_arguments)]
+    fn line_discard<R: Rng + ?Sized>(
+        &self,
+        view: &SeatView,
+        after: &[(Tile, SeatView, Goals)],
+        suits: &[Suit],
+        lines: &[Line; 4],
+        kept: &[Suit],
+        off: &[Tile],
+        candidates: &[Tile],
+        rng: &mut R,
+    ) -> (Tile, Note) {
+        let lead = lines[0];
         // Stage 1: tiles outside the flush go first. Every other line holds
         // spare tiles until it is ready, so it stays in stage 1.
         let stage1 = lead != Line::Flush || !off.is_empty();
-        let pool = if off.is_empty() { candidates } else { &off };
+        let pool = if off.is_empty() { candidates } else { off };
         // (distance, -faan, -helpers, other lines' distances, connection,
         // -visible, random): lowest wins.
         type Key = (i8, i32, i32, [i8; 3], i32, i32, u32);
@@ -501,9 +566,9 @@ impl StageBot {
             .iter()
             .filter(|(t, _, _)| pool.contains(t))
             .map(|(t, _, g)| {
-                let targets = g.list(lead, &kept);
+                let targets = g.list(lead, kept);
                 let faan = targets.first().map_or(0, |x| x.faan as i32);
-                let all = g.dists(&suits);
+                let all = g.dists(suits);
                 let mut others = [0i8; 3];
                 if stage1 {
                     for (o, l) in others.iter_mut().zip(&lines[1..]) {
@@ -527,7 +592,7 @@ impl StageBot {
         for (t, key) in keyed.iter_mut().filter(|k| (k.1 .0, k.1 .1) == top) {
             let (_, v, g) = after.iter().find(|a| a.0 == *t).expect("candidate");
             let helpers = g
-                .list(lead, &kept)
+                .list(lead, kept)
                 .iter()
                 .map(|x| helpers_of(&v.hand_view(), route_of(lead), x).0)
                 .fold(0f32, f32::max);
@@ -552,8 +617,23 @@ impl StageBot {
                 .map(|d| f(&discard(v, d)))
                 .fold(f64::NEG_INFINITY, f64::max)
         };
+        let goals = Goals::of(view);
+        let flush_dist = [0, 1, 2].map(|s| dist(&goals.flush[s]));
+        let suits = suit_order(view, flush_dist);
+        let d = goals.dists(&suits);
+        let lead = order(d)[0];
+        let feasible = d[lead as usize] < FAR;
+        let kept = if feasible && lead == Line::Flush {
+            kept_suits(view, &suits)
+        } else {
+            Vec::new()
+        };
+        // A tile outside the leading flush (the stage 2 check below).
+        let outside =
+            feasible && lead == Line::Flush && !view.concealed.kinds().all(|t| fits(t, &kept));
         // Stage 3: claim when the 1-step and 2-step count is higher afterwards.
-        if faan_dist(view) <= self.ready {
+        let now = faan_dist(view);
+        if now <= self.ready && (!outside || self.gate_open(now)) {
             let mut best = (
                 stage3_value(view, self.ready, &Memo::default()),
                 Action::Pass,
@@ -575,12 +655,7 @@ impl StageBot {
             }
             return best.1;
         }
-        let goals = Goals::of(view);
-        let flush_dist = [0, 1, 2].map(|s| dist(&goals.flush[s]));
-        let suits = suit_order(view, flush_dist);
-        let d = goals.dists(&suits);
-        let lead = order(d)[0];
-        if d[lead as usize] >= FAR {
+        if !feasible {
             return Action::Pass;
         }
         let pung = legal.contains(&Action::Pung);
@@ -590,12 +665,11 @@ impl StageBot {
             Line::Pungs if pung => Action::Pung,
             Line::Pungs => Action::Pass,
             Line::Flush => {
-                let kept = kept_suits(view, &suits);
                 let main = suits[0];
                 // Minus the flush distance in the main suit (higher is better).
                 let closeness = |v: &SeatView| -(dist(&Goals::of(v).flush[main as usize]) as f64);
                 let now = closeness(view);
-                if view.concealed.kinds().all(|t| fits(t, &kept)) {
+                if !outside {
                     // Stage 2: claim when the flush is closer afterwards.
                     let mut best = (now, Action::Pass);
                     for &a in legal.iter().filter(melds) {
@@ -738,7 +812,11 @@ mod tests {
     fn pick(hand: &str) -> (Tile, Note) {
         let v = view(hand);
         let c: Vec<Tile> = v.concealed.kinds().collect();
-        StageBot::default().pick_discard(&v, &c, &mut rand::rngs::StdRng::seed_from_u64(1))
+        StageBot::default().with_gate(0).pick_discard(
+            &v,
+            &c,
+            &mut rand::rngs::StdRng::seed_from_u64(1),
+        )
     }
 
     #[test]
@@ -773,52 +851,81 @@ mod tests {
         let pung = [Action::Pass, Action::Pung];
         // 77s is no edge pair (version 2 passes); 22s, 77s and EE are three pairs (version 3 claims).
         assert_eq!(
-            StageBot::new(2, 1).claim(&v, t("7s"), 0, &pung),
+            StageBot::new(2, 1)
+                .with_gate(0)
+                .claim(&v, t("7s"), 0, &pung),
             Action::Pass
         );
         assert_eq!(
-            StageBot::new(3, 1).claim(&v, t("7s"), 0, &pung),
+            StageBot::new(3, 1)
+                .with_gate(0)
+                .claim(&v, t("7s"), 0, &pung),
             Action::Pung
         );
         assert_eq!(
-            StageBot::default().claim(&v, t("2s"), 0, &pung),
+            StageBot::default()
+                .with_gate(0)
+                .claim(&v, t("2s"), 0, &pung),
             Action::Pung
         );
         assert_eq!(
-            StageBot::default().claim(&v, t("E"), 0, &pung),
+            StageBot::default().with_gate(0).claim(&v, t("E"), 0, &pung),
             Action::Pung
         );
         // A lone pair in the second kept suit is claimed; one in the third suit is not.
         assert_eq!(
-            StageBot::default().claim(&view("22s7789sEEN22m9m3p"), t("2m"), 0, &pung),
+            StageBot::default()
+                .with_gate(0)
+                .claim(&view("22s7789sEEN22m9m3p"), t("2m"), 0, &pung),
             Action::Pung
         );
         let v = view("22s789sEE2345m33p");
         assert_eq!(
-            StageBot::default().claim(&v, t("3p"), 0, &pung),
+            StageBot::default()
+                .with_gate(0)
+                .claim(&v, t("3p"), 0, &pung),
             Action::Pass
         );
         // Edge pairs only: 44s is no edge pair; 22s with a 1s is none; 99s always is.
         let three = view("44s99sEEN2m5m9m3p7p1p");
         assert_eq!(
-            StageBot::new(2, 1).claim(&three, t("4s"), 0, &pung),
+            StageBot::new(2, 1)
+                .with_gate(0)
+                .claim(&three, t("4s"), 0, &pung),
             Action::Pass
         );
         // Version 3: 44s, 99s and EE are three pairs for the flush, so 4s is claimed.
         assert_eq!(
-            StageBot::new(3, 1).claim(&three, t("4s"), 0, &pung),
+            StageBot::new(3, 1)
+                .with_gate(0)
+                .claim(&three, t("4s"), 0, &pung),
             Action::Pung
         );
         assert_eq!(
-            StageBot::new(3, 1).claim(&view("44s9sEENW2m5m9m3p7p1p"), t("4s"), 0, &pung),
+            StageBot::new(3, 1).with_gate(0).claim(
+                &view("44s9sEENW2m5m9m3p7p1p"),
+                t("4s"),
+                0,
+                &pung
+            ),
             Action::Pass
         );
         assert_eq!(
-            StageBot::default().claim(&view("44s99sEEN2m5m9m3p7p1p"), t("9s"), 0, &pung),
+            StageBot::default().with_gate(0).claim(
+                &view("44s99sEEN2m5m9m3p7p1p"),
+                t("9s"),
+                0,
+                &pung
+            ),
             Action::Pung
         );
         assert_eq!(
-            StageBot::new(2, 1).claim(&view("122s99sEEN2m5m9m3p7p"), t("2s"), 0, &pung),
+            StageBot::new(2, 1).with_gate(0).claim(
+                &view("122s99sEEN2m5m9m3p7p"),
+                t("2s"),
+                0,
+                &pung
+            ),
             Action::Pass
         );
     }
@@ -830,7 +937,9 @@ mod tests {
         let take = |tile: &str, lows: &[&str]| {
             let mut legal = vec![Action::Pass];
             legal.extend(lows.iter().map(|l| Action::Chow(t(l))));
-            StageBot::default().claim(&v, t(tile), 0, &legal)
+            StageBot::default()
+                .with_gate(0)
+                .claim(&v, t(tile), 0, &legal)
         };
         // 4s: the chow 345s leaves 1s and 7s alone, so pass.
         assert_eq!(take("4s", &["3s"]), Action::Pass);
@@ -840,7 +949,9 @@ mod tests {
         let v = view("1357sEEWN2m5m9m3p8p");
         let legal = [Action::Pass, Action::Chow(t("5s"))];
         assert_eq!(
-            StageBot::default().claim(&v, t("6s"), 0, &legal),
+            StageBot::default()
+                .with_gate(0)
+                .claim(&v, t("6s"), 0, &legal),
             Action::Pass
         );
     }
@@ -889,26 +1000,118 @@ mod tests {
         let v = view(&format!("{TWO_AWAY}9m"));
         let c: Vec<Tile> = v.concealed.kinds().collect();
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        let (_, note) = StageBot::new(3, 1).pick_discard(&v, &c, &mut rng);
+        let (_, note) = StageBot::new(3, 1)
+            .with_gate(0)
+            .pick_discard(&v, &c, &mut rng);
         assert_ne!(note.stage, 3);
-        let (tile, note) = StageBot::new(3, 2).pick_discard(&v, &c, &mut rng);
+        let (tile, note) = StageBot::new(3, 2)
+            .with_gate(0)
+            .pick_discard(&v, &c, &mut rng);
         assert_eq!(note.stage, 3);
         assert!(tile.suit() != Some(Suit::Bamboo), "{tile}");
+    }
+
+    fn pick_with(bot: StageBot, hand: &str) -> (Tile, Note) {
+        let v = view(hand);
+        let c: Vec<Tile> = v.concealed.kinds().collect();
+        bot.pick_discard(&v, &c, &mut rand::rngs::StdRng::seed_from_u64(1))
+    }
+
+    /// Brian's example (2026-11-16): one from ready while it still holds 1m and 5p.
+    const OUTSIDE: &str = "11123456789s1m5p";
+
+    #[test]
+    fn gate_one_keeps_outside_tiles_out_of_stage_three() {
+        assert_eq!(faan_dist(&view(OUTSIDE)), 1);
+        // The example hand after drawing 9m: today it is in stage 3.
+        let hand = format!("{OUTSIDE}9m");
+        let (_, note) = pick_with(StageBot::new(3, 1).with_gate(0), &hand);
+        assert_eq!(note.stage, 3);
+        // Gate 1 (and gate 2, as it is not ready): stage 1, an outside tile goes.
+        for gate in [1, 2] {
+            let (tile, note) = pick_with(StageBot::new(3, 1).with_gate(gate), &hand);
+            assert_eq!(
+                (note.stage, note.line),
+                (1, Some(Line::Flush)),
+                "gate {gate}"
+            );
+            assert!(
+                ["1m", "5p", "9m"].contains(&tile.to_string().as_str()),
+                "{tile}"
+            );
+        }
+    }
+
+    #[test]
+    fn gate_two_lets_a_ready_hand_stay_in_stage_three() {
+        // Nine gates, ready, with a drawn 5p as its one outside tile.
+        let hand = "1112345678999s5p";
+        assert_eq!(faan_dist(&discard(&view(hand), t("5p"))), 0);
+        let (_, note) = pick_with(StageBot::new(3, 1).with_gate(0), hand);
+        assert_eq!(note.stage, 3);
+        let (tile, note) = pick_with(StageBot::new(3, 1).with_gate(1), hand);
+        assert_eq!((note.stage, tile), (1, t("5p")));
+        let (tile, note) = pick_with(StageBot::new(3, 1).with_gate(2), hand);
+        assert_eq!((note.stage, tile), (3, t("5p")));
+        // A hand with every tile inside the flush enters stage 3 under every gate.
+        for gate in 0..3 {
+            let (_, note) = pick_with(StageBot::new(3, 1).with_gate(gate), "1112345678999s9s");
+            assert_eq!(note.stage, 3, "gate {gate}");
+        }
+    }
+
+    #[test]
+    fn gate_applies_to_claims() {
+        // The example hand (13 tiles, one from ready) is offered a 4s. Today stage 3
+        // chows 456s to be ready; under gates 1 and 2 the hand plays stage 1, where
+        // the chow does not bring the flush closer (1m and 5p are still to go).
+        let v = view(OUTSIDE);
+        let legal = [
+            Action::Pass,
+            Action::Chow(t("2s")),
+            Action::Chow(t("3s")),
+            Action::Chow(t("4s")),
+        ];
+        let claim = |gate| {
+            StageBot::new(3, 1)
+                .with_gate(gate)
+                .claim(&v, t("4s"), 0, &legal)
+        };
+        assert_eq!(claim(0), Action::Chow(t("4s")));
+        assert_eq!(claim(1), Action::Pass);
+        assert_eq!(claim(2), Action::Pass);
+        // A ready hand with no outside tile claims as today under every gate.
+        let ready = view("1112345678999s");
+        let pung = [Action::Pass, Action::Pung];
+        for gate in 0..3 {
+            assert_eq!(
+                StageBot::new(3, 1)
+                    .with_gate(gate)
+                    .claim(&ready, t("9s"), 0, &pung),
+                StageBot::new(3, 1)
+                    .with_gate(0)
+                    .claim(&ready, t("9s"), 0, &pung),
+                "gate {gate}"
+            );
+        }
     }
 
     #[test]
     fn bot_names_set_both_switches() {
         let of = |name: &str| match crate::Bot::by_name(name) {
-            Some(crate::Bot::Stage(b)) => (b.pung, b.ready),
+            Some(crate::Bot::Stage(b)) => (b.pung, b.ready, b.gate),
             _ => panic!("{name} is no three-stage bot"),
         };
-        assert_eq!(of("stage"), (3, 1));
-        assert_eq!(of("stage1"), (1, 1));
-        assert_eq!(of("stage2"), (2, 1));
-        assert_eq!(of("stage-orig"), (1, 1));
-        assert_eq!(of("stage-pung"), (3, 1));
-        assert_eq!(of("stage-ready2"), (1, 2));
-        assert_eq!(of("stage-both"), (3, 2));
+        assert_eq!(of("stage"), (3, 1, 1));
+        assert_eq!(of("stage-gate0"), (3, 1, 0));
+        assert_eq!(of("stage1"), (1, 1, 0));
+        assert_eq!(of("stage2"), (2, 1, 0));
+        assert_eq!(of("stage-orig"), (1, 1, 0));
+        assert_eq!(of("stage-pung"), (3, 1, 0));
+        assert_eq!(of("stage-ready2"), (1, 2, 0));
+        assert_eq!(of("stage-both"), (3, 2, 0));
+        assert_eq!(of("stage-gate1"), (3, 1, 1));
+        assert_eq!(of("stage-gate2"), (3, 1, 2));
     }
 
     #[test]

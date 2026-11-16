@@ -1,9 +1,11 @@
 //! Where deal-ins come from: the three-stage bot against three value bots.
 //!
-//! `dealin <deals> [seed]`. Every deal is played four times with the stage bot in
-//! each seat. Every discard is counted in buckets (own discard number, tile class,
-//! own distance, unseen copies, opponents' exposed melds); a deal-in is charged to
-//! the bucket of the discard that was won on. Rates are deal-ins per 1,000 discards.
+//! `dealin <deals> [seed] [gate]`. `gate` is the three-stage bot's stage 3 gate
+//! (0, 1 or 2, see [`StageBot`]; default 1, the default bot's). Every deal is
+//! played four times with the stage bot in each seat. Every discard is counted in
+//! buckets (own discard number, tile class, own distance, unseen copies,
+//! opponents' exposed melds); a deal-in is charged to the bucket of the discard
+//! that was won on. Rates are deal-ins per 1,000 discards.
 use mahjong_analysis::faan_shanten;
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
@@ -80,8 +82,8 @@ fn class(t: Tile) -> usize {
 }
 
 /// Plays one hand; `stage_seat` holds the three-stage bot. Returns `[stage, value]`.
-fn play(rules: &RuleSet, deal_seed: u64, stage_seat: usize) -> [Agg; 2] {
-    let mut state = State::new_deal(rules.clone(), &mut ChaCha8Rng::seed_from_u64(deal_seed));
+fn play(rules: &RuleSet, bot: StageBot, deal_seed: u64, stage_seat: usize) -> [Agg; 2] {
+    let mut state = State::new_deal(*rules, &mut ChaCha8Rng::seed_from_u64(deal_seed));
     let mut rng =
         ChaCha8Rng::seed_from_u64(deal_seed.wrapping_mul(4).wrapping_add(stage_seat as u64));
     let value = Bot::by_name("value").expect("the value bot");
@@ -93,7 +95,7 @@ fn play(rules: &RuleSet, deal_seed: u64, stage_seat: usize) -> [Agg; 2] {
         let seat = state.current_player().expect("not over");
         let kind = usize::from(seat != stage_seat);
         let (action, note) = if kind == 0 {
-            StageBot::default().decide(&state, &legal, &mut rng)
+            bot.decide(&state, &legal, &mut rng)
         } else {
             (value.choose(&state, &legal, &mut rng), None)
         };
@@ -156,12 +158,18 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let deals: u64 = args.first().and_then(|d| d.parse().ok()).unwrap_or(200);
     let seed: u64 = args.get(1).and_then(|d| d.parse().ok()).unwrap_or(1);
+    let bot = match args.get(2).and_then(|d| d.parse().ok()) {
+        Some(gate) => StageBot::default().with_gate(gate),
+        None => StageBot::default(),
+    };
+    println!("stage bot: {bot:?}");
     let rules = RuleSet::default();
     let total = (0..deals * 4)
         .into_par_iter()
         .map(|i| {
             play(
                 &rules,
+                bot,
                 seed.wrapping_mul(1_000_003).wrapping_add(i / 4),
                 (i % 4) as usize,
             )

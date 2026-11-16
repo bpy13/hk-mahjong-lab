@@ -597,14 +597,21 @@ impl Bot {
             "closed" => Bot::Value(Value::closed()),
             "fast" => Bot::Fast(Fast::default()),
             "stage" => Bot::Stage(StageBot::default()),
-            "stage1" => Bot::Stage(StageBot::new(1, 1)),
-            "stage2" => Bot::Stage(StageBot::new(2, 1)),
+            "stage1" => Bot::Stage(StageBot::new(1, 1).with_gate(0)),
+            "stage2" => Bot::Stage(StageBot::new(2, 1).with_gate(0)),
             // Brian's table test, 2026-11-16: pung rule 1 or 3, stage 3 from one
             // or two from ready.
-            "stage-orig" => Bot::Stage(StageBot::new(1, 1)),
-            "stage-pung" => Bot::Stage(StageBot::new(3, 1)),
-            "stage-ready2" => Bot::Stage(StageBot::new(1, 2)),
-            "stage-both" => Bot::Stage(StageBot::new(3, 2)),
+            "stage-orig" => Bot::Stage(StageBot::new(1, 1).with_gate(0)),
+            "stage-pung" => Bot::Stage(StageBot::new(3, 1).with_gate(0)),
+            "stage-ready2" => Bot::Stage(StageBot::new(1, 2).with_gate(0)),
+            "stage-both" => Bot::Stage(StageBot::new(3, 2).with_gate(0)),
+            // Brian, 2026-11-16: stage 3 only without a tile outside the leading
+            // flush (gate 1, "use strict version as default": `stage` is gate 1);
+            // gate 0 is the first build; gate 2 lets a ready hand stay in stage 3.
+            // The older names above keep gate 0: they name measured builds.
+            "stage-gate0" => Bot::Stage(StageBot::default().with_gate(0)),
+            "stage-gate1" => Bot::Stage(StageBot::default()),
+            "stage-gate2" => Bot::Stage(StageBot::default().with_gate(2)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
