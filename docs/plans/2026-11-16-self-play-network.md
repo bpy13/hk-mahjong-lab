@@ -131,7 +131,17 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 3 – Imitation, then self-play (opus; graphics card through the queue)
 
-- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (taken: slot 1, 2026-11-16 19:07)
+- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (waiting: jobs 151 and 152)
+  - Status (slot 1, 2026-11-16 19:40): built and pushed in 42f828e (label layout 3 with the
+    packed history, `distill_cnn --history`, both job scripts; tests pass). Queued from the
+    worker clone `repo\.worktrees\hk-mahjong-lab-workers`: job 151 (cpu,
+    `imitation_data.ps1`, 3 M rows into `runs\rl-stage\labels`) and job 152 (gpu, after 151,
+    behind gpu job 150; `imitation.ps1`: training, then 4,000 deals vs three `stage`).
+    Check: `jobq.ps1 status`, `jobq.ps1 log 152`; each log's first line prints
+    `mahjong.__file__` (must lie under the worker clone). Results in that clone:
+    `runs\rl-stage\imitation\result.json` (`held_out.top1_agreement`, `held_out.top1_ci95`)
+    and `runs\rl-stage\imitation\vs-stage.txt` (first line = the network). Finish: fill the
+    table in `docs/study-results/self-play-network.md`, board line, tick or inbox.
   - Files: `experiments/stage/imitation_data.ps1` (cpu lane), `experiments/stage/imitation.ps1`
     (gpu lane), `python/mahjong/rl/distill_cnn.py` only as far as the new input needs,
     `docs/study-results/self-play-network.md` (new), `docs/board.md`.
