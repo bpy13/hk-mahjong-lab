@@ -60,6 +60,12 @@ watch session's plain work copy into this repository first, so the work has a hi
   `repo\hk-mahjong-lab\models\`, read-only. Build `mahjong._core` in your own checkout before a
   queue job runs from it.
 - The watch session's folder `C:\Users\brian\.orchestrator\mahjong-watch\` is read-only.
+- The `mahjong` conda env is shared by all workers and queue jobs. Never run
+  `pip install -e` into it or into the base env from a worker checkout (2026-11-16: a worker
+  repointed it at its own checkout). Build `_core` into your checkout, set `PYTHONPATH` to your
+  checkout's `python` folder, call `C:\Users\brian\miniconda3\envs\mahjong\python.exe` by full path, and start
+  every job script with a check that `mahjong.__file__` lies under the script's own checkout
+  (exit 1 if not).
 - The rule bot's numbers do not change in this plan.
 - Nothing is put into the game (hk-games) by this plan.
 
