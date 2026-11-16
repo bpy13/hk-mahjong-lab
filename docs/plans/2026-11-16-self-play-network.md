@@ -125,7 +125,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 3 – Imitation, then self-play (opus; graphics card through the queue)
 
-- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3
+- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (taken: slot 1, 2026-11-16 19:07)
   - Files: `experiments/stage/imitation_data.ps1` (cpu lane), `experiments/stage/imitation.ps1`
     (gpu lane), `python/mahjong/rl/distill_cnn.py` only as far as the new input needs,
     `docs/study-results/self-play-network.md` (new), `docs/board.md`.
