@@ -5,9 +5,10 @@ Plan: `docs/plans/2026-11-16-self-play-network.md`. Baseline: `stage` (`StageBot
 
 ## Task 4: imitation start
 
-**Status (2026-11-16 19:40): data and training queued, no result yet.** Jobs 151 (cpu lane,
-data) and 152 (gpu lane, after 151, training and the match). Both run from the worker clone
-`repo\.worktrees\hk-mahjong-lab-workers`.
+**Status (2026-11-16): done, both pass marks met.** Jobs 151 (cpu lane, data, 19:50-20:00)
+and 152 (gpu lane, training and the match, 20:01-20:26) ended with exit code 0. Both ran from
+the worker clone `repo\.worktrees\hk-mahjong-lab-workers`; the network is
+`models\stage-imitation.pt` / `.mjnn` there (not in git).
 
 ### Data
 - 3,000,000 decisions of `stage`, written by the `label` example (frozen copy
@@ -41,8 +42,23 @@ data) and 152 (gpu lane, after 151, training and the match). Both run from the w
   labels, training with the history block, int8 export (99.9 % top-1 agreement with fp32),
   and the network plays in `compare` against three `stage` bots.
 
-### Results (to be filled in when job 152 has ended)
+### Results (job 152, 2026-11-16)
 | Measure | Pass mark | Result | 95 % range |
 |---|---|---|---|
-| Held-out agreement with `stage` | ≥ 90 % | pending (`result.json`: `held_out.top1_agreement`) | `held_out.top1_ci95` (normal approximation; rows of one hand are correlated, so the true range is a little wider) |
-| Network vs three `stage`, 4,000 deals | ≥ −1.0 per hand | pending (`vs-stage.txt`, first line) | ± on that line |
+| Held-out agreement with `stage` (200,000 decisions) | ≥ 90 % | **93.1 %** (0.93121) | ± 0.11 points (normal approximation; rows of one hand are correlated, so the true range is a little wider) |
+| Network vs three `stage`, 4,000 deals | ≥ −1.0 per hand | **−0.24 per hand** | ± 0.71 (−0.95 to +0.47) |
+
+- Training: 6 epochs of 2.8 M rows in 21.8 minutes on the card (not timed out); held-out
+  agreement by epoch 87.7, 90.1, 91.7, 92.6, 92.9, 93.1 %; target head 98.6 %; 2,730,545
+  parameters; int8 export agrees with fp32 on 99.5 % of 1,000 rows.
+- Match (int8 network in one seat, three `stage`, seats rotated, draws 5.2 %):
+
+  | Seat | Points per hand | Win | Deal-in | Avg faan |
+  |---|---|---|---|---|
+  | network | −0.24 ± 0.71 | 23.6 % | 19.1 % | 5.1 |
+  | stage | +0.05 ± 0.71 | 24.1 % | 18.8 % | 5.1 |
+  | stage | +0.01 ± 0.71 | 24.3 % | 18.6 % | 5.1 |
+  | stage | +0.18 ± 0.70 | 24.3 % | 18.0 % | 5.1 |
+
+- Reading: the network copies `stage` closely and plays within noise of it (its range holds
+  zero); it wins a little less and deals in a little more. Task 6 starts from this network.
