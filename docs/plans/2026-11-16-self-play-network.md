@@ -219,7 +219,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     the doudizhu repository) names a cause by then, say in the board line whether it applies
     here. Do not change the fade or other training settings in this task.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (taken: slot 3, 2026-11-16 22:00)
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (waiting: job 154, gpu lane, runs from worker checkout hk-mahjong-lab-3; check: `Get-Content runsl-stageprogress.txt; runsl-stageog.json; runsl-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds

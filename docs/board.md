@@ -2,6 +2,8 @@
 
 ## Workers
 
+- Task 6 (slot 3, 2026-11-16): queued, not finished: job 154 (gpu lane, `rl-stage`) from checkout hk-mahjong-lab-3, init `models/stage-imitation.pt` (copied from the worker clone), package frozen in `runs/rl-stage/pkg`; a later run reads the result.
+
 ## Results
 - Task 5b (slot 1, 2026-11-16): ticked; `pool.stop_reason` stops on collapse (last two results each below the best earlier one by more than the sum of the two 95 % ranges), `best.pt` kept by `ppo_cnn.keep_best` (a worse result never replaces it), `log.json` eval entries carry `best` (iteration, hours, mean, ci95, file); tests in `test_pool.py` pass (8 passed); 10-min cpu dry run wrote `best.pt` (best -7.6 at iteration 558; stopped by the stall rule after 0.17 h). Dou Dizhu study (phase2.md, Task 12d) describes the 2c collapse but names no cause, so nothing to apply here; fade and settings untouched. No paid API calls.
 - Task 5 (slot 3, 2026-11-16): ticked; `ppo_cnn --pool` (each other seat per hand: current 50 %, older saved 30 %, `stage` 20 %), pool member per 2 h, result per 2 h (2,000 deals vs three `stage` and vs each earlier member) in `runs/rl-stage/log.json`, stops on draws > 15 %, a 4-result stall or 48 h (`stopped.txt`), pull to the imitation net fading by hour 24; `experiments/stage/selfplay.ps1` (gpu, `-Freeze` first, resumable); pybind `observe_history()`/`observe_passed()` (orchestrator's calls); 20-min cpu dry run killed and resumed with the log intact; no paid API calls.
