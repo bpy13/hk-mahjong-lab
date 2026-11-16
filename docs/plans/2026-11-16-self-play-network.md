@@ -170,7 +170,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Notes: add the gpu job with `jobq.ps1 add -Lane gpu`; it waits behind job 120 by itself.
     Estimate from the watch session: about 2 hours on the graphics card.
 
-- [ ] **Task 5: the self-play job with a pool of opponents** (opus) `[parallel-ok]` — needs: Task 2, Task 3 (taken: slot 3, 2026-11-16 19:07)
+- [x] **Task 5: the self-play job with a pool of opponents** (opus) `[parallel-ok]` — needs: Task 2, Task 3 (`ppo_cnn --pool`, `mahjong.rl.pool`, `experiments/stage/selfplay.ps1`; 20-min cpu dry run: 4 results, killed after the 2nd, resumed from ckpt 86 with the log unchanged, stopped at its time limit; `HkVecEnv.observe_passed()`/`observe_history()` feed Task 4's passed+history network)
   - Files: `python/mahjong/rl/ppo_cnn.py`, `python/mahjong/rl/pool.py` (new),
     `experiments/stage/selfplay.ps1` (gpu lane, resumable), tests in `python/tests/`.
   - Done when: tests written first pass for: opponents drawn per hand 50 % current network,
@@ -186,6 +186,20 @@ watch session's plain work copy into this repository first, so the work has a hi
     continues from the last saved network with the log intact.
   - Notes: the dry run starts from a random network if Task 4's network does not exist yet.
     Total budget is 48 hours of training time across restarts, not per start.
+  - Result (slot 3, 2026-11-16): settings chosen by the worker (Brian may change them before
+    Task 6 starts, never between restarts): pull `0.1 * KL(imitation || net)` on every decision,
+    fading linearly to 0 by hour 24; the per-pattern anchor off (`--anchor-weight 0`); no
+    min-faan curriculum; paired reward against the imitation network greedy in the same seat.
+    The dry run started from `models/cnn-distill.pt` (a trained net without history; a random
+    net trips the 15 % draw stop at its first result): results at 5/10/15/20 min against
+    `stage` -0.36, +1.52, +1.96, -3.08 per hand (200 deals each, ranges about ±5); self-play
+    draws 7-9 %. A tiny `distill_cnn --passed --history` net loads through `load_init` and
+    gives the same output from env rows as from label rows (difference below 1e-5 once the
+    env rows are rounded to float16 as label files store them; 1.1e-5 unrounded).
+    For Task 6: build `_core` into the checkout that runs the job (no `pip install -e`), then
+    `experiments\stage\selfplay.ps1 -Freeze`, then the queue line in that script's header
+    (`-Init` defaults to `models\stage-imitation.pt`). The script exits 1 unless
+    `mahjong.__file__` lies under its checkout.
 
 - [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.

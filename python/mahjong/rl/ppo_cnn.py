@@ -45,8 +45,9 @@ with batched inference (GPU when there is one) for every game of a Rust
   four results in a row gain nothing on the best one, or when its time is up.
 * **Pull toward the init network** (``--pull W``): ``W * KL(init || net)`` on every
   decision, fading linearly to zero by ``--pull-fade-hours``.
-* **History input**: a network with the ``history`` block gets it from
-  ``HkVecEnv.observe_history()``.
+* **Passed and history inputs**: a network that reads the passed block or the
+  ``history`` block gets them from ``HkVecEnv.observe_passed()`` and
+  ``observe_history()``, after the features in that order.
 
 Checkpoints every 30 minutes of training to ``<out>/ckpt-<iteration>.pt`` (network,
 optimizer) with ``<out>/state.json`` (hands, iteration, elapsed time, curriculum
@@ -84,7 +85,15 @@ import torch
 import torch.nn.functional as F
 
 from mahjong._core import HkVecEnv, tournament
-from mahjong.rl.cnn import HISTORY_LEN, ORACLE_LEN, STATE_LEN, CnnConfig, SuitCNN, export
+from mahjong.rl.cnn import (
+    HISTORY_LEN,
+    ORACLE_LEN,
+    PASSED_LEN,
+    STATE_LEN,
+    CnnConfig,
+    SuitCNN,
+    export,
+)
 from mahjong.rl.pool import CURRENT, OLDER, STAGE, STAGE_SPEC, Pool, draw_seats, pull_scale
 from mahjong.rl.pool import stop_reason as pool_stop_reason
 
@@ -325,9 +334,8 @@ def load_init(path: Path | None, cfg: CnnConfig | None = None) -> SuitCNN:
     if path is None:
         return SuitCNN(CnnConfig(**{**asdict(cfg or CnnConfig()), "oracle": True}))
     ckpt = torch.load(path, map_location="cpu")
-    if ckpt["cfg"].get("passed"):
-        # The rollouts feed `features` only (plan 2026-11-09 Task 18 left PPO as it was).
-        raise ValueError(f"{path}: reads the passed block, which PPO does not feed yet")
+    # The rollouts feed the passed and history blocks the network reads
+    # (HkVecEnv.observe_passed / observe_history, plan 2026-11-16 Task 5).
     net = SuitCNN(CnnConfig(**{**ckpt["cfg"], "oracle": True}))
     missing, unexpected = net.load_state_dict(ckpt["state"], strict=False)
     if unexpected or any(not m.startswith("oracle") for m in missing):
@@ -336,6 +344,27 @@ def load_init(path: Path | None, cfg: CnnConfig | None = None) -> SuitCNN:
         torch.nn.init.zeros_(net.oracle_value.weight)
         torch.nn.init.zeros_(net.oracle_value.bias)
     return net
+
+
+def observe(
+    env: HkVecEnv, passed: bool = False, history: bool = False
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], bytes]:
+    """``env.observe()`` as arrays ``(inputs, oracle, masks, env_ids, seats)``: the
+    features followed by the passed block (``passed``) and the history block
+    (``history``), the network's input order (plan 2026-11-16 Task 5)."""
+    fb, ob, mb, ids, seats = env.observe()
+    n = len(ids)
+    f = np.frombuffer(fb, dtype=np.float32).reshape(n, STATE_LEN)
+    blocks = [f]
+    if passed:
+        blocks.append(np.frombuffer(env.observe_passed(), np.float32).reshape(n, PASSED_LEN))
+    if history:
+        blocks.append(np.frombuffer(env.observe_history(), np.float32).reshape(n, HISTORY_LEN))
+    if len(blocks) > 1:
+        f = np.concatenate(blocks, axis=1)
+    o = np.frombuffer(ob, dtype=np.float32).reshape(n, ORACLE_LEN)
+    m = np.frombuffer(mb, dtype=np.uint8).reshape(n, NUM_ACTIONS)
+    return f, o, m, ids, bytes(seats)
 
 
 def masked(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -428,6 +457,7 @@ class Trainer:
         else:
             self.env = HkVecEnv(cfg.envs, env_seed, opponents=cfg.opponents, min_faan=0)
         self.buffer = Buffer(cfg.envs)
+        self.passed_input = self.net.cfg.passed
         self.history_input = self.net.cfg.history
         self.pool: Pool | None = Pool(self.out) if cfg.pool else None
         # Who plays each absolute seat of each game this hand (the learner's own seat
@@ -445,17 +475,7 @@ class Trainer:
     def _observe(
         self, env: HkVecEnv
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], bytes]:
-        """``env.observe()`` as arrays; the features carry the history block when the
-        network reads it."""
-        fb, ob, mb, ids, seats = env.observe()
-        n = len(ids)
-        f = np.frombuffer(fb, dtype=np.float32).reshape(n, STATE_LEN)
-        if self.history_input:
-            h = np.frombuffer(env.observe_history(), dtype=np.float32).reshape(n, HISTORY_LEN)
-            f = np.concatenate([f, h], axis=1)
-        o = np.frombuffer(ob, dtype=np.float32).reshape(n, ORACLE_LEN)
-        m = np.frombuffer(mb, dtype=np.uint8).reshape(n, NUM_ACTIONS)
-        return f, o, m, ids, bytes(seats)
+        return observe(env, self.passed_input, self.history_input)
 
     # --- Checkpoints ------------------------------------------------------------
 

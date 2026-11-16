@@ -191,6 +191,9 @@ class HkVecEnv:
     def observed_roles(self) -> tuple[bytes, bytes]:
         """``(sides, roles)`` of the last observe, one byte per decision: copy 0/1; role
         0 learner, 1 baseline, 2 untrained seat. Call it before ``step``."""
+    def observe_passed(self) -> bytes:
+        """The passed-tile block (``PASSED_LEN`` float32 values per row) of each
+        decision of the last observe, in its order."""
     def observe_history(self) -> bytes:
         """The discard-history block (``HISTORY_LEN`` float32 values per row) of each
         decision of the last observe, in its order."""

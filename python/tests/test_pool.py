@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from mahjong._core import HkState, HkVecEnv, encode_history
 from mahjong.rl.cnn import HISTORY_LEN
 
@@ -117,7 +120,7 @@ def test_pool_members_persist(tmp_path) -> None:  # type: ignore[no-untyped-def]
     assert torch.equal(a, b)
 
 
-def test_pool_run_with_history_network_resumes(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_pool_run_with_passed_and_history_network_resumes(tmp_path) -> None:  # type: ignore[no-untyped-def]
     import json
 
     import torch
@@ -127,7 +130,7 @@ def test_pool_run_with_history_network_resumes(tmp_path) -> None:  # type: ignor
     torch.manual_seed(3)
     init = tmp_path / "init.pt"
     small = CnnConfig(channels=8, blocks=1, honour_hidden=16, merge=16, value_hidden=8)
-    SuitCNN(CnnConfig(**{**small.__dict__, "history": True})).save(init)
+    SuitCNN(CnnConfig(**{**small.__dict__, "passed": True, "history": True})).save(init)
     out = tmp_path / "run"
     common = ["--init", str(init), "--out", str(out), "--envs", "8", "--device", "cpu"]
     common += ["--hands-per-iter", "8", "--pool", "--no-curriculum", "--eval-deals", "4"]
@@ -159,3 +162,142 @@ def test_pool_run_with_history_network_resumes(tmp_path) -> None:  # type: ignor
     assert (out2 / "stopped.txt").read_text().startswith(state["stopped"])
     main([*common2, *fast[:-2], "--minutes", "60", "--resume", "--max-iterations", "3"])
     assert json.loads((out2 / "state.json").read_text())["iteration"] == 1
+
+
+LABEL_EXE = Path(__file__).resolve().parents[2] / "target" / "release" / "examples" / "label.exe"
+SMALL: dict[str, Any] = {
+    "channels": 8,
+    "blocks": 1,
+    "honour_hidden": 16,
+    "merge": 16,
+    "value_hidden": 8,
+}
+
+
+def _env_rows(net_cfg: Any, rows: int, seed: int) -> tuple[np.ndarray, np.ndarray, HkVecEnv]:
+    """``rows`` decisions of random play, encoded as ppo_cnn feeds them."""
+    from mahjong.rl.ppo_cnn import observe
+
+    env = HkVecEnv(16, seed, min_faan=0)
+    rng = np.random.default_rng(seed)
+    xs: list[np.ndarray] = []
+    ms: list[np.ndarray] = []
+    while sum(len(x) for x in xs) < rows:
+        f, _o, m, ids, _ = observe(env, net_cfg.passed, net_cfg.history)
+        xs.append(f.copy())
+        ms.append(m.copy())
+        env.step([int(rng.choice(np.flatnonzero(m[k]))) for k in range(len(ids))])
+    return np.concatenate(xs)[:rows], np.concatenate(ms)[:rows], env
+
+
+def _pack_history(h: np.ndarray) -> np.ndarray:
+    """The inverse of ``labels.unpack_history`` (``labels::pack_history``'s bytes)."""
+    from mahjong.rl.labels import HISTORY_SLOTS
+
+    n = h.shape[0]
+    sc = HISTORY_SLOTS * 34
+    out = np.zeros((n, HISTORY_SLOTS + 4), dtype=np.uint8)
+    planes = h[:, :sc].reshape(n, HISTORY_SLOTS, 34)
+    full = planes.max(2) > 0
+    tile = planes.argmax(2)
+    from_hand = h[:, sc : sc + 2 * HISTORY_SLOTS : 2] == 1.0
+    claimed = h[:, sc + 1 : sc + 2 * HISTORY_SLOTS : 2] == 1.0
+    out[:, :HISTORY_SLOTS] = np.where(full, 1 + tile + 34 * from_hand + 68 * claimed, 0)
+    out[:, HISTORY_SLOTS:] = np.round(h[:, sc + 2 * HISTORY_SLOTS :] * 4).astype(np.uint8)
+    return out
+
+
+def test_env_inputs_match_the_rust_network_agent(tmp_path: Path) -> None:
+    # A network reading the passed and history blocks: PyTorch on the rows ppo_cnn
+    # builds from the vector env picks the move Rust's `net:` agent picks from its
+    # own encoding of the same positions.
+    import torch
+    from mahjong.rl.cnn import CnnConfig, SuitCNN, export
+    from mahjong.rl.ppo_cnn import masked, observe
+
+    torch.manual_seed(4)
+    net = SuitCNN(CnnConfig(**SMALL, passed=True, history=True)).eval()
+    path = tmp_path / "net.mjnn"
+    export(net, path)
+    env = HkVecEnv(16, 21, min_faan=0)
+    rng = np.random.default_rng(2)
+    checked = 0
+    while checked < 300:
+        f, _o, m, ids, _ = observe(env, True, True)
+        rust = np.asarray(env.agent_actions(f"net:path={path}"))
+        with torch.no_grad():
+            logits = masked(net(torch.from_numpy(f.copy()))[0], torch.from_numpy(m.copy()))
+        top2 = logits.topk(2, 1)
+        clear = (top2.values[:, 0] - top2.values[:, 1] > 1e-3).numpy() & (m.sum(1) > 1)
+        assert np.array_equal(rust[clear], top2.indices[:, 0].numpy()[clear])
+        checked += int(clear.sum())
+        env.step([int(rng.choice(np.flatnonzero(m[k]))) for k in range(len(ids))])
+
+
+@pytest.mark.skipif(not LABEL_EXE.exists(), reason="build the label example first")
+def test_distilled_network_reads_env_rows_as_label_rows(tmp_path: Path) -> None:
+    # The seam between Task 4 and Task 6: a network saved by `distill_cnn --passed
+    # --history` loads through ppo_cnn's load_init, and its output on 200 positions
+    # fed as the vector env hands them to ppo_cnn equals its output on the same
+    # positions fed through distill_cnn's label path (float16 features and passed
+    # block, packed history, distill_cnn.inputs).
+    import torch
+    from mahjong.rl.distill_cnn import Data, DistillConfig, HistoryUnpack, distill, inputs
+    from mahjong.rl.labels import unpack_history
+    from mahjong.rl.ppo_cnn import load_init
+
+    labels = tmp_path / "labels"
+    subprocess.run(
+        [str(LABEL_EXE), "--decisions", "400", "--chunk", "200", "--seed", "5"]
+        + ["--teacher", "stage", "--others", "stage", "--out", str(labels)],
+        check=True,
+        capture_output=True,
+    )
+    cfg = DistillConfig(
+        labels=str(labels),
+        out=str(tmp_path / "distill"),
+        models=str(tmp_path / "models"),
+        name="tiny",
+        epochs=1,
+        minutes=0.2,
+        batch=128,
+        warmup_steps=1,
+        device="cpu",
+        int8_check_rows=50,
+        cnn={**SMALL, "passed": True, "history": True},
+    )
+    distill(cfg)
+    net = load_init(tmp_path / "models" / "tiny.pt").eval()
+    assert net.cfg.passed and net.cfg.history and net.cfg.oracle
+
+    x, m, _env = _env_rows(net.cfg, 200, 9)
+    from mahjong.rl.cnn import HISTORY_LEN, STATE_LEN
+
+    front = x[:, : x.shape[1] - HISTORY_LEN]  # features and passed block
+    hist = x[:, x.shape[1] - HISTORY_LEN :]
+    packed = _pack_history(hist)
+    assert np.array_equal(unpack_history(packed), hist)  # the packing is lossless here
+    assert front.shape[1] > STATE_LEN
+    n = len(x)
+    data = Data(
+        x=torch.from_numpy(front.astype(np.float16)),
+        legal=torch.from_numpy(m > 0),
+        chosen=torch.zeros(n, dtype=torch.int64),
+        weight=torch.ones(n),
+        target=torch.full((n,), 255, dtype=torch.int64),
+        value=torch.zeros((n, 4)),
+        hist=torch.from_numpy(packed),
+    )
+    # Label files store the features and passed block as float16 (some feature
+    # columns are continuous, e.g. 4.5e-6), the env hands over float32: the seam is
+    # checked on the env rows rounded the way a label row stores them, and the
+    # unrounded difference is bounded separately.
+    rounded = x.copy()
+    rounded[:, : front.shape[1]] = front.astype(np.float16).astype(np.float32)
+    with torch.no_grad():
+        via_labels = net(inputs(data, slice(0, n), HistoryUnpack("cpu")).float())
+        via_env = net(torch.from_numpy(rounded))
+        via_env_f32 = net(torch.from_numpy(x.copy()))
+    for a, b, c in zip(via_labels, via_env, via_env_f32, strict=True):
+        assert (a - b).abs().max().item() < 1e-5
+        assert (a - c).abs().max().item() < 1e-3

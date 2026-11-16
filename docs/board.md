@@ -1,9 +1,9 @@
 # Board
 
 ## Workers
-- slot 3: Task 5 (self-play job with a pool of opponents), building; `HkVecEnv.observe_history()` pushed.
 
 ## Results
+- Task 5 (slot 3, 2026-11-16): ticked; `ppo_cnn --pool` (each other seat per hand: current 50 %, older saved 30 %, `stage` 20 %), pool member per 2 h, result per 2 h (2,000 deals vs three `stage` and vs each earlier member) in `runs/rl-stage/log.json`, stops on draws > 15 %, a 4-result stall or 48 h (`stopped.txt`), pull to the imitation net fading by hour 24; `experiments/stage/selfplay.ps1` (gpu, `-Freeze` first, resumable); pybind `observe_history()`/`observe_passed()` (orchestrator's calls); 20-min cpu dry run killed and resumed with the log intact; no paid API calls.
 - Task 4 (slot 1, 2026-11-16): waiting on jobs 151 (cpu: 3 M `stage` decisions with the full discard history, label layout 3) and 152 (gpu, after 151 and gpu job 150: imitation training, then 4,000 deals vs three `stage`); history in the written rows equals `encode_history` on 1,000 decisions (Rust test); CPU smoke trains, exports and plays; numbers pending in docs/study-results/self-play-network.md.
 - Task 3 (slot 2, 2026-11-16): ticked; new input block `history` (`features::encode_history`, 3,460 floats: per seat its first 24 discards in order with tile, 摸打/入章 and claimed; later ones add to an overflow value), CNN hyper-parameter and input slice `history`; Python reference equals Rust on 1,000 positions, network output difference 1.2e-7; all 15 `.mjnn` and 3 CNN `.pt` files in `models/` give the same output as before; pybind `encode_history` added (orchestrator's exception).
 - Task 2 (slot 1, 2026-11-16): ticked; the binding already parsed `stage` (no Rust change); new `python/tests/test_stage_binding.py` (200 hands, 1,000 logged decisions legal and reproducible) passes; `ppo_cnn --init none --minutes 3 --device cpu` exits 0.

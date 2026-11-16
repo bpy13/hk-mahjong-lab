@@ -662,6 +662,22 @@ impl VecEnv {
         f32_bytes(py, &h)
     }
 
+    /// The passed-tile block (`features::encode_passed`, `PASSED_LEN` float32
+    /// values per row, as bytes) of each decision of the last `observe()`, in its
+    /// order: the block a network with the `passed` input reads after the
+    /// features (plan 2026-11-16 Task 5).
+    fn observe_passed<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        use mahjong_search::features::{encode_passed, PASSED_LEN};
+        let mut p = vec![0.0f32; self.observed.len() * PASSED_LEN];
+        let this = self;
+        py.detach(|| {
+            p.par_chunks_mut(PASSED_LEN)
+                .zip(this.observed.par_iter())
+                .for_each(|(row, &slot)| encode_passed(this.game(slot), row));
+        });
+        f32_bytes(py, &p)
+    }
+
     /// The moves the agent `spec` would choose in each observed game (in the
     /// order of the last `observe()`), with a random stream seeded by `seed`.
     /// For tests and teacher comparisons.
