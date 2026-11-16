@@ -126,7 +126,10 @@ watch session's plain work copy into this repository first, so the work has a hi
     differs from the one in `repo/hk-mahjong-lab/models/`. Rename the clone's file to
     `race-belief.mjnn.loop-2026-11-11` (keep it), copy the standalone checkout's file in
     (read-only source), and note both md5 sums in `docs/open-items.md`. Do not touch any file
-    a running queue job reads: check `jobq.ps1 status` first.
+    a running queue job reads: check `jobq.ps1 status` first. Also, once and only while no
+    mahjong queue job runs: point the shared `mahjong` env's editable install back at
+    `hk-mahjong-lab-workers` (a worker left it pointing at `hk-mahjong-lab-3` on 16 Nov) and
+    print `mahjong.__file__` from a neutral folder as proof.
 
 ## Phase 2 – Full discard history as input (opus)
 
@@ -201,7 +204,22 @@ watch session's plain work copy into this repository first, so the work has a hi
     (`-Init` defaults to `models\stage-imitation.pt`). The script exits 1 unless
     `mahjong.__file__` lies under its checkout.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5
+- [ ] **Task 5b: a stop on collapse, and the best network kept** `[parallel-ok]` — needs: Task 5
+  - Files: `python/mahjong/rl/pool.py`, `python/mahjong/rl/ppo_cnn.py`, tests in `python/tests/`.
+  - Done when: tests written first pass for: (a) the run stops with a written reason when two
+    results in a row against three `stage` bots lie below the best earlier result by more than
+    the sum of the two 95 % ranges; (b) the network of the best result so far is kept as
+    `runs/rl-stage/best.pt` and a worse result never replaces it; (c) `log.json` names the best
+    result and its file. A 10-minute scaled-down dry run with `--device cpu` shows `best.pt`
+    written.
+  - Notes: reason (orchestrator, 2026-11-16): Dou Dizhu's run 2c fell from -0.3 to -0.7
+    against its benchmark at the step where its imitation pull reached zero, never recovered in
+    115 M steps, and kept only its latest checkpoint. This run fades the same kind of pull by
+    hour 24. If the Dou Dizhu study (`docs/study-results/phase2.md`, section "2c collapse", in
+    the doudizhu repository) names a cause by then, say in the board line whether it applies
+    here. Do not change the fade or other training settings in this task.
+
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds
