@@ -150,7 +150,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 3 – Imitation, then self-play (opus; graphics card through the queue)
 
-- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (waiting: jobs 151 and 152)
+- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (jobs 151 and 152 ended exit 0, 16 Nov 20:26; job 152 printed held-out top-1 0.931 and net -0.24 +- 0.71 per hand vs three stage bots, 4,000 deals: read its out.log, record the numbers, finish the task)
   - Status (slot 1, 2026-11-16 19:40): built and pushed in 42f828e (label layout 3 with the
     packed history, `distill_cnn --history`, both job scripts; tests pass). Queued from the
     worker clone `repo\.worktrees\hk-mahjong-lab-workers`: job 151 (cpu,
