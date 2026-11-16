@@ -8,7 +8,10 @@ pub mod shanten;
 pub mod target;
 
 pub use shanten::{orphans_shanten, shanten, standard_shanten, Structure};
-pub use target::{faan_shanten, targets, FaanShanten, HandView, SuitPlan, Target, UNREACHABLE};
+pub use target::{
+    faan_shanten, for_each_route_target, target_shanten, targets, FaanShanten, HandView, SuitPlan,
+    Target, UNREACHABLE,
+};
 
 use mahjong_hk::RuleSet;
 use mahjong_tiles::{Tile, TileCounts};

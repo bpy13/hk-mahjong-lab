@@ -77,7 +77,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 1 – The three-stage bot in the lab (sonnet)
 
-- [ ] **Task 1: bring the three-stage bot into the lab and reproduce its strength**
+- [x] **Task 1: bring the three-stage bot into the lab and reproduce its strength**
   - Files: from `C:\Users\brian\.orchestrator\mahjong-watch\lab\crates` copy or merge
     `search/src/stage.rs`, `search/src/route.rs`, the changes in `search/src/bots.rs`,
     `search/src/lib.rs`, `search/src/agent.rs`, `analysis/src/lib.rs`, `analysis/src/target.rs`,
@@ -96,7 +96,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     digit differs, the merge is wrong: find the missing change, do not adjust the bot. If the
     bot cannot build without an `app-api` change, stop and put the question in the inbox.
 
-- [ ] **Task 2: the Python binding knows the three-stage bot** — needs: Task 1
+- [x] **Task 2: the Python binding knows the three-stage bot** — needs: Task 1
   - Files: `crates/pybind/src/rl.rs` (and `lib.rs` there if needed), `python/mahjong/rl/`
     only where a bot name is listed, `python/tests/` (one new test).
   - Done when: `pip install -e ".[dev]"` builds `mahjong._core` in the worker's checkout; a new
@@ -185,7 +185,10 @@ watch session's plain work copy into this repository first, so the work has a hi
 ## Shared files and safety
 - `crates/search/src/bots.rs`, `lib.rs`, `agent.rs`: Task 1 only. `features.rs`, `cnn.rs`,
   `cnn.py`: Task 3 only. `ppo_cnn.py`: Task 5 only. `distill_cnn.py`: Task 4 only.
-  `crates/pybind`: Task 2 only.
+  `crates/pybind`: Task 2 only, except one additive function `encode_history` (and its
+  registration line) that Task 3 adds for its Rust-against-Python check; Task 3 may also touch
+  `crates/search/src/net.rs` so a model file can name the new input (orchestrator's call,
+  2026-11-16, on the Task 3 worker's question).
 - Tasks 1 and 3 run side by side in separate worktrees; each builds its own `target` folder.
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.

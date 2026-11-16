@@ -231,3 +231,17 @@ with their defaults.
   too defensive. Four generations gain nothing measurable (gen 3 vs gen 2 +0.18 [-0.08, +0.44]);
   -9.4 vs three `value`. Fixing `hazard` before more loops is the likeliest gain. Details:
   `docs/study-results/race-bot.md` (Tasks 8 and 9).
+
+## Left out of the three-stage bot merge (Task 1 of the self-play plan, 2026-11-16)
+Only the bot (`stage`, plus the route bots `chain`, `chain2`, `route` it shares code with) and
+its test tools were merged from the Mahjong watch work copy. Left out on purpose:
+- `crates/app-api/src/api.rs`: the work copy maps the in-game level "hard" to a new bot name.
+  Nothing is put into the game by this plan.
+- `crates/app-api/src/solver.rs` and `crates/app-api/tests/api.rs`: work-copy edits that go with
+  the `api.rs` change.
+- `crates/app-api/examples/whatif.rs`, `timeit.rs`, `route_check.rs`: one-off probes of the work copy.
+- `crates/app-api/pkg`: a generated web-assembly package.
+- The work copy's `jobs\*.ps1` other than `versus.ps1` (analysis scripts: `fit_chain_*`, `valuefit`,
+  `wasm`, `register_stage.py`, …) and its `positions` and `runs` folders; the bot builds without them.
+- The work copy's `features.rs` and `cnn.rs`: identical to this checkout's (no difference found).
+- `chain2` and `route` need the env vars `ROUTE_HELPERS` / `ROUTE_TABLE` pointing at files that stay in the work copy; they panic without them. `stage` does not.

@@ -104,7 +104,9 @@ fn melds_fit(melds: &[Meld], plan: SuitPlan, structure: Structure) -> bool {
 /// Guaranteed faan of a plan for this player (capped; `None` if below minimum).
 /// `flowers` is the faan of the bonus tiles held ([`flower_faan`]) and
 /// `concealed` whether every meld is concealed; both are the same for every
-/// target of a hand, so the caller works them out once.
+/// target of a hand, so the caller works them out once. `extra` is faan the
+/// plan adds beyond these rules (the route bots' 自摸 on all chows).
+#[allow(clippy::too_many_arguments)]
 fn guaranteed_faan(
     view: &HandView,
     plan: SuitPlan,
@@ -113,11 +115,12 @@ fn guaranteed_faan(
     rules: &RuleSet,
     flowers: u32,
     concealed: bool,
+    extra: u32,
 ) -> Option<(u8, bool)> {
     if matches!(plan, SuitPlan::Honours | SuitPlan::Orphans) {
         return Some((rules.faan_cap, true));
     }
-    let mut f: u32 = 0;
+    let mut f: u32 = extra;
     if concealed {
         f += 1;
     }
@@ -324,9 +327,9 @@ fn plan_shanten(
 }
 
 /// The scoring tiles worth planning a pung of: dragons and the two value winds
-/// already held at least in pairs (`optional`), or already pung'ed on the table
-/// (`on_table`). Returns `(on_table, optional)`.
-fn value_pung_candidates(view: &HandView, rules: &RuleSet) -> (Tiles, Tiles) {
+/// already held at least `min_copies` times (`optional`), or already pung'ed on
+/// the table (`on_table`). Returns `(on_table, optional)`.
+fn value_pung_candidates(view: &HandView, rules: &RuleSet, min_copies: u8) -> (Tiles, Tiles) {
     let mut values = Tiles::new();
     for t in [Tile::WHITE, Tile::GREEN, Tile::RED, Tile::wind(view.seat)] {
         values.push(t);
@@ -342,7 +345,7 @@ fn value_pung_candidates(view: &HandView, rules: &RuleSet) -> (Tiles, Tiles) {
     }
     let mut optional = Tiles::new();
     for &t in values.as_slice() {
-        if !on_table.as_slice().contains(&t) && view.concealed[t] >= 2 {
+        if !on_table.as_slice().contains(&t) && view.concealed[t] >= min_copies {
             optional.push(t);
         }
     }
@@ -354,7 +357,7 @@ fn value_pung_candidates(view: &HandView, rules: &RuleSet) -> (Tiles, Tiles) {
 fn for_each_target(
     view: &HandView,
     rules: &RuleSet,
-    mut visit: impl FnMut(SuitPlan, Structure, &[Tile], u8, bool),
+    visit: impl FnMut(SuitPlan, Structure, &[Tile], u8, bool),
 ) {
     let mut all = *view.concealed;
     for m in view.melds {
@@ -364,19 +367,59 @@ fn for_each_target(
         .into_iter()
         .max_by_key(|&s| all.suit_counts(s).iter().map(|&c| c as u32).sum::<u32>())
         .expect("three suits");
+    let suits = [best_suit];
+    let wide = Wide {
+        suits: &suits,
+        min_copies: 2,
+        chows_self_draw: false,
+    };
+    enumerate_targets(view, rules, &all, wide, visit);
+}
+
+/// How far [`enumerate_targets`] looks beyond the nearest plans.
+#[derive(Clone, Copy)]
+struct Wide<'s> {
+    /// The suits a flush may be planned in.
+    suits: &'s [Suit],
+    /// Copies of a dragon or value wind held before its pung is planned.
+    min_copies: u8,
+    /// Whether a concealed mixed all-chow plan counts 自摸 (+1): a plan that
+    /// commits to winning by self-draw.
+    chows_self_draw: bool,
+}
+
+/// The shared body of [`for_each_target`] and [`for_each_route_target`]; `all`
+/// is the hand with its melds.
+fn enumerate_targets(
+    view: &HandView,
+    rules: &RuleSet,
+    all: &TileCounts,
+    wide: Wide,
+    mut visit: impl FnMut(SuitPlan, Structure, &[Tile], u8, bool),
+) {
     let honours: u32 = (27..34).map(|i| all.0[i] as u32).sum();
-    let plans = [
-        SuitPlan::Mixed,
-        SuitPlan::HalfFlush(best_suit),
-        SuitPlan::FullFlush(best_suit),
-        SuitPlan::Honours,
-    ];
-    let plans = &plans[..if honours >= 7 { 4 } else { 3 }];
-    let (fixed, optional) = value_pung_candidates(view, rules);
+    // On the stack: `faan_shanten` runs this hundreds of times per position.
+    let mut plans = [SuitPlan::Mixed; 8];
+    let mut len = 1;
+    for flush in [SuitPlan::HalfFlush, SuitPlan::FullFlush] {
+        for &s in wide.suits {
+            plans[len] = flush(s);
+            len += 1;
+        }
+    }
+    if honours >= 7 {
+        plans[len] = SuitPlan::Honours;
+        len += 1;
+    }
+    let (fixed, optional) = value_pung_candidates(view, rules, wide.min_copies);
     let flowers = flower_faan(view, rules);
     let concealed = view.melds.iter().all(|m| m.concealed);
-    for &plan in plans {
+    for &plan in &plans[..len] {
         for structure in [Structure::Any, Structure::AllPungs, Structure::AllChows] {
+            let extra = (wide.chows_self_draw
+                && concealed
+                && plan == SuitPlan::Mixed
+                && structure == Structure::AllChows) as u32;
             for mask in 0..(1u32 << optional.len) {
                 let mut pungs = fixed;
                 for (i, &t) in optional.as_slice().iter().enumerate() {
@@ -391,9 +434,9 @@ fn for_each_target(
                 if pungs.iter().any(|&t| !plan.allows(t)) {
                     continue;
                 }
-                if let Some((faan, limit)) =
-                    guaranteed_faan(view, plan, structure, pungs, rules, flowers, concealed)
-                {
+                if let Some((faan, limit)) = guaranteed_faan(
+                    view, plan, structure, pungs, rules, flowers, concealed, extra,
+                ) {
                     visit(plan, structure, pungs, faan, limit);
                 }
             }
@@ -402,6 +445,52 @@ fn for_each_target(
     if view.melds.is_empty() {
         visit(SuitPlan::Orphans, Structure::Any, &[], rules.faan_cap, true);
     }
+}
+
+/// Every feasible plan for the route bots, with its shanten:
+/// `visit(plan, structure, pungs, faan, limit, shanten)`.
+///
+/// Wider than [`faan_shanten`]'s set (which keeps its own): flushes in every
+/// suit (not only the longest), a dragon or value wind pung planned from a
+/// single copy (it needs two more), and the concealed mixed all-chow plan
+/// scored with 自摸, the self-drawn win it commits to.
+pub fn for_each_route_target(
+    view: &HandView,
+    rules: &RuleSet,
+    mut visit: impl FnMut(SuitPlan, Structure, &[Tile], u8, bool, i8),
+) {
+    let mut all = *view.concealed;
+    for m in view.melds {
+        m.add_to(&mut all);
+    }
+    let wide = Wide {
+        suits: &Suit::ALL,
+        min_copies: 1,
+        chows_self_draw: true,
+    };
+    let mut plans = PlanShanten::new(view);
+    enumerate_targets(
+        view,
+        rules,
+        &all,
+        wide,
+        |plan, structure, pungs, faan, limit| {
+            if let Some(s) = plans.get(plan, structure, pungs) {
+                visit(plan, structure, pungs, faan, limit, s);
+            }
+        },
+    );
+}
+
+/// Shanten toward one plan, or `None` if it is impossible: the measure
+/// [`for_each_route_target`] reports, for one target at a time.
+pub fn target_shanten(
+    view: &HandView,
+    plan: SuitPlan,
+    structure: Structure,
+    pungs: &[Tile],
+) -> Option<i8> {
+    PlanShanten::new(view).get(plan, structure, pungs)
 }
 
 /// The plans worth considering for this hand.
