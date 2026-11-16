@@ -204,7 +204,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     (`-Init` defaults to `models\stage-imitation.pt`). The script exits 1 unless
     `mahjong.__file__` lies under its checkout.
 
-- [ ] **Task 5b: a stop on collapse, and the best network kept** `[parallel-ok]` — needs: Task 5 (taken: slot 1, 2026-11-16 12:00)
+- [x] **Task 5b: a stop on collapse, and the best network kept** `[parallel-ok]` — needs: Task 5
   - Files: `python/mahjong/rl/pool.py`, `python/mahjong/rl/ppo_cnn.py`, tests in `python/tests/`.
   - Done when: tests written first pass for: (a) the run stops with a written reason when two
     results in a row against three `stage` bots lie below the best earlier result by more than

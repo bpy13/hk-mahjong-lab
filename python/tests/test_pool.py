@@ -90,6 +90,26 @@ def test_stop_reason() -> None:
     assert "stalled" in (stop_reason([*rising, r(0.05)]) or "")
 
 
+def test_collapse_stop_and_best_result() -> None:
+    from mahjong.rl.pool import best_result, stop_reason
+
+    def r(mean: float, ci: float = 0.5) -> dict[str, Any]:
+        return {"mean": mean, "ci95": ci, "draw_rate": 0.05, "train_draw_rate": 0.05}
+
+    # (a) Two in a row below the best earlier one by more than the sum of two ranges (1.0).
+    base = [r(-1.0), r(0.0), r(-0.2)]
+    assert stop_reason([*base, r(-1.2)]) is None  # one low result
+    assert stop_reason([*base, r(-0.9), r(-1.2)]) is None  # -0.9 is within 1.0 of 0.0
+    why = stop_reason([*base, r(-1.2), r(-1.5)])
+    assert why is not None and "collapse" in why
+    assert stop_reason([r(0.0), r(-1.2), r(-0.5), r(-1.3)]) is None  # not in a row
+    # Wider ranges forgive the drop.
+    assert stop_reason([r(0.0, 1.0), r(-0.2), r(-1.5, 1.0), r(-1.5, 1.0)]) is None
+    # (b) The best so far: the first of equal means; a worse result never replaces it.
+    assert best_result([]) is None
+    assert best_result([r(-1.0), r(0.0), r(-0.5), r(0.0)]) == 1
+
+
 def test_pull_scale() -> None:
     from mahjong.rl.pool import pull_scale
 
@@ -148,6 +168,12 @@ def test_pool_run_with_passed_and_history_network_resumes(tmp_path) -> None:  # 
     assert [len(e["vs_pool"]) for e in evals] == list(range(len(evals)))
     assert all(e["pull"] > 0 for e in log)
     assert state["stopped"] is None
+    # (b), (c): best.pt is the network of the best result; log.json names both.
+    assert (out / "best.pt").exists()
+    best = [e["eval"]["best"] for e in log if "eval" in e][-1]
+    means = [e["mean"] for e in (x["eval"]["vs_stage"] for x in log if "eval" in x)]
+    assert best["file"] == "best.pt" and best["mean"] == max(means)
+    assert best["iteration"] == [x["iter"] for x in log if "eval" in x][means.index(max(means))]
     # Resume: continues from the saved network with the log intact.
     main([*common, *fast, "--minutes", "60", "--resume", "--max-iterations", "3"])
     log2 = json.loads((out / "log.json").read_text())

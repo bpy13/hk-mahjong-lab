@@ -94,7 +94,16 @@ from mahjong.rl.cnn import (
     SuitCNN,
     export,
 )
-from mahjong.rl.pool import CURRENT, OLDER, STAGE, STAGE_SPEC, Pool, draw_seats, pull_scale
+from mahjong.rl.pool import (
+    CURRENT,
+    OLDER,
+    STAGE,
+    STAGE_SPEC,
+    Pool,
+    best_result,
+    draw_seats,
+    pull_scale,
+)
 from mahjong.rl.pool import stop_reason as pool_stop_reason
 
 NUM_ACTIONS = 134
@@ -876,6 +885,28 @@ class Trainer:
             if "eval" in e and "vs_stage" in e["eval"]
         ]
 
+    def keep_best(self, entry: dict[str, Any]) -> None:
+        """Keeps the network of the best result so far as ``<out>/best.pt`` (a worse or
+        equal result never replaces it) and names the best result and its file in
+        ``entry["eval"]["best"]`` (the latest result, already in the history)."""
+        res = self.results()
+        i = best_result(res)
+        assert i is not None
+        if i == len(res) - 1:
+            self.net.save(self.out / "best.pt")
+            v = entry["eval"]["vs_stage"]
+            b = {
+                "iteration": entry["iter"],
+                "hours": entry["eval"]["hours"],
+                "mean": v["mean"],
+                "ci95": v["ci95"],
+                "file": "best.pt",
+            }
+        else:
+            evals = [e for e in self.history if "eval" in e and "vs_stage" in e["eval"]]
+            b = evals[i]["eval"]["best"]
+        entry["eval"]["best"] = b
+
     def stop(self, reason: str) -> None:
         """Ends the run for good: the reason goes to the state (a resume ends at once)
         and to ``<out>/stopped.txt``."""
@@ -953,6 +984,7 @@ class Trainer:
             print("ppo_cnn", json.dumps(entry), flush=True)
             self.history.append(entry)
             if self.pool is not None and "eval" in entry:
+                self.keep_best(entry)
                 reason = pool_stop_reason(self.results(), cfg.draw_limit)
                 if reason is not None:
                     entry["stop"] = reason
