@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 2b (lint, model test), running
 
 - Task 6 (slot 3, 2026-11-16): queued, not finished: job 154 (gpu lane, `rl-stage`) from checkout hk-mahjong-lab-3, init `models/stage-imitation.pt` (copied from the worker clone), package frozen in `runs/rl-stage/pkg`; a later run reads the result.
 
