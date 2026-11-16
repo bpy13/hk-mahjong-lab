@@ -183,6 +183,11 @@ watch session's plain work copy into this repository first, so the work has a hi
     the new input version and the pool.
 
 ## Shared files and safety
+- Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
+  additive method `HkVecEnv.observe_history()` to `crates/pybind/src/rl.rs` and owns it; Task 4
+  adds label layout 3 (layout 2 plus `history`) in `crates/search/src/labels.rs` and
+  `examples/label.rs` and does not touch `crates/pybind`; the opponent pool draws each of the
+  three other seats independently every hand (50 / 30 / 20), so tables are mixed.
 - `crates/search/src/bots.rs`, `lib.rs`, `agent.rs`: Task 1 only. `features.rs`, `cnn.rs`,
   `cnn.py`: Task 3 only. `ppo_cnn.py`: Task 5 only. `distill_cnn.py`: Task 4 only.
   `crates/pybind`: Task 2 only, except one additive function `encode_history` (and its
