@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 2b (lint, model test), running
 
 ## Results
 - Task 5b (slot 1, 2026-11-16): ticked; `pool.stop_reason` stops on collapse (last two results each below the best earlier one by more than the sum of the two 95 % ranges), `best.pt` kept by `ppo_cnn.keep_best` (a worse result never replaces it), `log.json` eval entries carry `best` (iteration, hours, mean, ci95, file); tests in `test_pool.py` pass (8 passed); 10-min cpu dry run wrote `best.pt` (best -7.6 at iteration 558; stopped by the stall rule after 0.17 h). Dou Dizhu study (phase2.md, Task 12d) describes the 2c collapse but names no cause, so nothing to apply here; fade and settings untouched. No paid API calls.
