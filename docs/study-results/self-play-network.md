@@ -3,7 +3,7 @@
 Plan: `docs/plans/2026-11-16-self-play-network.md`. Baseline: `stage` (`StageBot::new(3, 1)`),
 +2.54 ± 0.21 per hand against three `value` bots over 40,000 deals (Task 1).
 
-## Task 4: imitation start
+## Task 4: imitation start (old bot, now `stage-gate0`)
 
 **Status (2026-11-16): done, both pass marks met.** Jobs 151 (cpu lane, data, 19:50-20:00)
 and 152 (gpu lane, training and the match, 20:01-20:26) ended with exit code 0. Both ran from
@@ -62,3 +62,23 @@ the worker clone `repo\.worktrees\hk-mahjong-lab-workers`; the network is
 
 - Reading: the network copies `stage` closely and plays within noise of it (its range holds
   zero); it wins a little less and deals in a little more. Task 6 starts from this network.
+
+## Task 4b: imitation start again, on the strict bot
+
+**Status (2026-11-17): done, both pass marks met.** Jobs 165 (cpu lane, labels, 00:20-00:28)
+and 166 (gpu lane, training and the match, 00:28-00:48) ended with exit code 0, from the worker
+clone. `stage` is the strict gate-1 bot (Task 9). Settings unchanged from Task 4. The network is
+`models\stage-imitation.pt` / `.mjnn`; Task 4's outputs are kept as `runs\rl-stage\labels-gate0`,
+`imitation-gate0` and `models\stage-imitation-gate0.*`. (The queue job log with its first line
+`mahjong.__file__` was not found by the worker; the orchestrator read both jobs' results.)
+
+| Measure | Pass mark | Task 4 (old bot) | Task 4b (strict `stage`) | 95 % range (4b) |
+|---|---|---|---|---|
+| Held-out agreement (200,000 decisions) | >= 90 % | 93.1 % | **93.1 %** (0.93124) | +- 0.11 points |
+| Network vs three strict `stage`, 4,000 deals | >= -1.0 per hand | -0.24 | **-0.11 per hand** | +- 0.71 (-0.82 to +0.60) |
+
+- Training: 6 epochs of 2.8 M rows in 17.7 minutes; agreement by epoch 87.4, 89.8, 91.6, 92.5,
+  92.9, 93.1 %; target head 98.6 %; int8 agrees with fp32 on 99.6 % of 1,000 rows.
+- Match (draws 5.7 %): network -0.11 +- 0.71 (win 23.9 %, deal-in 18.9 %, faan 5.1); the three
+  `stage` seats -0.21, -0.17, +0.49 (each +- 0.70). Inside noise of `stage`; Task 6 starts from it.
+- Task 9's match did not show the strict bot clearly weaker than `stage-gate0`: no inbox note.

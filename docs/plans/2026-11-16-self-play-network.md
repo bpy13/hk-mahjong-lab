@@ -173,7 +173,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Notes: add the gpu job with `jobq.ps1 add -Lane gpu`; it waits behind job 120 by itself.
     Estimate from the watch session: about 2 hours on the graphics card.
 
-- [ ] **Task 4b: imitation start again, on the strict bot** (checkpoint) `[parallel-ok]` — needs: Task 2b, Task 9 (jobs 165 and 166 ended exit 0, 17 Nov 00:48: held-out top-1 93.1 %, -0.11 +- 0.71 per hand against three strict `stage` over 4,000 deals, read by the orchestrator: both checks pass; write the results up, tick; old outputs are in `runs\rl-stage\labels-gate0`, `imitation-gate0`, `models\stage-imitation-gate0.*`; finish: read `runs\rl-stage\imitation\result.json` and `vs-stage.txt`, add the strict row to docs/study-results/self-play-network.md and the board) (taken: slot 1, 2026-11-17 09:00)
+- [x] **Task 4b: imitation start again, on the strict bot** (checkpoint) `[parallel-ok]` — needs: Task 2b, Task 9 (jobs 165 and 166 ended exit 0, 17 Nov 00:48: held-out top-1 93.1 %, -0.11 +- 0.71 per hand against three strict `stage` over 4,000 deals, read by the orchestrator: both checks pass; write the results up, tick; old outputs are in `runs\rl-stage\labels-gate0`, `imitation-gate0`, `models\stage-imitation-gate0.*`; finish: read `runs\rl-stage\imitation\result.json` and `vs-stage.txt`, add the strict row to docs/study-results/self-play-network.md and the board)
   - Why: Brian, 2026-11-16: "use strict version as default" (Task 9), then, asked whether to
     hold the 48-hour run and redo its start on the strict bot at a cost of about 35 minutes
     of preparation: "that's fine". Task 4's network copies the old bot (now `stage-gate0`).
@@ -248,7 +248,10 @@ watch session's plain work copy into this repository first, so the work has a hi
     build `mahjong._core` into the checkout, check `stage` is the strict bot (Task 9's unit
     test), run `selfplay.ps1 -Freeze` (remove an old `runs\rl-stage\pkg` first if the folder
     has no `state.json`), then add the gpu job with `-Init` = Task 4b's network. Mark the task
-    waiting on the new job number and name the checkout it runs from.l-stageprogress.txt; runsl-stageog.json; runsl-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
+    waiting on the new job number and name the checkout it runs from.
+l-stageprogress.txt; runs
+l-stageog.json; runs
+l-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds
