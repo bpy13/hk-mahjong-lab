@@ -15,12 +15,20 @@
 //! `mahjong.rl.labels`. Seats in a row are relative to the acting seat
 //! (0 = actor, 1 = next, 2 = across, 3 = previous).
 //!
+//! Layout 3 (plan 2026-11-16 Task 4) adds the full discard history
+//! (`features::encode_history`) in a packed form of [`HISTORY_BYTES`] bytes
+//! per row ([`pack_history`]); [`unpack_history`] and the Python reader's
+//! `mahjong.rl.labels.history` turn it back into the 3,460-float block.
+//!
 //! Hands are seeded from `(seed, chunk, hand)` alone, so a chunk's rows do not
 //! depend on the number of threads or on earlier chunks, and a rerun resumes
 //! after the last complete chunk with the same rows a single run would write.
 
 use crate::agent::Agent;
-use crate::features::{self, ORACLE_LEN, PASSED_LEN, STATE_LEN};
+use crate::features::{
+    self, DiscardRecord, HISTORY_DEPTH, HISTORY_LEN, HISTORY_PLANES, ORACLE_LEN, PASSED_LEN,
+    STATE_LEN,
+};
 use crate::log::{f16_bits, layout_bytes, Field};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, Structure, SuitPlan, Target};
@@ -33,7 +41,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 
 /// Layout version written to `meta.json`; bump when [`FIELDS`] changes.
-pub const LABEL_LAYOUT_VERSION: u32 = 2;
+pub const LABEL_LAYOUT_VERSION: u32 = 3;
 /// Candidate slots per row (PIMC-64 with 4 discard candidates evaluates at most
 /// 4 discards, the special actions and the anchor's move).
 pub const MAX_CANDIDATES: usize = 12;
@@ -64,6 +72,9 @@ pub const FIELDS: &[Field] = &[
     // The passed-tile record and 摸打 / 入章 (features::encode_passed), as float16
     // (layout version 2, plan 2026-11-09 Task 18).
     f("passed", "f2", &[PASSED_LEN]),
+    // The full discard history, packed (pack_history; layout version 3, plan
+    // 2026-11-16 Task 4).
+    f("history", "u1", &[HISTORY_BYTES]),
     // 1 for each legal action code.
     f("legal", "u1", &[NUM_ACTION_CODES]),
     // The search: candidates (action code, 65535 = empty slot), samples per
@@ -97,6 +108,67 @@ pub const FIELDS: &[Field] = &[
     f("win_faan", "u1", &[]),
     f("win_patterns", "u4", &[]),
 ];
+
+/// Bytes of the packed discard history: one per seat and slot, then one
+/// overflow count per seat.
+pub const HISTORY_BYTES: usize = HISTORY_PLANES + 4;
+
+/// Packs the discard history of the player to act (what
+/// `features::encode_history` encodes) into [`HISTORY_BYTES`] bytes. Byte
+/// `r * 24 + k` (relative seat `r`, its `k`-th discard) is 0 for an empty
+/// slot, else `1 + tile + 34 * from_hand + 68 * claimed` (at most 136); byte
+/// `96 + r` is the number of seat `r`'s discards beyond the 24th (at most 255).
+///
+/// # Panics
+/// Panics if the hand is over.
+pub fn pack_history(state: &State) -> [u8; HISTORY_BYTES] {
+    let me = state.current_player().expect("hand in progress");
+    pack_history_of(&features::discard_records(state), me)
+}
+
+/// [`pack_history`] from a list of discards (in the order thrown) for the
+/// absolute seat `me`.
+pub fn pack_history_of(records: &[DiscardRecord], me: usize) -> [u8; HISTORY_BYTES] {
+    let mut out = [0u8; HISTORY_BYTES];
+    let mut count = [0usize; 4];
+    for d in records {
+        let r = (d.seat as usize + 4 - me) % 4;
+        let k = count[r];
+        count[r] += 1;
+        if k < HISTORY_DEPTH {
+            out[r * HISTORY_DEPTH + k] =
+                1 + d.tile.index() + 34 * d.from_hand as u8 + 68 * d.claimed as u8;
+        }
+    }
+    for (r, &n) in count.iter().enumerate() {
+        out[HISTORY_PLANES + r] = n.saturating_sub(HISTORY_DEPTH).min(255) as u8;
+    }
+    out
+}
+
+/// Unpacks [`pack_history`]'s bytes into `features::encode_history`'s block
+/// (`out` of length `HISTORY_LEN`).
+///
+/// # Panics
+/// Panics if a length is wrong.
+pub fn unpack_history(packed: &[u8], out: &mut [f32]) {
+    assert_eq!(packed.len(), HISTORY_BYTES);
+    assert_eq!(out.len(), HISTORY_LEN);
+    out.fill(0.0);
+    let (planes, s) = out.split_at_mut(HISTORY_PLANES * 34);
+    for (slot, &b) in packed[..HISTORY_PLANES].iter().enumerate() {
+        if b == 0 {
+            continue;
+        }
+        let v = (b - 1) as usize;
+        planes[slot * 34 + v % 34] = 1.0;
+        s[2 * slot] = if (v / 34) % 2 == 1 { 1.0 } else { 0.5 };
+        s[2 * slot + 1] = (v / 68) as f32;
+    }
+    for r in 0..4 {
+        s[2 * HISTORY_PLANES + r] = (packed[HISTORY_PLANES + r] as f32 / 4.0).min(1.0);
+    }
+}
 
 /// Bytes per row.
 pub fn label_row_bytes() -> usize {
@@ -158,6 +230,8 @@ pub struct LabelRow {
     pub features: Vec<f32>,
     pub oracle: Vec<f32>,
     pub passed: Vec<f32>,
+    /// The packed discard history ([`pack_history`]).
+    pub history: [u8; HISTORY_BYTES],
     pub legal: Vec<u8>,
     /// (code, n, mean, ci95, diff, diff_se, win rate, deal-in rate).
     pub candidates: Vec<(u16, u16, [f32; 6])>,
@@ -201,6 +275,7 @@ impl LabelRow {
         for &x in self.features.iter().chain(&self.oracle).chain(&self.passed) {
             out.extend_from_slice(&f16_bits(x).to_le_bytes());
         }
+        out.extend_from_slice(&self.history);
         out.extend_from_slice(&self.legal);
         out.push(self.candidates.len() as u8);
         let slot = |i: usize| self.candidates.get(i);
@@ -264,6 +339,17 @@ impl Labeller {
     ///
     /// The labelled seat is `hand % 4`.
     pub fn label_hand(&self, chunk: u32, hand: u32) -> (Vec<u8>, usize) {
+        self.label_hand_with(chunk, hand, |_, _| {})
+    }
+
+    /// [`Labeller::label_hand`] that also shows `seen` each labelled position
+    /// and its row (before the move is applied), for tests.
+    pub fn label_hand_with(
+        &self,
+        chunk: u32,
+        hand: u32,
+        mut seen: impl FnMut(&State, &LabelRow),
+    ) -> (Vec<u8>, usize) {
         let mut rng = SmallRng::seed_from_u64(hand_seed(self.seed, chunk, hand));
         let mut wall = State::all_tiles(&self.rules);
         wall.shuffle(&mut rng);
@@ -276,6 +362,7 @@ impl Labeller {
             s.legal_actions(&mut legal);
             let a = if p == me && legal.len() > 1 {
                 let (row, a) = self.label_decision(&s, &legal, chunk, hand, step, &mut rng);
+                seen(&s, &row);
                 rows.push(row);
                 a
             } else {
@@ -353,6 +440,7 @@ impl Labeller {
             features: feats,
             oracle,
             passed,
+            history: pack_history(s),
             legal: mask,
             candidates,
             baseline,
@@ -479,11 +567,83 @@ mod tests {
         assert_eq!(out.len(), 6 * label_row_bytes());
         assert!(hands >= 1);
         // n_candidates sits right after the legal mask.
-        let off = 4 + 2 + 2 + 3 + 2 * (STATE_LEN + ORACLE_LEN + PASSED_LEN) + NUM_ACTION_CODES;
+        let off = 4
+            + 2
+            + 2
+            + 3
+            + 2 * (STATE_LEN + ORACLE_LEN + PASSED_LEN)
+            + HISTORY_BYTES
+            + NUM_ACTION_CODES;
         for r in 0..6 {
             let n = out[r * label_row_bytes() + off];
             assert!(n >= 1 && n as usize <= MAX_CANDIDATES, "row {r}: {n}");
         }
+    }
+
+    /// Plan 2026-11-16 Task 4: on 1,000 decisions of the `stage` teacher, the
+    /// history bytes in the written row unpack to `encode_history` of the same
+    /// position, and every packed slot kind occurs.
+    #[test]
+    fn history_in_the_row_equals_encode_history() {
+        let l = Labeller {
+            teacher: Agent::parse("stage").unwrap(),
+            others: Agent::parse("stage").unwrap(),
+            rules: RuleSet::default(),
+            seed: 11,
+        };
+        let row_bytes = label_row_bytes();
+        let off = 4 + 2 + 2 + 3 + 2 * (STATE_LEN + ORACLE_LEN + PASSED_LEN);
+        let (mut checked, mut drawn, mut from_hand, mut claimed) = (0, 0, 0, 0);
+        let mut want = vec![0.0f32; HISTORY_LEN];
+        let mut got = vec![0.0f32; HISTORY_LEN];
+        let mut hand = 0;
+        while checked < 1000 {
+            let mut expected = Vec::new();
+            let (bytes, n) = l.label_hand_with(0, hand, |s, row| {
+                features::encode_history(s, &mut want);
+                expected.push((want.clone(), row.history));
+            });
+            assert_eq!(n, expected.len());
+            for (i, (w, packed)) in expected.iter().enumerate() {
+                let stored = &bytes[i * row_bytes + off..i * row_bytes + off + HISTORY_BYTES];
+                assert_eq!(stored, packed, "hand {hand} row {i}");
+                unpack_history(stored, &mut got);
+                assert_eq!(&got, w, "hand {hand} row {i}");
+                for &b in &stored[..HISTORY_PLANES] {
+                    match b {
+                        0 => {}
+                        1..=34 => drawn += 1,
+                        35..=68 => from_hand += 1,
+                        _ => claimed += 1,
+                    }
+                }
+                checked += 1;
+            }
+            hand += 1;
+        }
+        assert!(drawn > 0 && from_hand > 0 && claimed > 0);
+    }
+
+    #[test]
+    fn packed_history_counts_discards_beyond_24() {
+        let recs: Vec<DiscardRecord> = (0..30)
+            .map(|i| DiscardRecord {
+                seat: 2,
+                tile: Tile::from_index((i % 34) as u8),
+                from_hand: i % 2 == 0,
+                claimed: i == 3,
+            })
+            .collect();
+        let packed = pack_history_of(&recs, 1);
+        // Seat 2 is seat 1's next seat (relative 1).
+        assert_eq!(packed[HISTORY_DEPTH], 1 + 34);
+        assert_eq!(packed[HISTORY_DEPTH + 3], 1 + 3 + 68);
+        assert_eq!(packed[HISTORY_PLANES + 1], 6);
+        let mut want = vec![0.0f32; HISTORY_LEN];
+        let mut got = vec![0.0f32; HISTORY_LEN];
+        features::encode_history_of(&recs, 1, &mut want);
+        unpack_history(&packed, &mut got);
+        assert_eq!(got, want);
     }
 
     #[test]
