@@ -197,6 +197,7 @@ fn main() {
             ("others", js(&args.others)),
             ("seed", args.seed.to_string()),
             ("chunk_rows", args.chunk.to_string()),
+            ("layout_version", LABEL_LAYOUT_VERSION.to_string()),
         ] {
             let have = meta_member(&old, key);
             if have.as_deref() != Some(want.as_str()) {

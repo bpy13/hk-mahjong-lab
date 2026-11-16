@@ -13,6 +13,7 @@ Example::
     rows = labels.chunk(0)
     x = features(rows)                 # float32, (n, 933)
     chosen, weight = policy_targets(rows)
+    h = history(rows)                  # float32, (n, 3460); label layout 3 only
 """
 
 from __future__ import annotations
@@ -29,7 +30,9 @@ __all__ = [
     "NO_ACTION",
     "NO_TARGET",
     "NUM_TARGETS",
+    "HISTORY_BYTES",
     "features",
+    "history",
     "oracle",
     "policy_targets",
     "value_targets",
@@ -41,6 +44,10 @@ NO_ACTION = 65535
 NO_TARGET = 255
 #: Target classes: plan kind (5) x suit (3) x structure (3).
 NUM_TARGETS = 45
+#: History slots (4 seats x 24 discards) and the packed history's bytes per row
+#: (``labels::HISTORY_BYTES``: one per slot, then one overflow count per seat).
+HISTORY_SLOTS = 96
+HISTORY_BYTES = HISTORY_SLOTS + 4
 
 Rows = np.ndarray[Any, np.dtype[Any]]
 
@@ -62,6 +69,35 @@ class LabelDir(LogDir):
 def oracle(rows: Rows) -> npt.NDArray[np.float32]:
     """The hidden oracle block (``features::encode_oracle``) as float32, ``(n, 136)``."""
     return np.asarray(rows["oracle"], dtype=np.float32)
+
+
+def history(rows: Rows) -> npt.NDArray[np.float32]:
+    """The full discard history (``features::encode_history``, 3,460 floats per row)
+    unpacked from the ``history`` field of label layout 3 (``labels::pack_history``,
+    plan 2026-11-16 Task 4).
+
+    Packed byte ``r * 24 + k`` is 0 for an empty slot, else ``1 + tile + 34 *
+    from_hand + 68 * claimed``; byte ``96 + r`` counts seat ``r``'s discards beyond
+    the 24th."""
+    if "history" not in (rows.dtype.names or ()):
+        raise ValueError("these labels have no history block (layout < 3)")
+    return unpack_history(np.asarray(rows["history"]))
+
+
+def unpack_history(packed: npt.NDArray[np.uint8]) -> npt.NDArray[np.float32]:
+    """``labels::unpack_history`` for a ``(n, 100)`` array of packed rows."""
+    n = packed.shape[0]
+    slots = packed[:, :HISTORY_SLOTS].astype(np.int64)
+    out = np.zeros((n, HISTORY_SLOTS * 34 + 2 * HISTORY_SLOTS + 4), dtype=np.float32)
+    row, slot = np.nonzero(slots)
+    v = slots[row, slot] - 1
+    out[row, slot * 34 + v % 34] = 1.0
+    sc = HISTORY_SLOTS * 34
+    out[row, sc + 2 * slot] = np.where((v // 34) % 2 == 1, 1.0, 0.5)
+    out[row, sc + 2 * slot + 1] = v // 68
+    over = packed[:, HISTORY_SLOTS:].astype(np.float32) / 4.0
+    out[:, sc + 2 * HISTORY_SLOTS :] = np.minimum(over, 1.0)
+    return out
 
 
 def policy_targets(

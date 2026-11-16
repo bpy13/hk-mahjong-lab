@@ -17,6 +17,10 @@ Loss per row (plan Task 15):
 * **value**: mean squared error of the four-seat value head against the final
   deltas, log-scaled ``sign(x) · ln(1 + |x| / 8)`` (idea 5d).
 
+With ``--history`` (plan 2026-11-16 Task 4) the network also reads the full discard
+history (labels of layout 3): it stays packed on the device (100 bytes per row) and
+each batch is unpacked there (:class:`HistoryUnpack`), so 3 M rows fit on the card.
+
 Every batch gets one random suit permutation per row (:func:`mahjong.rl.cnn.augment`,
 done on the GPU here). AdamW with a short warm-up and a cosine decay. A checkpoint
 (model, optimiser, position in the run) is written every ``checkpoint_minutes`` to
@@ -56,7 +60,7 @@ from mahjong.rl.cnn import (
     feature_perm,
     target_map,
 )
-from mahjong.rl.labels import LabelDir, policy_targets, value_targets
+from mahjong.rl.labels import HISTORY_SLOTS, LabelDir, policy_targets, value_targets
 
 NEG = -1.0e9
 
@@ -109,18 +113,29 @@ class Data:
     weight: torch.Tensor  # (n,) float32
     target: torch.Tensor  # (n,) int64, 255 = none
     value: torch.Tensor  # (n, 4) float32, log-scaled
+    #: Packed discard history (n, 100) uint8, or None (layout 3, 2026-11-16 Task 4).
+    hist: torch.Tensor | None = None
 
     def __len__(self) -> int:
         return int(self.chosen.shape[0])
 
 
 def load(
-    labels: LabelDir, chunks: list[int], device: str, clip: float, passed: bool = False
+    labels: LabelDir,
+    chunks: list[int],
+    device: str,
+    clip: float,
+    passed: bool = False,
+    history: bool = False,
 ) -> Data:
     """The rows of ``chunks`` moved to ``device`` (one chunk at a time on the CPU).
     With ``passed``, ``x`` is the features followed by the passed block (label
-    layout 2, plan 2026-11-09 Task 18)."""
-    parts: dict[str, list[torch.Tensor]] = {k: [] for k in Data.__dataclass_fields__}
+    layout 2, plan 2026-11-09 Task 18); with ``history``, ``hist`` holds the packed
+    discard history (layout 3, plan 2026-11-16 Task 4)."""
+    names = list(Data.__dataclass_fields__)
+    if not history:
+        names.remove("hist")
+    parts: dict[str, list[torch.Tensor]] = {k: [] for k in names}
     for i in chunks:
         rows = labels.chunk(i)
         chosen, weight = policy_targets(rows, clip=clip)
@@ -129,6 +144,11 @@ def load(
             if "passed" not in (rows.dtype.names or ()):
                 raise ValueError(f"{labels.path}: the labels have no passed block (layout < 2)")
             x = np.concatenate([x, rows["passed"]], axis=1)
+        if history:
+            if "history" not in (rows.dtype.names or ()):
+                raise ValueError(f"{labels.path}: the labels have no history block (layout < 3)")
+            packed = np.ascontiguousarray(rows["history"])
+            parts["hist"].append(torch.from_numpy(packed).to(device))
         parts["x"].append(torch.from_numpy(np.ascontiguousarray(x)).to(device))
         parts["legal"].append(torch.from_numpy(rows["legal"] > 0).to(device))
         parts["chosen"].append(torch.from_numpy(chosen).to(device))
@@ -139,16 +159,53 @@ def load(
     return Data(**{k: torch.cat(v) for k, v in parts.items()})
 
 
+class HistoryUnpack:
+    """``labels::unpack_history`` on the device: packed ``(n, 100)`` uint8 rows to
+    the ``(n, 3460)`` history block (:func:`mahjong.rl.labels.unpack_history`)."""
+
+    def __init__(self, device: str) -> None:
+        v = torch.arange(256, device=device) - 1  # packed byte -> value (-1 = empty)
+        self.empty = v < 0
+        self.tile = v.clamp(min=0) % 34
+        self.how = torch.where((v.clamp(min=0) // 34) % 2 == 1, 1.0, 0.5)
+        self.claimed = (v.clamp(min=0) // 68).float()
+        self.slot = torch.arange(HISTORY_SLOTS, device=device)
+
+    def __call__(self, packed: torch.Tensor) -> torch.Tensor:
+        n = packed.shape[0]
+        b = packed[:, :HISTORY_SLOTS].long()
+        full = ~self.empty[b]
+        planes = torch.zeros((n, HISTORY_SLOTS, 34), device=packed.device)
+        planes.scatter_(2, self.tile[b].unsqueeze(2), full.float().unsqueeze(2))
+        flags = torch.stack(
+            [torch.where(full, self.how[b], 0.0), torch.where(full, self.claimed[b], 0.0)], 2
+        )
+        over = (packed[:, HISTORY_SLOTS:].float() / 4.0).clamp(max=1.0)
+        return torch.cat([planes.reshape(n, -1), flags.reshape(n, -1), over], 1)
+
+
+def inputs(data: Data, idx: Any, unpack: HistoryUnpack | None) -> torch.Tensor:
+    """The network input of rows ``idx``: features (and passed block), followed by
+    the unpacked history when the data carry it."""
+    x = data.x[idx]
+    if data.hist is None:
+        return x
+    if unpack is None:
+        unpack = HistoryUnpack(str(x.device))
+    return torch.cat([x, unpack(data.hist[idx]).to(x.dtype)], 1)
+
+
 class SuitSwap:
     """:func:`mahjong.rl.cnn.augment` as GPU gathers: one random suit permutation
     per row for features, legal masks, chosen codes and target classes."""
 
-    def __init__(self, device: str, passed: bool = False) -> None:
+    def __init__(self, device: str, passed: bool = False, history: bool = False) -> None:
         def stack(f: Any) -> torch.Tensor:
             return torch.as_tensor(np.stack([f(p) for p in PERMS]), device=device)
 
-        # (6, 933), or (6, 1421) with the passed block: new column <- old column.
-        self.feat = stack(lambda p: feature_perm(p, passed))
+        # (6, 933), (6, 1421) with the passed block, + 3460 with the history block:
+        # new column <- old column.
+        self.feat = stack(lambda p: feature_perm(p, passed, history))
         self.act = stack(action_perm)  # (6, 134): new code <- old code
         self.act_map = stack(action_map)  # (6, 134): old code -> new code
         tm = np.stack([np.append(target_map(p), np.arange(NUM_TARGETS, 256)) for p in PERMS])
@@ -210,9 +267,10 @@ def evaluate(net: SuitCNN, data: Data, batch: int = 8192) -> dict[str, float]:
     net.eval()
     agree = n = t_ok = t_n = 0
     v_se = 0.0
+    unpack = HistoryUnpack(str(data.x.device)) if data.hist is not None else None
     for i in range(0, len(data), batch):
         sl = slice(i, i + batch)
-        p, t, v = net(data.x[sl].float())
+        p, t, v = net(inputs(data, sl, unpack).float())
         logits = p.masked_fill(~data.legal[sl], NEG)
         agree += int((logits.argmax(1) == data.chosen[sl]).sum())
         n += logits.shape[0]
@@ -221,8 +279,12 @@ def evaluate(net: SuitCNN, data: Data, batch: int = 8192) -> dict[str, float]:
         t_n += int(has.sum())
         v_se += float(((v - data.value[sl]) ** 2).sum())
     net.train()
+    p_agree = agree / max(1, n)
     return {
-        "top1_agreement": agree / max(1, n),
+        "top1_agreement": p_agree,
+        # Normal-approximation 95 % half-width (rows of one hand are not independent,
+        # so the true range is somewhat wider).
+        "top1_ci95": 1.96 * math.sqrt(p_agree * (1 - p_agree) / max(1, n)),
         "target_accuracy": t_ok / max(1, t_n),
         "value_mse": v_se / max(1, 4 * n),
         "rows": float(n),
@@ -242,7 +304,7 @@ def int8_agreement(fp32: Path, int8: Path, data: Data, rows: int) -> float:
     from mahjong._core import net_forward
 
     n = min(rows, len(data))
-    x = data.x[:n].float().cpu().numpy().astype("<f4")
+    x = inputs(data, slice(0, n), None).float().cpu().numpy().astype("<f4")
     legal = data.legal[:n].cpu().numpy()
 
     def top1(path: Path) -> np.ndarray:
@@ -267,8 +329,8 @@ def distill(cfg: DistillConfig, resume: bool = False) -> dict[str, Any]:
 
     t0 = time.time()
     cnn_cfg = CnnConfig(**cfg.cnn)
-    data = load(labels, train, device, cfg.margin_clip, cnn_cfg.passed)
-    held = load(labels, holdout, device, cfg.margin_clip, cnn_cfg.passed)
+    data = load(labels, train, device, cfg.margin_clip, cnn_cfg.passed, cnn_cfg.history)
+    held = load(labels, holdout, device, cfg.margin_clip, cnn_cfg.passed, cnn_cfg.history)
     log_line(
         out, f"loaded {len(data)} train rows, {len(held)} held-out rows in {time.time() - t0:.0f} s"
     )
@@ -276,7 +338,8 @@ def distill(cfg: DistillConfig, resume: bool = False) -> dict[str, Any]:
     torch.manual_seed(cfg.seed)
     net = SuitCNN(cnn_cfg).to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    swap = SuitSwap(device, cnn_cfg.passed)
+    swap = SuitSwap(device, cnn_cfg.passed, cnn_cfg.history)
+    unpack = HistoryUnpack(device) if cnn_cfg.history else None
     steps_per_epoch = max(1, len(data) // cfg.batch)
     total = steps_per_epoch * cfg.epochs
     state: dict[str, Any] = {"epoch": 0, "step": 0, "global_step": 0, "seconds": 0.0}
@@ -323,7 +386,7 @@ def distill(cfg: DistillConfig, resume: bool = False) -> dict[str, Any]:
         for s in range(state["step"], steps_per_epoch):
             idx = order[s * cfg.batch : (s + 1) * cfg.batch]
             x, legal, chosen, target = swap(
-                g, data.x[idx], data.legal[idx], data.chosen[idx], data.target[idx]
+                g, inputs(data, idx, unpack), data.legal[idx], data.chosen[idx], data.target[idx]
             )
             for group in opt.param_groups:
                 group["lr"] = lr_at(state["global_step"], total, cfg)
@@ -437,6 +500,11 @@ def main(argv: list[str] | None = None) -> None:
         help="also read the passed-tile block (labels of layout 2; plan 2026-11-09 Task 18)",
     )
     ap.add_argument(
+        "--history",
+        action="store_true",
+        help="also read the full discard history (labels of layout 3; plan 2026-11-16 Task 4)",
+    )
+    ap.add_argument(
         "--threads", type=int, default=0, help="CPU threads for torch (0 = torch's default)"
     )
     a = ap.parse_args(argv)
@@ -455,7 +523,7 @@ def main(argv: list[str] | None = None) -> None:
         lr=a.lr,
         device=a.device,
         seed=a.seed,
-        cnn={"passed": True} if a.passed else {},
+        cnn={**({"passed": True} if a.passed else {}), **({"history": True} if a.history else {})},
     )
     distill(cfg, resume=a.resume)
 

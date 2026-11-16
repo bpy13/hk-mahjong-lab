@@ -60,6 +60,12 @@ watch session's plain work copy into this repository first, so the work has a hi
   `repo\hk-mahjong-lab\models\`, read-only. Build `mahjong._core` in your own checkout before a
   queue job runs from it.
 - The watch session's folder `C:\Users\brian\.orchestrator\mahjong-watch\` is read-only.
+- The `mahjong` conda env is shared by all workers and queue jobs. Never run
+  `pip install -e` into it or into the base env from a worker checkout (2026-11-16: a worker
+  repointed it at its own checkout). Build `_core` into your checkout, set `PYTHONPATH` to your
+  checkout's `python` folder, call `C:\Users\brian\miniconda3\envs\mahjong\python.exe` by full path, and start
+  every job script with a check that `mahjong.__file__` lies under the script's own checkout
+  (exit 1 if not).
 - The rule bot's numbers do not change in this plan.
 - Nothing is put into the game (hk-games) by this plan.
 
@@ -106,6 +112,22 @@ watch session's plain work copy into this repository first, so the work has a hi
     `python -m mahjong.rl.ppo_cnn --init none --minutes 3 --out runs/ppo/smoke --device cpu`
     finishes with exit code 0.
 
+- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]` — needs: Task 4
+  - Files: `crates/search/src/stage.rs`, `crates/search/examples/dealin.rs`,
+    `crates/search/examples/fit_routes.rs`, `docs/open-items.md`; the worker clone's
+    `models/race-belief.mjnn` (not in git).
+  - Done when: `cargo clippy --workspace -- -D warnings` and `cargo fmt --check` pass;
+    `cargo test --workspace` passes, `crates/search/tests/model_files.rs` included; and a
+    cpu-lane job of `compare stage value value value 40000 1` still prints +2.54 +- 0.21,
+    25.1 %, 18.4 %, 5.1, digit for digit.
+  - Notes: found by the Task 4 worker, 2026-11-16. Clippy: `stage.rs:530` (`sort_by` to
+    `sort_by_key`); fmt: the three files above. The model test fails in the worker clone
+    because its `models/race-belief.mjnn` was written there by the race loop on 11 Nov and
+    differs from the one in `repo/hk-mahjong-lab/models/`. Rename the clone's file to
+    `race-belief.mjnn.loop-2026-11-11` (keep it), copy the standalone checkout's file in
+    (read-only source), and note both md5 sums in `docs/open-items.md`. Do not touch any file
+    a running queue job reads: check `jobq.ps1 status` first.
+
 ## Phase 2 – Full discard history as input (opus)
 
 - [x] **Task 3: a new input version with every discard in order** (opus) `[parallel-ok]` (input `history`, 3,460 floats; Rust and Python agree on 1,000 positions, largest output difference 1.2e-7; all 15 `.mjnn` and 3 CNN `.pt` files in `models/` give the same output as before)
@@ -125,7 +147,17 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 3 – Imitation, then self-play (opus; graphics card through the queue)
 
-- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (taken: slot 1, 2026-11-16 19:07)
+- [ ] **Task 4: imitation start** (opus) (checkpoint) — needs: Task 2, Task 3 (waiting: jobs 151 and 152)
+  - Status (slot 1, 2026-11-16 19:40): built and pushed in 42f828e (label layout 3 with the
+    packed history, `distill_cnn --history`, both job scripts; tests pass). Queued from the
+    worker clone `repo\.worktrees\hk-mahjong-lab-workers`: job 151 (cpu,
+    `imitation_data.ps1`, 3 M rows into `runs\rl-stage\labels`) and job 152 (gpu, after 151,
+    behind gpu job 150; `imitation.ps1`: training, then 4,000 deals vs three `stage`).
+    Check: `jobq.ps1 status`, `jobq.ps1 log 152`; each log's first line prints
+    `mahjong.__file__` (must lie under the worker clone). Results in that clone:
+    `runs\rl-stage\imitation\result.json` (`held_out.top1_agreement`, `held_out.top1_ci95`)
+    and `runs\rl-stage\imitation\vs-stage.txt` (first line = the network). Finish: fill the
+    table in `docs/study-results/self-play-network.md`, board line, tick or inbox.
   - Files: `experiments/stage/imitation_data.ps1` (cpu lane), `experiments/stage/imitation.ps1`
     (gpu lane), `python/mahjong/rl/distill_cnn.py` only as far as the new input needs,
     `docs/study-results/self-play-network.md` (new), `docs/board.md`.
