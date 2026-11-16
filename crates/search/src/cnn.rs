@@ -35,6 +35,13 @@
 //! suit tower and more honour columns of the rest block, its 12 scalars follow
 //! the feature scalars. Files without the hyper-parameter read the features only.
 //!
+//! **History block** (hyper-parameter `history` = 1; plan 2026-11-16 Task 3): the
+//! input continues with [`crate::features::encode_history`]'s block (named input
+//! slice `history`, after `passed` when both are read). Its 96 tile planes (one
+//! per seat and discard slot) become the next channels of the suit tower and
+//! more honour columns of the rest block, its 196 scalars follow the earlier
+//! scalars. Files without the hyper-parameter read no history.
+//!
 //! **File** (after `b"MJNN"`, `u32 3` and the v2 named input and output
 //! slices): `u32 len` + architecture name ([`ARCH`]); `u32 n` hyper-parameters
 //! as `u32 len` + name + `u32 value`; `u32 n` tensors as `u32 len` + name,
@@ -45,7 +52,8 @@
 //! when loaded, so int8 only shrinks the file.
 
 use crate::features::{
-    HONOUR_KINDS, PASSED_LEN, PASSED_PLANES, PASSED_SCALARS, PLANES, REST_LEN, STATE_LEN, SUIT_LEN,
+    HISTORY_LEN, HISTORY_PLANES, HISTORY_SCALARS, HONOUR_KINDS, PASSED_LEN, PASSED_PLANES,
+    PASSED_SCALARS, PLANES, REST_LEN, STATE_LEN, SUIT_LEN,
 };
 use mahjong_tiles::NUM_KINDS;
 use std::collections::HashMap;
@@ -159,7 +167,10 @@ pub struct SuitCnn {
     kernel: usize,
     /// Reads the passed block after the features.
     passed: bool,
-    /// Input channels of the suit tower: 26, or 40 with the passed block.
+    /// Reads the history block after the features (and the passed block).
+    history: bool,
+    /// Input channels of the suit tower: 26, plus 14 with the passed block,
+    /// plus 96 with the history block.
     planes: usize,
     honour1: Dense,
     honour2: Dense,
@@ -243,15 +254,23 @@ impl SuitCnn {
         if k % 2 == 0 || k > SUIT_LEN {
             return Err(format!("kernel {k} must be odd and at most {SUIT_LEN}"));
         }
-        let passed = match hp.get("passed").copied().unwrap_or(0) {
-            0 => false,
-            1 => true,
-            v => return Err(format!("hyper-parameter passed is {v}, expected 0 or 1")),
+        let flag = |k: &str| match hp.get(k).copied().unwrap_or(0) {
+            0 => Ok(false),
+            1 => Ok(true),
+            v => Err(format!("hyper-parameter {k} is {v}, expected 0 or 1")),
         };
-        let planes = PLANES + if passed { PASSED_PLANES } else { 0 };
+        let (passed, history) = (flag("passed")?, flag("history")?);
+        let planes = PLANES
+            + if passed { PASSED_PLANES } else { 0 }
+            + if history { HISTORY_PLANES } else { 0 };
         let rest_len = REST_LEN
             + if passed {
                 PASSED_PLANES * HONOUR_KINDS + PASSED_SCALARS
+            } else {
+                0
+            }
+            + if history {
+                HISTORY_PLANES * HONOUR_KINDS + HISTORY_SCALARS
             } else {
                 0
             };
@@ -295,6 +314,7 @@ impl SuitCnn {
             channels: c,
             kernel: k,
             passed,
+            history,
             planes,
             honour1: t.dense("honour1", hh, rest_len)?,
             honour2: t.dense("honour2", hh, hh)?,
@@ -339,22 +359,35 @@ impl SuitCnn {
         self.passed
     }
 
-    /// Input length: [`STATE_LEN`], plus [`PASSED_LEN`] with the passed block.
+    /// Whether the network reads the history block (after the passed block).
+    pub fn reads_history(&self) -> bool {
+        self.history
+    }
+
+    /// Input length: [`STATE_LEN`], plus [`PASSED_LEN`] with the passed block,
+    /// plus [`HISTORY_LEN`] with the history block.
     pub fn input_len(&self) -> usize {
-        STATE_LEN + if self.passed { PASSED_LEN } else { 0 }
+        STATE_LEN
+            + if self.passed { PASSED_LEN } else { 0 }
+            + if self.history { HISTORY_LEN } else { 0 }
     }
 
     /// The suit block (27 suited tiles × [`Self::planes`] channels, position-major)
     /// and the rest block (honour columns of every plane, then the scalars), as
-    /// `python/mahjong/rl/cnn.py`'s `split_planes`. Without the passed block this
-    /// is [`crate::features::encode_planes`].
+    /// `python/mahjong/rl/cnn.py`'s `split_planes`. Without the passed and
+    /// history blocks this is [`crate::features::encode_planes`].
     fn split(&self, x: &[f32]) -> (Vec<f32>, Vec<f32>) {
         let np = self.planes;
         let mut suits = vec![0.0f32; 3 * SUIT_LEN * np];
         let mut rest = Vec::with_capacity(self.honour1.inp);
         let mut blocks = vec![(&x[..STATE_LEN], PLANES, 0)];
+        let (mut at, mut first) = (STATE_LEN, PLANES);
         if self.passed {
-            blocks.push((&x[STATE_LEN..STATE_LEN + PASSED_LEN], PASSED_PLANES, PLANES));
+            blocks.push((&x[at..at + PASSED_LEN], PASSED_PLANES, first));
+            (at, first) = (at + PASSED_LEN, first + PASSED_PLANES);
+        }
+        if self.history {
+            blocks.push((&x[at..at + HISTORY_LEN], HISTORY_PLANES, first));
         }
         for (blk, n, first) in blocks {
             for p in 0..n {

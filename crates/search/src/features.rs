@@ -20,6 +20,11 @@
 //! passed-win rule still load; a network reads it through a `passed` input slice
 //! (`crate::net`).
 //!
+//! [`encode_history`] is another separate public block ([`HISTORY_LEN`] floats,
+//! plan 2026-11-16 Task 3): every discard of every seat in order (the first 24
+//! per seat), each with its tile, 摸打 or 入章, and whether it was claimed. Networks
+//! read it through a `history` input slice; earlier networks never see it.
+//!
 //! A test checks that two positions that differ only in hidden tiles encode
 //! identically.
 
@@ -482,6 +487,116 @@ pub fn encode_passed(state: &State, out: &mut [f32]) {
     }
 }
 
+/// Discards kept per seat in [`encode_history`]'s block.
+pub const HISTORY_DEPTH: usize = 24;
+/// Tile planes of [`encode_history`]: one per seat and discard slot.
+pub const HISTORY_PLANES: usize = 4 * HISTORY_DEPTH;
+/// Scalars of [`encode_history`]: two flags per seat and slot, then one overflow
+/// value per seat.
+pub const HISTORY_SCALARS: usize = 2 * HISTORY_PLANES + 4;
+/// Length of [`encode_history`]'s output.
+pub const HISTORY_LEN: usize = HISTORY_PLANES * NUM_KINDS + HISTORY_SCALARS;
+
+/// One discard of the hand, as [`encode_history`] reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiscardRecord {
+    /// Absolute seat of the discarder.
+    pub seat: u8,
+    /// The tile thrown.
+    pub tile: Tile,
+    /// 入章 (thrown from the hand); `false` is 摸打 (the tile just drawn).
+    pub from_hand: bool,
+    /// Another seat claimed it into an exposed meld.
+    pub claimed: bool,
+}
+
+/// Every discard of the hand so far, in the order thrown. A discard is
+/// `claimed` once a [`Event::Claim`] takes it; the tile on offer right now is
+/// not (yet) claimed.
+pub fn discard_records(state: &State) -> Vec<DiscardRecord> {
+    let mut out: Vec<DiscardRecord> = Vec::new();
+    for e in state.events() {
+        match *e {
+            Event::Discard {
+                seat,
+                tile,
+                from_hand,
+            } => out.push(DiscardRecord {
+                seat,
+                tile,
+                from_hand,
+                claimed: false,
+            }),
+            Event::Claim { from, .. } => {
+                // A claim always takes the latest discard, which `from` made.
+                let last = out.last_mut().expect("a claim follows a discard");
+                debug_assert_eq!(last.seat, from);
+                last.claimed = true;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Encodes the full discard history of the hand from the view of the player to
+/// act into `out` (length [`HISTORY_LEN`]; plan 2026-11-16 Task 3). Everything in
+/// it is public. Seats are relative as in [`encode`] (`r`: 0 = me, 1 = next,
+/// 2 = across, 3 = previous); slot `k` is the seat's `k`-th discard of the hand
+/// (0 = its first), whether or not another seat claimed it.
+///
+/// | Part | Contents |
+/// |---|---|
+/// | planes `r * 24 + k` | one-hot tile of seat `r`'s discard `k` (all zero while the slot is empty) |
+/// | scalar `(r * 24 + k) * 2` | how it was thrown: 1 = 入章 (from the hand), ½ = 摸打 (the tile just drawn), 0 = empty slot |
+/// | scalar `(r * 24 + k) * 2 + 1` | 1 if another seat claimed it into a meld |
+/// | scalar `192 + r` | discards of seat `r` beyond the 24th, / 4, at most 1 |
+///
+/// **More than 24 discards**: slots hold a seat's first 24 discards; later ones
+/// only raise its overflow scalar (they still count in [`encode`]'s discard
+/// planes, and its last three are in [`encode`]'s recency planes and
+/// [`encode_passed`]'s flags).
+///
+/// It is a block of its own, not more planes in [`encode`], so every network
+/// trained before it loads unchanged; a suit-shared CNN reads it with the
+/// hyper-parameter `history` = 1 (`crate::cnn`), a network file through the
+/// input slice `history` (`crate::net`).
+///
+/// # Panics
+/// Panics if the hand is over or `out` has the wrong length.
+pub fn encode_history(state: &State, out: &mut [f32]) {
+    let me = state.current_player().expect("hand in progress");
+    encode_history_of(&discard_records(state), me, out);
+}
+
+/// [`encode_history`] from a list of discards (in the order thrown) for the
+/// absolute seat `me`.
+///
+/// # Panics
+/// Panics if `out` has the wrong length or a seat is not 0–3.
+pub fn encode_history_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) {
+    assert_eq!(out.len(), HISTORY_LEN);
+    assert!(me < 4);
+    out.fill(0.0);
+    let mut count = [0usize; 4];
+    let (planes, s) = out.split_at_mut(HISTORY_PLANES * NUM_KINDS);
+    for d in records {
+        let r = (d.seat as usize + 4 - me) % 4;
+        let k = count[r];
+        count[r] += 1;
+        if k >= HISTORY_DEPTH {
+            continue;
+        }
+        let slot = r * HISTORY_DEPTH + k;
+        planes[slot * NUM_KINDS + d.tile.index() as usize] = 1.0;
+        s[2 * slot] = if d.from_hand { 1.0 } else { 0.5 };
+        s[2 * slot + 1] = d.claimed as u8 as f32;
+    }
+    for (r, &n) in count.iter().enumerate() {
+        s[2 * HISTORY_PLANES + r] = (n.saturating_sub(HISTORY_DEPTH) as f32 / 4.0).min(1.0);
+    }
+}
+
 /// Encodes what is hidden from the player to act into `out` (length
 /// [`ORACLE_LEN`]): each opponent's concealed tiles (relative seats 1–3, count
 /// / 4) and the next 16 tiles of the wall (count / 4).
@@ -711,6 +826,120 @@ mod tests {
         assert!(checked > 100 && from_hand_seen > 0 && drawn_seen > 0);
     }
 
+    /// Plan 2026-11-16 Task 3 (a): per seat, every discard in order with its tile,
+    /// 摸打 or 入章, and claimed or not, read back from the block and compared with
+    /// the event list (a claim is the event right after the discard it takes).
+    #[test]
+    fn history_block_holds_every_discard_in_order() {
+        let mut rng = SmallRng::seed_from_u64(17);
+        let bot = Bot::by_name("fast").unwrap();
+        let mut out = vec![0.0; HISTORY_LEN];
+        let (mut checked, mut claimed_seen, mut drawn_seen, mut hand_seen) = (0, 0, 0, 0);
+        for _ in 0..30 {
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            while let Some(me) = s.current_player() {
+                encode_history(&s, &mut out);
+                // What each relative seat discarded: (tile, from_hand, claimed).
+                let mut want: [Vec<(usize, bool, bool)>; 4] = Default::default();
+                let events = s.events();
+                for (i, e) in events.iter().enumerate() {
+                    if let Event::Discard {
+                        seat,
+                        tile,
+                        from_hand,
+                    } = *e
+                    {
+                        let claimed = matches!(
+                            events.get(i + 1),
+                            Some(Event::Claim { from, .. }) if *from == seat
+                        );
+                        let r = (seat as usize + 4 - me) % 4;
+                        want[r].push((tile.index() as usize, from_hand, claimed));
+                    }
+                }
+                let (planes, sc) = out.split_at(HISTORY_PLANES * NUM_KINDS);
+                for (r, list) in want.iter().enumerate() {
+                    assert!(list.len() <= HISTORY_DEPTH, "{} discards", list.len());
+                    for k in 0..HISTORY_DEPTH {
+                        let slot = r * HISTORY_DEPTH + k;
+                        let p = &planes[slot * NUM_KINDS..(slot + 1) * NUM_KINDS];
+                        match list.get(k) {
+                            Some(&(t, from_hand, claimed)) => {
+                                let mut one = [0.0; NUM_KINDS];
+                                one[t] = 1.0;
+                                assert_eq!(p, one);
+                                assert_eq!(sc[2 * slot], if from_hand { 1.0 } else { 0.5 });
+                                assert_eq!(sc[2 * slot + 1], claimed as u8 as f32);
+                                claimed_seen += claimed as usize;
+                                drawn_seen += !from_hand as usize;
+                                hand_seen += from_hand as usize;
+                            }
+                            None => {
+                                assert!(p.iter().all(|&x| x == 0.0));
+                                assert_eq!((sc[2 * slot], sc[2 * slot + 1]), (0.0, 0.0));
+                            }
+                        }
+                    }
+                    assert_eq!(sc[2 * HISTORY_PLANES + r], 0.0);
+                }
+                checked += 1;
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(checked > 1000 && claimed_seen > 0 && drawn_seen > 0 && hand_seen > 0);
+    }
+
+    /// Plan 2026-11-16 Task 3 (a), the rule for a 25th discard: the slots keep a
+    /// seat's first 24 discards in order; each later one adds ¼ to the seat's
+    /// overflow scalar (at most 1) and appears in no slot.
+    #[test]
+    fn history_keeps_the_first_24_discards_and_counts_the_rest() {
+        let tile = |i: usize| Tile::from_index((i % 27) as u8);
+        // Seat 2 (relative 1 for me = 1) throws 30 tiles: 0, 1, …, 26, 0, 1, 2.
+        let mut records: Vec<DiscardRecord> = (0..30)
+            .map(|i| DiscardRecord {
+                seat: 2,
+                tile: tile(i),
+                from_hand: i % 2 == 0,
+                claimed: i == 5,
+            })
+            .collect();
+        records.push(DiscardRecord {
+            seat: 1,
+            tile: Tile::RED,
+            from_hand: false,
+            claimed: false,
+        });
+        let mut out = vec![0.0; HISTORY_LEN];
+        let at = |out: &[f32], slot: usize| -> Vec<usize> {
+            (0..NUM_KINDS)
+                .filter(|&t| out[slot * NUM_KINDS + t] == 1.0)
+                .collect()
+        };
+        let sc = HISTORY_PLANES * NUM_KINDS;
+        for n in [24, 25, 26, 28, 30] {
+            let mut rs: Vec<_> = records[..n].to_vec();
+            rs.push(records[30]);
+            encode_history_of(&rs, 1, &mut out);
+            for k in 0..HISTORY_DEPTH {
+                assert_eq!(at(&out, HISTORY_DEPTH + k), vec![k % 27]);
+                assert_eq!(
+                    out[sc + 2 * (HISTORY_DEPTH + k)],
+                    if k % 2 == 0 { 1.0 } else { 0.5 }
+                );
+                assert_eq!(out[sc + 2 * (HISTORY_DEPTH + k) + 1], (k == 5) as u8 as f32);
+            }
+            let extra = (n - HISTORY_DEPTH) as f32 / 4.0;
+            assert_eq!(out[sc + 2 * HISTORY_PLANES + 1], extra.min(1.0), "{n}");
+            // The actor's own discard is relative seat 0, slot 0.
+            assert_eq!(at(&out, 0), vec![Tile::RED.index() as usize]);
+            assert_eq!(out[sc], 0.5);
+            assert_eq!(out[sc + 2 * HISTORY_PLANES], 0.0);
+        }
+    }
+
     #[test]
     fn hidden_tiles_do_not_change_the_encoding() {
         let mut rng = SmallRng::seed_from_u64(1);
@@ -735,6 +964,11 @@ mod tests {
             encode_passed(&s, &mut pa);
             encode_passed(&other, &mut pb);
             assert_eq!(pa, pb, "the passed block depends on hidden tiles");
+            let mut ha = vec![0.0; HISTORY_LEN];
+            let mut hb = vec![0.0; HISTORY_LEN];
+            encode_history(&s, &mut ha);
+            encode_history(&other, &mut hb);
+            assert_eq!(ha, hb, "the history block depends on hidden tiles");
             assert!(pa.iter().all(|x| (0.0..=1.0).contains(x)));
             let mut a = vec![0.0; STATE_LEN];
             let mut b = vec![0.0; STATE_LEN];

@@ -41,6 +41,16 @@ Design (the Rust side, ``crates/search/src/cnn.rs``, runs the same network):
   its planes like the feature planes, so the network stays suit-equivariant.
   Networks without it (``passed=False``, every file before Task 18) are unchanged.
 
+* **History block** (``history=True``; plan 2026-11-16 Task 3): the input continues
+  (after the passed block, when there is one) with the 3,460 values of
+  ``features::encode_history``: every discard of every seat in order, the first 24
+  per seat. Its 96 tile planes (seat-major, then slot; one-hot tile) join the suit
+  tower as further channels and the honour columns as further columns; its 196
+  scalars (per seat and slot: 1 = from the hand, 1/2 = the tile just drawn, 0 =
+  empty; then 1 = claimed; then per seat the discards beyond the 24th, / 4, at most
+  1) join the rest block. :func:`encode_history` is the Python reference of the
+  same block, built from ``HkState.events()``. Networks without it are unchanged.
+
 Defaults (C = 128, 6 blocks, 512-wide dense parts) give about 2.2 M parameters and
 about 18 M multiply-adds per position, so one forward pass on one thread stays near
 the 5 ms target; ``net_speed`` measures it. No normalisation layers: the export
@@ -56,6 +66,7 @@ from __future__ import annotations
 import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -84,6 +95,13 @@ PASSED_PLANES = 14
 PASSED_SCALARS = 12
 PASSED_LEN = PASSED_PLANES * 34 + PASSED_SCALARS
 
+#: ``features::encode_history``: per seat 24 discard slots, one tile plane each,
+#: then two flags per slot and one overflow value per seat.
+HISTORY_DEPTH = 24
+HISTORY_PLANES = 4 * HISTORY_DEPTH
+HISTORY_SCALARS = 2 * HISTORY_PLANES + 4
+HISTORY_LEN = HISTORY_PLANES * 34 + HISTORY_SCALARS
+
 assert SCALARS == 49 and NUM_ACTIONS == 134
 
 
@@ -99,22 +117,33 @@ class CnnConfig:
     oracle: bool = False
     #: The input also holds the passed-tile block after the features (Task 18).
     passed: bool = False
+    #: The input also holds the discard-history block after those (2026-11-16 Task 3).
+    history: bool = False
 
 
-def input_len(passed: bool) -> int:
-    """Input width: the features, plus the passed block when the network reads it."""
-    return STATE_LEN + (PASSED_LEN if passed else 0)
+def input_len(passed: bool, history: bool = False) -> int:
+    """Input width: the features, plus the passed block and the history block when
+    the network reads them."""
+    return STATE_LEN + (PASSED_LEN if passed else 0) + (HISTORY_LEN if history else 0)
 
 
-def split_planes(x: torch.Tensor, passed: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+def split_planes(
+    x: torch.Tensor, passed: bool = False, history: bool = False
+) -> tuple[torch.Tensor, torch.Tensor]:
     """``features::encode_planes``: ``(B, 933)`` -> suits ``(B, 3, 26, 9)`` and
     rest ``(B, 231)`` (honours plane-major, then the scalars). With ``passed`` the
     input is ``(B, 1421)``; the passed planes follow as channels 26-39 of the suits,
-    and the rest block continues with their honour columns and the 12 scalars."""
+    and the rest block continues with their honour columns and the 12 scalars. With
+    ``history`` its 96 planes follow as the next channels, and the rest block
+    continues with their honour columns and the 196 scalars."""
     b = x.shape[0]
     blocks = [(x[:, :STATE_LEN], PLANES)]
+    at = STATE_LEN
     if passed:
-        blocks.append((x[:, STATE_LEN : STATE_LEN + PASSED_LEN], PASSED_PLANES))
+        blocks.append((x[:, at : at + PASSED_LEN], PASSED_PLANES))
+        at += PASSED_LEN
+    if history:
+        blocks.append((x[:, at : at + HISTORY_LEN], HISTORY_PLANES))
     suits, rest = [], []
     for blk, n in blocks:
         planes = blk[:, : n * 34].reshape(b, n, 34)
@@ -157,8 +186,14 @@ class SuitCNN(nn.Module):
         c, k, hh, m, vh = cfg.channels, cfg.kernel, cfg.honour_hidden, cfg.merge, cfg.value_hidden
         if k % 2 == 0 or k > SUIT_LEN:
             raise ValueError(f"kernel {k} must be odd and at most {SUIT_LEN}")
-        self.in_planes = PLANES + (PASSED_PLANES if cfg.passed else 0)
-        rest_len = REST_LEN + (PASSED_PLANES * HONOURS + PASSED_SCALARS if cfg.passed else 0)
+        self.in_planes = (
+            PLANES + (PASSED_PLANES if cfg.passed else 0) + (HISTORY_PLANES if cfg.history else 0)
+        )
+        rest_len = (
+            REST_LEN
+            + (PASSED_PLANES * HONOURS + PASSED_SCALARS if cfg.passed else 0)
+            + (HISTORY_PLANES * HONOURS + HISTORY_SCALARS if cfg.history else 0)
+        )
         self.honour1 = nn.Linear(rest_len, hh)
         self.honour2 = nn.Linear(hh, hh)
         self.stem = nn.Conv1d(self.in_planes, c, k, padding=k // 2)
@@ -177,18 +212,18 @@ class SuitCNN(nn.Module):
     def forward(
         self, x: torch.Tensor, oracle: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """``x``: features ``(B, 933)``, or features and passed block ``(B, 1421)``
-        when ``cfg.passed``; ``oracle``: ``(B, 136)`` or None (zeros).
+        """``x``: features ``(B, 933)``, followed by the passed block (488) when
+        ``cfg.passed`` and the history block (3,460) when ``cfg.history``;
+        ``oracle``: ``(B, 136)`` or None (zeros).
 
         Returns policy logits ``(B, 134)``, target logits ``(B, 45)`` and values
         ``(B, 4)`` (relative seats, summing to zero).
         """
         b = x.shape[0]
-        if x.shape[1] != input_len(self.cfg.passed):
-            raise ValueError(
-                f"input has {x.shape[1]} columns, expected {input_len(self.cfg.passed)}"
-            )
-        suits, rest = split_planes(x, self.cfg.passed)
+        want = input_len(self.cfg.passed, self.cfg.history)
+        if x.shape[1] != want:
+            raise ValueError(f"input has {x.shape[1]} columns, expected {want}")
+        suits, rest = split_planes(x, self.cfg.passed, self.cfg.history)
         h = F.relu(self.honour2(F.relu(self.honour1(rest))))
         y = F.relu(self.stem(suits.reshape(b * 3, self.in_planes, SUIT_LEN)))
         for blk in self.blocks:
@@ -263,16 +298,56 @@ def _tile_perm(perm: tuple[int, int, int]) -> npt.NDArray[np.int64]:
     return src
 
 
-def feature_perm(perm: tuple[int, int, int], passed: bool = False) -> npt.NDArray[np.int64]:
+def feature_perm(
+    perm: tuple[int, int, int], passed: bool = False, history: bool = False
+) -> npt.NDArray[np.int64]:
     """Column order that swaps suits in a features row (``x[:, feature_perm(p)]``);
-    with ``passed``, in a row of features followed by the passed block."""
+    with ``passed`` and ``history``, in a row of features followed by those blocks."""
     t = _tile_perm(perm)
-    planes = (np.arange(PLANES)[:, None] * 34 + t[None, :]).reshape(-1)
-    out = [planes, np.arange(PLANES * 34, STATE_LEN)]
-    if passed:
-        pp = STATE_LEN + (np.arange(PASSED_PLANES)[:, None] * 34 + t[None, :]).reshape(-1)
-        out += [pp, np.arange(STATE_LEN + PASSED_PLANES * 34, STATE_LEN + PASSED_LEN)]
+    out: list[npt.NDArray[np.int64]] = []
+    at = 0
+    for n, length, use in (
+        (PLANES, STATE_LEN, True),
+        (PASSED_PLANES, PASSED_LEN, passed),
+        (HISTORY_PLANES, HISTORY_LEN, history),
+    ):
+        if use:
+            out += [
+                at + (np.arange(n)[:, None] * 34 + t[None, :]).reshape(-1),
+                np.arange(at + n * 34, at + length),
+            ]
+            at += length
     return np.concatenate(out)
+
+
+def encode_history(events: list[dict[str, Any]], me: int) -> npt.NDArray[np.float32]:
+    """Python reference of ``features::encode_history``: the discard history of the
+    hand for absolute seat ``me``, from ``HkState.events()`` (``HISTORY_LEN`` values).
+
+    Seats are relative (0 = me, 1 = next, 2 = across, 3 = previous). Plane
+    ``r * 24 + k`` is seat ``r``'s ``k``-th discard (one-hot tile); scalar
+    ``(r * 24 + k) * 2`` is 1 for a tile from the hand and 1/2 for the tile just
+    drawn, the next scalar 1 when a claim took it; scalar ``192 + r`` counts the
+    discards beyond the 24th (/ 4, at most 1), which take no slot."""
+    out = np.zeros(HISTORY_LEN, dtype=np.float32)
+    sc = HISTORY_PLANES * 34
+    count = [0, 0, 0, 0]
+    last: int | None = None  # slot of the latest discard, if it has one
+    for e in events:
+        if e["type"] == "discard":
+            r = (e["seat"] - me) % 4
+            k = count[r]
+            count[r] += 1
+            last = None
+            if k < HISTORY_DEPTH:
+                last = r * HISTORY_DEPTH + k
+                out[last * 34 + e["tile"]] = 1.0
+                out[sc + 2 * last] = 1.0 if e["from_hand"] else 0.5
+        elif e["type"] == "claim" and last is not None:
+            out[sc + 2 * last + 1] = 1.0
+    for r in range(4):
+        out[sc + 2 * HISTORY_PLANES + r] = min(1.0, max(0, count[r] - HISTORY_DEPTH) / 4)
+    return out
 
 
 def oracle_perm(perm: tuple[int, int, int]) -> npt.NDArray[np.int64]:
@@ -414,6 +489,9 @@ def export(model: SuitCNN, path: str | Path, int8: bool = False) -> int:
         # Only networks that read the block say so: older files stay byte-identical.
         hp["passed"] = 1
         inputs.append(("passed", STATE_LEN, PASSED_LEN))
+    if cfg.history:
+        hp["history"] = 1
+        inputs.append(("history", input_len(cfg.passed), HISTORY_LEN))
     tensors = [(n, p) for n, p in model.state_dict().items() if not n.startswith("oracle")]
     out = bytearray(b"MJNN" + struct.pack("<I", 3))
     out += _slices(inputs)

@@ -20,8 +20,9 @@
 //! **Version 2** names its input and output slices. Input names this module can
 //! fill from a [`State`]: `features` ([`crate::features::encode`]), `oracle`
 //! (zeros at play time), `passed` ([`crate::features::encode_passed`]: the
-//! passed-tile record and 摸打 / 入章) and `discards` ([`encode_discards`]: each opponent's last
-//! eight discards, one-hot). Output names are the model's business (the belief
+//! passed-tile record and 摸打 / 入章), `discards` ([`encode_discards`]: each opponent's last
+//! eight discards, one-hot) and `history` ([`crate::features::encode_history`]:
+//! every discard of every seat in order). Output names are the model's business (the belief
 //! model's are listed in `docs/belief.md`); a `policy` slice, when present, is
 //! what [`NetPolicy`] reads. A v2 network without a `policy` slice is not a
 //! policy and [`Mlp::scores`] must not be called on it.
@@ -30,11 +31,13 @@
 //! the v2 named slices (input `features`; outputs `policy`, `target`, `value`)
 //! followed by the architecture, its hyper-parameters and named tensors (fp32
 //! or int8). Since plan 2026-11-09 Task 18 a v3 network may also read `passed`
-//! right after `features`. [`Mlp`] runs it through the same methods, so `net:` and
+//! right after `features`, and since plan 2026-11-16 Task 3 `history` after those
+//! (hyper-parameter `history`). [`Mlp`] runs it through the same methods, so `net:` and
 //! `netpimc:` agents take v3 files unchanged.
 
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
 use crate::features::{encode, encode_passed, ORACLE_LEN, PASSED_LEN, STATE_LEN};
+use crate::features::{encode_history, HISTORY_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
 use mahjong_tiles::NUM_KINDS;
@@ -202,11 +205,19 @@ impl Mlp {
                     range: STATE_LEN..STATE_LEN + PASSED_LEN,
                 });
             }
+            if cnn.reads_history() {
+                let at = want.last().map_or(0, |s| s.range.end);
+                want.push(Slice {
+                    name: "history".into(),
+                    range: at..at + HISTORY_LEN,
+                });
+            }
             if inputs != want {
                 return Err(format!(
-                    "an MJNN v3 network reads exactly `features` 0..{STATE_LEN}, and \
-                     `passed` {STATE_LEN}..{} when its passed hyper-parameter is 1",
-                    STATE_LEN + PASSED_LEN
+                    "an MJNN v3 network reads exactly `features` 0..{STATE_LEN}, then \
+                     `passed` ({PASSED_LEN} values) when its passed hyper-parameter is 1, \
+                     then `history` ({HISTORY_LEN} values) when its history \
+                     hyper-parameter is 1"
                 ));
             }
             if let Some(s) = outputs.iter().find(|s| s.range.end > OUTPUT_LEN) {
@@ -254,6 +265,7 @@ impl Mlp {
                 "oracle" => ORACLE_LEN,
                 "discards" => DISCARD_LEN,
                 "passed" => PASSED_LEN,
+                "history" => HISTORY_LEN,
                 other => return Err(format!("unknown input slice {other:?}")),
             };
             if s.range.len() != want || s.range.end > first.inp {
@@ -327,7 +339,8 @@ impl Mlp {
     }
 
     /// The input vector for `state`: every named input slice filled from public
-    /// information (`features`, `discards`, `passed`; `oracle` stays zero).
+    /// information (`features`, `discards`, `passed`, `history`; `oracle` stays
+    /// zero).
     ///
     /// # Panics
     /// Panics if the hand is over.
@@ -338,6 +351,7 @@ impl Mlp {
                 "features" => encode(state, &mut x[s.range.clone()]),
                 "discards" => encode_discards(state, &mut x[s.range.clone()]),
                 "passed" => encode_passed(state, &mut x[s.range.clone()]),
+                "history" => encode_history(state, &mut x[s.range.clone()]),
                 _ => {}
             }
         }

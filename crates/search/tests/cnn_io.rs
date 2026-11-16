@@ -7,7 +7,8 @@ use mahjong_hk::{RuleSet, State};
 use mahjong_search::agent::DEFAULT_LEAF_DEPTH;
 use mahjong_search::cnn::{OUTPUT_LEN, POLICY_LEN, TARGET_LEN, UNUSED_TARGET};
 use mahjong_search::features::{
-    encode, encode_passed, PASSED_LEN, PASSED_PLANES, PLANES, STATE_LEN,
+    encode, encode_history, encode_passed, HISTORY_LEN, HISTORY_PLANES, HISTORY_SCALARS,
+    PASSED_LEN, PASSED_PLANES, PLANES, STATE_LEN,
 };
 use mahjong_search::net::top_actions;
 use mahjong_search::pimc::VALUE_LOG_SCALE;
@@ -33,12 +34,16 @@ fn name(b: &mut Vec<u8>, s: &str) {
     b.extend(s.as_bytes());
 }
 
-fn tensor_list(passed: bool) -> Vec<(String, Vec<usize>)> {
-    let (rest, planes) = if passed {
+fn tensor_list(passed: bool, history: bool) -> Vec<(String, Vec<usize>)> {
+    let (mut rest, mut planes) = if passed {
         (REST + PASSED_PLANES * 7 + 12, PLANES + PASSED_PLANES)
     } else {
         (REST, PLANES)
     };
+    if history {
+        rest += HISTORY_PLANES * 7 + HISTORY_SCALARS;
+        planes += HISTORY_PLANES;
+    }
     let mut t: Vec<(String, Vec<usize>)> = vec![
         ("honour1.weight".into(), vec![HH, rest]),
         ("honour1.bias".into(), vec![HH]),
@@ -92,12 +97,28 @@ fn file_with(
     passed: Passed,
     edit: impl Fn(&mut Vec<(String, Vec<usize>)>),
 ) -> Vec<u8> {
+    file_blocks(int8, arch, passed, false, edit)
+}
+
+/// [`file_with`], and with `history` the history block of plan 2026-11-16
+/// Task 3 (hyper-parameter, `history` slice after the others, wider tensors).
+fn file_blocks(
+    int8: bool,
+    arch: &str,
+    passed: Passed,
+    history: bool,
+    edit: impl Fn(&mut Vec<(String, Vec<usize>)>),
+) -> Vec<u8> {
     let mut rng = SmallRng::seed_from_u64(5);
     let mut b = b"MJNN".to_vec();
     b.extend(3u32.to_le_bytes());
     let mut inputs = vec![("features", 0, STATE_LEN)];
     if passed == Passed::Yes {
         inputs.push(("passed", STATE_LEN, PASSED_LEN));
+    }
+    if history {
+        let at = inputs.last().map_or(0, |s| s.1 + s.2);
+        inputs.push(("history", at, HISTORY_LEN));
     }
     for slices in [
         inputs,
@@ -126,12 +147,15 @@ fn file_with(
     if passed != Passed::No {
         hp.push(("passed", 1));
     }
+    if history {
+        hp.push(("history", 1));
+    }
     b.extend((hp.len() as u32).to_le_bytes());
     for (n, v) in hp {
         name(&mut b, n);
         b.extend((v as u32).to_le_bytes());
     }
-    let mut tensors = tensor_list(passed != Passed::No);
+    let mut tensors = tensor_list(passed != Passed::No, history);
     edit(&mut tensors);
     b.extend((tensors.len() as u32).to_le_bytes());
     for (n, dims) in tensors {
@@ -369,6 +393,49 @@ fn a_passed_network_reads_the_passed_block() {
     assert!(Mlp::from_bytes(&narrow).is_err());
     // int8 passed files load too.
     assert!(Mlp::from_bytes(&file_with(true, "suitcnn-1", Passed::Yes, |_| {})).is_ok());
+}
+
+/// Plan 2026-11-16 Task 3: a network with the history block (alone, or after the
+/// passed block) names it, fills it from the state, and reads it; a file whose
+/// slices or stem do not match is refused.
+#[test]
+fn a_history_network_reads_the_history_block() {
+    for passed in [Passed::No, Passed::Yes] {
+        let net = Mlp::from_bytes(&file_blocks(false, "suitcnn-1", passed, true, |_| {})).unwrap();
+        let at = STATE_LEN + if passed == Passed::Yes { PASSED_LEN } else { 0 };
+        assert_eq!(net.input_len(), at + HISTORY_LEN);
+        assert_eq!(net.inputs().last().unwrap().name, "history");
+        assert_eq!(net.inputs().last().unwrap().range, at..at + HISTORY_LEN);
+        let mut changed = 0;
+        for s in live_states(30, 10) {
+            let x = net.encode_input(&s);
+            let mut want = vec![0.0; HISTORY_LEN];
+            encode_history(&s, &mut want);
+            assert_eq!(&x[at..], &want[..]);
+            let y = net.forward(&x);
+            assert!(y.iter().all(|v| v.is_finite()));
+            assert_eq!(y, net.forward_state(&s));
+            if want.iter().any(|&v| v != 0.0) && net.forward(&x[..at]) != y {
+                changed += 1;
+            }
+        }
+        assert!(changed > 0, "the history block never changed an output");
+        assert!(Mlp::from_bytes(&file_blocks(true, "suitcnn-1", passed, true, |_| {})).is_ok());
+    }
+    // Stem narrower than the history planes: refused.
+    let narrow = file_blocks(false, "suitcnn-1", Passed::No, true, |t| {
+        t[4].1 = vec![C, PLANES, K];
+    });
+    assert!(Mlp::from_bytes(&narrow).is_err());
+    // History tensors and hyper-parameter, but no `history` slice: refused.
+    let mut no_slice = file_blocks(false, "suitcnn-1", Passed::No, true, |_| {});
+    let plain = file(false, "suitcnn-1", |_| {});
+    // Splice: the slice table of a plain file, the rest of the history file.
+    // Magic, version, count, then `features` (len, name, offset, length).
+    let plain_slices = 4 + 4 + 4 + (4 + 8 + 8);
+    let history_slices = plain_slices + (4 + 7 + 8);
+    no_slice.splice(..history_slices, plain[..plain_slices].iter().copied());
+    assert!(Mlp::from_bytes(&no_slice).is_err());
 }
 
 /// The distilled network trained before Task 18 still loads and reads features only.

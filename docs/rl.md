@@ -41,6 +41,27 @@ wall tiles, as counts per kind) are appended for training only, and are zero at 
 A test checks that two positions that differ only in hidden tiles produce
 identical features, so the network cannot see what it should not.
 
+**Optional input blocks.** A network may read more blocks after the 933 features.
+Each is its own input version, chosen by the model file (a hyper-parameter and a
+named input slice), so every network trained without it loads and plays exactly
+as before (`crates/search/tests/model_files.rs` checks every file in `models/`):
+
+* `passed` (488 floats, plan 2026-11-09 Task 18): the passed-tile record and the
+  摸打 / 入章 flags of each seat's last three discards (`features::encode_passed`).
+* `history` (3,460 floats, plan 2026-11-16 Task 3): the **full discard history**,
+  every discard of every seat in order (`features::encode_history`;
+  `mahjong.rl.cnn.encode_history` is the Python reference built from the event
+  list). Per relative seat, 24 slots, one per discard (slot 0 = the seat's first):
+  a one-hot tile plane (96 planes), a flag for how it was thrown (1 = from the hand
+  入章, ½ = the tile just drawn 摸打, 0 = empty slot) and a flag for whether
+  another seat claimed it (192 scalars). A seat's discards beyond the 24th take no
+  slot; each adds ¼ to that seat's overflow value (4 scalars, at most 1); they
+  still count in the 933 features' discard planes. In 30 test hands no seat went
+  past 24. In the suit-shared CNN the 96 planes become more channels of the suit
+  tower and the scalars join the honour branch, so the network stays
+  suit-equivariant. Written in the file as hyper-parameter `history` = 1 and
+  input slice `history` (after `passed` when both are read).
+
 ## 3. Network
 
 ```

@@ -152,6 +152,9 @@ def net_forward(path: str, features: bytes) -> tuple[bytes, tuple[int, int]]:
 def encode_state(state: HkState) -> tuple[list[float], list[float], list[int]]:
     """Features, oracle features and legal-action mask for the player to act."""
 
+def encode_history(state: HkState) -> list[float]:
+    """The full discard history (``features::encode_history``) for the player to act."""
+
 def teacher_data(
     hands: int, teacher: str = ..., seed: int = ..., **rules: object
 ) -> tuple[bytes, bytes, bytes, list[int], list[float], list[int]]:

@@ -85,6 +85,20 @@ pub(crate) fn encode_state(state: &PyState) -> PyResult<(Vec<f32>, Vec<f32>, Vec
     Ok((f, o, mask))
 }
 
+/// The full discard history of the decision of the player to act
+/// (`features::encode_history`, plan 2026-11-16 Task 3), as a list of
+/// `HISTORY_LEN` floats (for tests and one-off use).
+#[pyfunction]
+pub(crate) fn encode_history(state: &PyState) -> PyResult<Vec<f32>> {
+    use mahjong_search::features::{encode_history, HISTORY_LEN};
+    if state.inner.is_terminal() {
+        return Err(value_error("the hand is over"));
+    }
+    let mut h = vec![0.0; HISTORY_LEN];
+    encode_history(&state.inner, &mut h);
+    Ok(h)
+}
+
 /// Role of a decision handed to Python: a learner seat whose moves are trained.
 const ROLE_LEARNER: u8 = 0;
 /// Role: the baseline seat of a paired game, played from Python (`baseline=None`).
