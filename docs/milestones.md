@@ -3,7 +3,16 @@
 This repo is the Hong Kong mahjong game of hk-games (submodule `games/hk-mahjong-lab`). Workers
 build only toward the current milestone.
 
-## Current: the 2026-11-09 plan built, with its strength checks
+## Current: a self-play network that starts from the three-stage bot
+Brian, 2026-11-16: "wrap up this session and send everything to the orchestrator, let it start
+working on the reinforcement learning with 3-stage bot as baseline, queued after the existing
+DouDiZhu task in the GPU lane"; and "Yes, merge first" (the three-stage bot goes into this
+repository before the training). The wording of this milestone is the orchestrator's.
+Done when:
+- Every task in `docs/plans/2026-11-16-self-play-network.md` is ticked, and Brian has the final
+  measurement against the three-stage bot.
+
+## Earlier (reached): the 2026-11-09 plan built, with its strength checks
 Registered with the orchestrator on Brian's word (2026-11-10: "Yes, register it"), after the
 strength-check tasks were added (2026-11-10: "Yes, add all three").
 Done when:
