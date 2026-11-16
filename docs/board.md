@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 3: Task 5 (self-play job with a pool of opponents), building; `HkVecEnv.observe_history()` pushed.
 
 ## Results
 - Task 3 (slot 2, 2026-11-16): ticked; new input block `history` (`features::encode_history`, 3,460 floats: per seat its first 24 discards in order with tile, 摸打/入章 and claimed; later ones add to an overflow value), CNN hyper-parameter and input slice `history`; Python reference equals Rust on 1,000 positions, network output difference 1.2e-7; all 15 `.mjnn` and 3 CNN `.pt` files in `models/` give the same output as before; pybind `encode_history` added (orchestrator's exception).
