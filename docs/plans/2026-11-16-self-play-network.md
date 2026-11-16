@@ -241,7 +241,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     the doudizhu repository) names a cause by then, say in the board line whether it applies
     here. Do not change the fade or other training settings in this task.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b, Task 4b
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b, Task 4b (taken: slot 1, 2026-11-17 00:50)
   - CHANGE 2026-11-16 22:10: job 154 (queued from `hk-mahjong-lab-3`, never started) was
     cancelled by the orchestrator on Brian's word, because bot `stage` changed (Task 9,
     strict stage 3). Queue the run anew from your own checkout once Task 4b has passed: pull,
