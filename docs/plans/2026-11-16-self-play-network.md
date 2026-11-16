@@ -261,3 +261,41 @@ watch session's plain work copy into this repository first, so the work has a hi
 - Tasks 1 and 3 run side by side in separate worktrees; each builds its own `target` folder.
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.
+
+- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]`
+  - Why: Brian, 2026-11-16, to the Mahjong watch session: "then make phase 3 the extra
+    requirement that is found in phase 2 as well, no irrelevant tile for top priority route".
+    Full brief (read it first): `C:\Users\brian\.orchestrator\mahjong-watch\brief-stage3-gate.md`. Today
+    `11123456789s1m5p` enters stage 3 while it still holds 1m and 5p.
+  - Files: `crates/search/src/stage.rs`, the bot name list (`bots.rs`), tests beside them,
+    `experiments/stage/` for the job scripts, `docs/study-results/stage3-gate.md` (new).
+  - Build: add a third switch to `StageBot`. Gate 0 = today's rule, and `StageBot::new(3, 1)`,
+    `StageBot::default()` and the bot name `stage` keep today's behaviour exactly (the 48-hour
+    run, job 154, plays against `stage`). Gate 1 (Brian's words read strictly): stage 3 only
+    when the leading-line check finds no tile outside the line (the same `off` check stage 2
+    uses); a hand with an outside tile plays stage 1 even when ready. Gate 2 (the watch
+    session's addition for comparison, not Brian's words): like gate 1, but an already ready
+    hand stays in stage 3. Apply the gate to the stage 3 claim decision as well as the discard.
+    For leads other than the flush there is no "outside tile" notion, so stage 3 starts as
+    today (the watch session's reading; say so in the report). Bot names `stage-gate1` =
+    new(3,1,1), `stage-gate2` = new(3,1,2).
+  - Tests first: the example hand does not enter stage 3 under gate 1; a ready hand with one
+    outside tile is in stage 1 under gate 1 and in stage 3 under gate 2; `stage` gives the
+    same moves as before on the existing stage tests.
+  - Measure (cpu lane, about 5 minutes each, queue them and end the run; they start once the
+    quiet job ahead is over): (1) `compare stage-gate1 value value value 40000 1`; (2) the
+    same for `stage-gate2`; (3) one table `stage stage-gate1 stage-gate2 stage`, 40,000 deals;
+    (4) discards per hand in stage 1/2/3 for gate 0, 1 and 2 (`examples/dealin.rs` reads
+    `StageBot::default()`: give it a switch rather than changing the default).
+  - Done when: `cargo test --workspace`, fmt and clippy pass; the three result tables and the
+    stage counts are in `docs/study-results/stage3-gate.md` beside the baseline (`stage`
+    against three value bots +2.54 +- 0.21, win 25.1 %, deal-in 18.4 %), with one line on
+    which gate looks better; the same tables are appended to
+    `C:\Users\brian\.orchestrator\mahjong-watch\findings.md` under a dated heading (append only, change
+    nothing else in that folder); pushed.
+  - Notes: build with `CARGO_TARGET_DIR` set to a scratch folder outside every checkout and
+    run the job binaries from there. Never rebuild `target\release` or `_core.pyd` inside a
+    checkout, and change nothing in `hk-mahjong-lab-3` (job 154 runs from it) while jobs 154
+    and 155 are queued or running. The brief's "no git commands" rule was for the watch
+    session's work copy; here commit and push as usual. Nothing becomes the default bot:
+    Brian decides after reading the numbers (the orchestrator tells him).
