@@ -173,6 +173,28 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Notes: add the gpu job with `jobq.ps1 add -Lane gpu`; it waits behind job 120 by itself.
     Estimate from the watch session: about 2 hours on the graphics card.
 
+- [ ] **Task 4b: imitation start again, on the strict bot** (checkpoint) `[parallel-ok]` — needs: Task 2b, Task 9
+  - Why: Brian, 2026-11-16: "use strict version as default" (Task 9), then, asked whether to
+    hold the 48-hour run and redo its start on the strict bot at a cost of about 35 minutes
+    of preparation: "that's fine". Task 4's network copies the old bot (now `stage-gate0`).
+  - Do: in your own checkout, after Task 2b and Task 9 are ticked (their queue jobs use the old
+    binaries, so never rebuild before): pull, rebuild the Rust binaries and `mahjong._core`,
+    confirm `stage` is the strict bot. Keep Task 4's outputs under new names
+    (`runs\rl-stage\labels-gate0`, `runs\rl-stage\imitation-gate0`,
+    `models\stage-imitation-gate0.*`), then run Task 4's two jobs again unchanged:
+    `imitation_data.ps1` (cpu lane, about 10 minutes) and `imitation.ps1` (gpu lane, after
+    it, about 25 minutes).
+  - Done when: both jobs ended with exit code 0 and each log's first line shows
+    `mahjong.__file__` under your checkout; held-out agreement with the strict `stage` is at
+    least 90 %; the network scores no worse than -1.0 per hand against three strict `stage`
+    bots over 4,000 deals; both numbers with 95 % ranges are added to
+    `docs/study-results/self-play-network.md` beside Task 4's (old bot) row and on the board.
+    If either misses, do not tick: result and one proposed next step go to the inbox.
+  - Notes: follow the shared conda env rule (PYTHONPATH, full python path, no `pip install -e`).
+    Change no training setting. If Task 9's match shows the strict `stage` clearly weaker than
+    `stage-gate0` against three value bots (ranges do not overlap), finish this task anyway
+    and say so in the inbox: Brian decides the baseline.
+
 - [x] **Task 5: the self-play job with a pool of opponents** (opus) `[parallel-ok]` — needs: Task 2, Task 3 (`ppo_cnn --pool`, `mahjong.rl.pool`, `experiments/stage/selfplay.ps1`; 20-min cpu dry run: 4 results, killed after the 2nd, resumed from ckpt 86 with the log unchanged, stopped at its time limit; `HkVecEnv.observe_passed()`/`observe_history()` feed Task 4's passed+history network)
   - Files: `python/mahjong/rl/ppo_cnn.py`, `python/mahjong/rl/pool.py` (new),
     `experiments/stage/selfplay.ps1` (gpu lane, resumable), tests in `python/tests/`.
@@ -219,7 +241,14 @@ watch session's plain work copy into this repository first, so the work has a hi
     the doudizhu repository) names a cause by then, say in the board line whether it applies
     here. Do not change the fade or other training settings in this task.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (waiting: job 154, gpu lane, runs from worker checkout hk-mahjong-lab-3; check: `Get-Content runsl-stageprogress.txt; runsl-stageog.json; runsl-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b, Task 4b
+  - CHANGE 2026-11-16 22:10: job 154 (queued from `hk-mahjong-lab-3`, never started) was
+    cancelled by the orchestrator on Brian's word, because bot `stage` changed (Task 9,
+    strict stage 3). Queue the run anew from your own checkout once Task 4b has passed: pull,
+    build `mahjong._core` into the checkout, check `stage` is the strict bot (Task 9's unit
+    test), run `selfplay.ps1 -Freeze` (remove an old `runs\rl-stage\pkg` first if the folder
+    has no `state.json`), then add the gpu job with `-Init` = Task 4b's network. Mark the task
+    waiting on the new job number and name the checkout it runs from.l-stageprogress.txt; runsl-stageog.json; runsl-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds
