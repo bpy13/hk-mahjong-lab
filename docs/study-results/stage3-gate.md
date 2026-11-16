@@ -36,11 +36,55 @@ through the orchestrator: "use strict version as default". Brief:
 Baseline (`stage` before this change = `stage-gate0`, job 149): +2.54 ± 0.21 per hand, win
 25.1 %, deal-in 18.4 %, avg faan 5.1.
 
-Pending: jobs 160 (`stage` vs three value), 161 (`stage-gate0` vs three value), 157
-(`stage-gate2` vs three value), 162 (one table `stage stage-gate0 stage-gate2 stage-gate0`),
+Jobs (all ended with exit code 0 on 16 Nov; job 161 failed on a queue fault before it ran and
+was repeated as job 163): 160 (`stage` vs three value), 163 (`stage-gate0` vs three value),
+157 (`stage-gate2` vs three value), 162 (one table `stage stage-gate0 stage-gate2 stage-gate0`),
 159 (stage counts, `dealin 10000 1 <gate>` for gates 0, 1, 2). Binaries:
-`C:\Users\brian\.cache\hk-mahjong-t9\bin` (built from this commit with a scratch
-`CARGO_TARGET_DIR`; md5 compare 6CD4755D..., dealin E9FDADE6...).
+`C:\Users\brian\.cache\hk-mahjong-t9\bin` (built from commit acabd24 with a scratch
+`CARGO_TARGET_DIR`).
 
-Quick look (1,000 deals, seed 7, not the result): `stage` (gate 1) +2.42 ± 1.32, `stage-gate0`
-+2.22 ± 1.32, `stage-gate2` +2.01 ± 1.30; all inside each other's ranges.
+### Each gate against three value bots (40,000 deals, the same deals for each)
+| Bot | Gate | Points per hand | Win rate | Deal-in | Average faan |
+|---|---|---|---|---|---|
+| `stage` (default) | 1 | +2.62 ± 0.21 | 25.1 % | 18.5 % | 5.1 |
+| `stage-gate0` | 0 | +2.54 ± 0.21 | 25.1 % | 18.4 % | 5.1 |
+| `stage-gate2` | 2 | +2.62 ± 0.21 | 25.1 % | 18.5 % | 5.1 |
+
+`stage-gate0` equals the baseline (job 149) digit for digit, so gate 0 is the old bot.
+The three value bots scored -0.81/-0.80/-1.01 (gate 1), -0.82/-0.75/-0.97 (gate 0) and
+-0.78/-0.81/-1.03 (gate 2). Draws 5.9 % in all three.
+
+### One table, the gates against each other (40,000 deals, seats rotated)
+| Seat | Gate | Points per hand | Win rate | Deal-in | Average faan |
+|---|---|---|---|---|---|
+| `stage` | 1 | -0.19 ± 0.22 | 23.8 % | 18.7 % | 5.1 |
+| `stage-gate0` | 0 | +0.03 ± 0.22 | 24.1 % | 18.6 % | 5.1 |
+| `stage-gate2` | 2 | -0.01 ± 0.22 | 24.1 % | 18.6 % | 5.1 |
+| `stage-gate0` | 0 | +0.16 ± 0.22 | 24.2 % | 18.4 % | 5.1 |
+
+Draws 5.4 %.
+
+### Stage counts (`dealin`, 10,000 deals, seed 1, the bot in each seat in turn = 40,000 hands against three value bots)
+Discards per hand in each stage, and deal-ins per 100 hands from discards made in that stage:
+
+| Gate | Stage 1 | Stage 2 | Stage 3 | Deal-ins in stage 1 / 2 / 3 per 100 hands | Win | Deal-in | Avg faan |
+|---|---|---|---|---|---|---|---|
+| 0 | 10.94 | 0.73 | 3.94 | 5.26 / 0.84 / 12.37 | 24.96 % | 18.51 % | 5.09 |
+| 1 | 12.42 | 0.73 | 2.46 | 9.28 / 0.84 / 8.40 | 24.92 % | 18.56 % | 5.11 |
+| 2 | 11.91 | 0.73 | 2.96 | 7.44 / 0.84 / 10.21 | 24.94 % | 18.54 % | 5.11 |
+
+Gate 1 moves about 1.5 discards per hand (38 % of stage 3) back into stage 1, all of them in
+flush-led hands (flush-led discards per hand 9.28, 10.77, 10.26 for gates 0, 1, 2; the other
+leads are unchanged, as the gate does not apply to them). Gate 2 moves about 1.0. The deal-ins
+move with the discards; the total deal-in rate does not change (18.51 to 18.56 %). Stage 2 is
+unchanged.
+
+### Which gate looks better
+None measurably. Against value bots gates 1 and 2 score +0.08 above gate 0, well inside the
+±0.21 range; at one table gate 1 is lowest (-0.19) and gate 0 highest, again all inside
+each other's ±0.22 ranges. Gate 2 is level with or above gate 1 in both measures, so if one
+is to be preferred on these numbers it is gate 2, but the data do not separate them. (The
+matches share their deals, so the true noise of a difference is smaller than the ranges shown,
+but the outputs give no paired range.) The strict default (`stage`, gate 1) is not clearly
+weaker than `stage-gate0`: the ranges overlap, so Task 4b's "clearly weaker" note does not
+apply. Brian decides the default; nothing else changes on these numbers.
