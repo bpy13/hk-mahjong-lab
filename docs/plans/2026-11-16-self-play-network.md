@@ -219,7 +219,10 @@ watch session's plain work copy into this repository first, so the work has a hi
     the doudizhu repository) names a cause by then, say in the board line whether it applies
     here. Do not change the fade or other training settings in this task.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (waiting: job 154, gpu lane, runs from worker checkout hk-mahjong-lab-3; check: `Get-Content runsl-stageprogress.txt; runsl-stageog.json; runsl-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (waiting: job 154, gpu lane, runs from worker checkout hk-mahjong-lab-3; check: `Get-Content runs
+l-stageprogress.txt; runs
+l-stageog.json; runs
+l-stagestopped.txt` there; if it dies re-add the same job, it resumes; do not remove that worktree)
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds
@@ -262,7 +265,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.
 
-- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]` (taken: slot 1, 2026-11-16 21:24)
+- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]` (waiting: cpu jobs 160 `stage` vs value, 161 `stage-gate0` vs value (must print +2.54 +- 0.21, 25.1 %, 18.4 %, 5.1), 157 `stage-gate2` vs value, 162 table, 159 stage counts; outputs `runs\stage\t9-*.txt` in the worker clone, check `jobq.ps1 status`; code, tests, fmt, clippy done and pushed in acabd24; then fill `docs/study-results/stage3-gate.md`, append to the watch session findings.md, tick)
   - Why: Brian, 2026-11-16, to the Mahjong watch session: "then make phase 3 the extra
     requirement that is found in phase 2 as well, no irrelevant tile for top priority route".
     Full brief (read it first): `C:\Users\brian\.orchestrator\mahjong-watch\brief-stage3-gate.md`. Today
