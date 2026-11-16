@@ -108,7 +108,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 2 – Full discard history as input (opus)
 
-- [ ] **Task 3: a new input version with every discard in order** (opus) `[parallel-ok]`
+- [ ] **Task 3: a new input version with every discard in order** (opus) `[parallel-ok]` (taken: slot 2, 2026-11-16 18:39)
   - Files: `crates/search/src/features.rs`, `crates/search/src/cnn.rs`,
     `python/mahjong/rl/cnn.py`, tests beside them, `docs/rl.md` (section 2).
   - Done when: `cargo test -p mahjong-search` and `pytest python/tests -k "features or cnn"`
