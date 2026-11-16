@@ -112,6 +112,22 @@ watch session's plain work copy into this repository first, so the work has a hi
     `python -m mahjong.rl.ppo_cnn --init none --minutes 3 --out runs/ppo/smoke --device cpu`
     finishes with exit code 0.
 
+- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]`
+  - Files: `crates/search/src/stage.rs`, `crates/search/examples/dealin.rs`,
+    `crates/search/examples/fit_routes.rs`, `docs/open-items.md`; the worker clone's
+    `models/race-belief.mjnn` (not in git).
+  - Done when: `cargo clippy --workspace -- -D warnings` and `cargo fmt --check` pass;
+    `cargo test --workspace` passes, `crates/search/tests/model_files.rs` included; and a
+    cpu-lane job of `compare stage value value value 40000 1` still prints +2.54 +- 0.21,
+    25.1 %, 18.4 %, 5.1, digit for digit.
+  - Notes: found by the Task 4 worker, 2026-11-16. Clippy: `stage.rs:530` (`sort_by` to
+    `sort_by_key`); fmt: the three files above. The model test fails in the worker clone
+    because its `models/race-belief.mjnn` was written there by the race loop on 11 Nov and
+    differs from the one in `repo/hk-mahjong-lab/models/`. Rename the clone's file to
+    `race-belief.mjnn.loop-2026-11-11` (keep it), copy the standalone checkout's file in
+    (read-only source), and note both md5 sums in `docs/open-items.md`. Do not touch any file
+    a running queue job reads: check `jobq.ps1 status` first.
+
 ## Phase 2 – Full discard history as input (opus)
 
 - [x] **Task 3: a new input version with every discard in order** (opus) `[parallel-ok]` (input `history`, 3,460 floats; Rust and Python agree on 1,000 positions, largest output difference 1.2e-7; all 15 `.mjnn` and 3 CNN `.pt` files in `models/` give the same output as before)
