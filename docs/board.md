@@ -2,7 +2,7 @@
 
 ## Workers
 
-- Task 6 (slot 3, 2026-11-16): queued, not finished: job 154 (gpu lane, `rl-stage`) from checkout hk-mahjong-lab-3, init `models/stage-imitation.pt` (copied from the worker clone), package frozen in `runs/rl-stage/pkg`; a later run reads the result.
+- Task 6 (slot 1, 2026-11-17): queued, not finished: gpu job 167 (`rl-stage`) from checkout hk-mahjong-lab-workers, init `models/stage-imitation.pt` (Task 4b, strict `stage`), package frozen in `runs/rl-stage/pkg`; job 154 had been cancelled; a later run reads the result.
 
 ## Results
 - Task 4b (slot 1, 2026-11-17): ticked; jobs 165 and 166 exit 0; strict-`stage` imitation net `models/stage-imitation.pt`: held-out agreement 93.1 % +- 0.11 (pass >= 90 %), -0.11 +- 0.71 per hand vs three strict `stage` over 4,000 deals (pass >= -1.0), win 23.9 %, deal-in 18.9 %; study-results/self-play-network.md; old outputs kept as `*-gate0`; no paid API calls.
