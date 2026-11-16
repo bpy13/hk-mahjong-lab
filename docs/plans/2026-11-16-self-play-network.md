@@ -112,7 +112,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     `python -m mahjong.rl.ppo_cnn --init none --minutes 3 --out runs/ppo/smoke --device cpu`
     finishes with exit code 0.
 
-- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]` — needs: Task 4 (waiting: cpu job 155 `task2b-stage-vs-value`, output `runs\stage	ask2b-stage-vs-value.txt`, must print +2.54 +- 0.21, 25.1 %, 18.4 %, 5.1; fmt, clippy, cargo test and the model swap are done; the env repoint was left out on the orchestrator's word, see open-items.md)
+- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]` — needs: Task 4 (job 155 ended exit 0, 16 Nov 23:43: `stage` from the old binary +2.54 +- 0.21, 25.1 %, 18.4 %, 5.1, read by the orchestrator: the check passes; fmt, clippy, cargo test and the model swap were done earlier; the env repoint stays left out; tick the task and write the board line)
   - Files: `crates/search/src/stage.rs`, `crates/search/examples/dealin.rs`,
     `crates/search/examples/fit_routes.rs`, `docs/open-items.md`; the worker clone's
     `models/race-belief.mjnn` (not in git).
@@ -291,7 +291,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.
 
-- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]` (waiting: cpu jobs 160 `stage` vs value, 161 `stage-gate0` vs value (must print +2.54 +- 0.21, 25.1 %, 18.4 %, 5.1), 157 `stage-gate2` vs value, 162 table, 159 stage counts; outputs `runs\stage\t9-*.txt` in the worker clone, check `jobq.ps1 status`; code, tests, fmt, clippy done and pushed in acabd24; then fill `docs/study-results/stage3-gate.md`, append to the watch session findings.md, tick)
+- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]` (all jobs ended exit 0, 16 Nov; job 161 failed on a queue fault before it ran and was repeated as job 163; outputs `runs/stage/t9-*.txt` in the checkout `hk-mahjong-lab-workers`: `stage` +2.62 +- 0.21, `stage-gate0` +2.54 +- 0.21 (identical to the old bot), `stage-gate2` +2.62 +- 0.21, table `stage` -0.19, `stage-gate0` +0.03 and +0.16, `stage-gate2` -0.01, each +- 0.22, stage counts in `t9-stage-counts.txt`; read by the orchestrator. Left: write `docs/study-results/stage3-gate.md`, append the tables to findings.md, tick)
   - Why: Brian, 2026-11-16, to the Mahjong watch session: "then make phase 3 the extra
     requirement that is found in phase 2 as well, no irrelevant tile for top priority route".
     Full brief (read it first): `C:\Users\brian\.orchestrator\mahjong-watch\brief-stage3-gate.md`. Today
