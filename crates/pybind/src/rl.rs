@@ -646,6 +646,22 @@ impl VecEnv {
             .unzip()
     }
 
+    /// The full discard history (`features::encode_history`, `HISTORY_LEN`
+    /// float32 values per row, as bytes) of each decision of the last
+    /// `observe()`, in its order: the history block a network with the
+    /// `history` input reads after the features (plan 2026-11-16 Task 5).
+    fn observe_history<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        use mahjong_search::features::{encode_history, HISTORY_LEN};
+        let mut h = vec![0.0f32; self.observed.len() * HISTORY_LEN];
+        let this = self;
+        py.detach(|| {
+            h.par_chunks_mut(HISTORY_LEN)
+                .zip(this.observed.par_iter())
+                .for_each(|(row, &slot)| encode_history(this.game(slot), row));
+        });
+        f32_bytes(py, &h)
+    }
+
     /// The moves the agent `spec` would choose in each observed game (in the
     /// order of the last `observe()`), with a random stream seeded by `seed`.
     /// For tests and teacher comparisons.
