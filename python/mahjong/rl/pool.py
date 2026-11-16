@@ -115,6 +115,13 @@ def pull_scale(hours: float, fade_hours: float) -> float:
     return max(0.0, 1.0 - hours / fade_hours)
 
 
+def best_result(results: list[dict[str, Any]]) -> int | None:
+    """Index of the result with the highest mean (the earliest of equals), or None."""
+    if not results:
+        return None
+    return max(range(len(results)), key=lambda i: (results[i]["mean"], -i))
+
+
 def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -> str | None:
     """Why the run must stop after the latest of ``results`` (the 2-hourly results
     against three ``stage`` bots, oldest first: ``mean``, ``ci95``, ``draw_rate``,
@@ -123,6 +130,8 @@ def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -
 
     * Draws: the latest result's draw share, or the self-play draw share, above
       ``draw_limit`` (15 %).
+    * Collapse: each of the last two results lies below the best earlier result (before
+      those two) by more than the sum of its own and that result's 95 % half-widths.
     * Stall: four results in a row none of which gains on the best earlier one, a
       gain being a mean above that result's mean + its 95 % half-width.
     """
@@ -136,6 +145,15 @@ def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -
         x = last.get(key)
         if x is not None and x > draw_limit:
             return f"draws {x:.1%} {what}, above {draw_limit:.0%} (result {len(results)})"
+    if len(results) >= 3:
+        earlier = results[:-2]
+        best = earlier[best_result(earlier) or 0]
+        if all(r["mean"] < best["mean"] - (best["ci95"] + r["ci95"]) for r in results[-2:]):
+            return (
+                f"collapse: the last two results ({results[-2]['mean']:+.2f}, "
+                f"{last['mean']:+.2f}) are below the best earlier one "
+                f"({best['mean']:+.2f} +- {best['ci95']:.2f}) by more than the ranges"
+            )
     best, since = results[0], 0
     for r in results[1:]:
         if r["mean"] > best["mean"] + best["ci95"]:
