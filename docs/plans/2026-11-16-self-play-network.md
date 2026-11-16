@@ -112,7 +112,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     `python -m mahjong.rl.ppo_cnn --init none --minutes 3 --out runs/ppo/smoke --device cpu`
     finishes with exit code 0.
 
-- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]` — needs: Task 4 (taken: slot 1, 2026-11-16 20:30)
+- [ ] **Task 2b: lint and one failing model test, no behaviour change** `[parallel-ok]` — needs: Task 4 (waiting: cpu job 155 `task2b-stage-vs-value`, output `runs\stage	ask2b-stage-vs-value.txt`, must print +2.54 +- 0.21, 25.1 %, 18.4 %, 5.1; fmt, clippy, cargo test and the model swap are done; the env repoint was left out on the orchestrator's word, see open-items.md)
   - Files: `crates/search/src/stage.rs`, `crates/search/examples/dealin.rs`,
     `crates/search/examples/fit_routes.rs`, `docs/open-items.md`; the worker clone's
     `models/race-belief.mjnn` (not in git).
