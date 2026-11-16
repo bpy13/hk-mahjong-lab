@@ -3,6 +3,7 @@
 ## Workers
 
 ## Results
+- Task 3 (slot 2, 2026-11-16): ticked; new input block `history` (`features::encode_history`, 3,460 floats: per seat its first 24 discards in order with tile, 摸打/入章 and claimed; later ones add to an overflow value), CNN hyper-parameter and input slice `history`; Python reference equals Rust on 1,000 positions, network output difference 1.2e-7; all 15 `.mjnn` and 3 CNN `.pt` files in `models/` give the same output as before; pybind `encode_history` added (orchestrator's exception).
 - Task 2 (slot 1, 2026-11-16): ticked; the binding already parsed `stage` (no Rust change); new `python/tests/test_stage_binding.py` (200 hands, 1,000 logged decisions legal and reproducible) passes; `ppo_cnn --init none --minutes 3 --device cpu` exits 0.
 - Task 1 (slot 1, 2026-11-16): ticked; `stage` merged into the lab (with route bots, compare/dealin/stage_speed/fit_routes tools); 40,000 deals vs three value (job 149): +2.54 ± 0.21, win 25.1 %, deal-in 18.4 %, avg faan 5.1, identical to the watch run; `cargo test --workspace` passes; left-out items in docs/open-items.md.
 - Task 19 (slot 1, 2026-11-14): ticked; attacker -12.24 [-14.37, -10.23] per hand vs 3 shipped bot (0 wins of 960); 2 h learns-at-all check failed (-11.2 vs value), no weakness found; study-results/exploiter.md.
