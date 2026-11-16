@@ -138,7 +138,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Notes: add the gpu job with `jobq.ps1 add -Lane gpu`; it waits behind job 120 by itself.
     Estimate from the watch session: about 2 hours on the graphics card.
 
-- [ ] **Task 5: the self-play job with a pool of opponents** (opus) `[parallel-ok]` — needs: Task 2, Task 3
+- [ ] **Task 5: the self-play job with a pool of opponents** (opus) `[parallel-ok]` — needs: Task 2, Task 3 (taken: slot 3, 2026-11-16 19:07)
   - Files: `python/mahjong/rl/ppo_cnn.py`, `python/mahjong/rl/pool.py` (new),
     `experiments/stage/selfplay.ps1` (gpu lane, resumable), tests in `python/tests/`.
   - Done when: tests written first pass for: opponents drawn per hand 50 % current network,
