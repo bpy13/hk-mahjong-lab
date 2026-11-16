@@ -96,7 +96,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     digit differs, the merge is wrong: find the missing change, do not adjust the bot. If the
     bot cannot build without an `app-api` change, stop and put the question in the inbox.
 
-- [ ] **Task 2: the Python binding knows the three-stage bot** — needs: Task 1
+- [ ] **Task 2: the Python binding knows the three-stage bot** — needs: Task 1 (taken: slot 1, 2026-11-16 19:00)
   - Files: `crates/pybind/src/rl.rs` (and `lib.rs` there if needed), `python/mahjong/rl/`
     only where a bot name is listed, `python/tests/` (one new test).
   - Done when: `pip install -e ".[dev]"` builds `mahjong._core` in the worker's checkout; a new
