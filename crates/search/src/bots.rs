@@ -19,6 +19,8 @@ use crate::danger_tables::WAIT;
 use crate::ev::{Belief, EvBot};
 use crate::passed::Passed;
 use crate::race::RaceBot;
+use crate::route::RouteBot;
+use crate::stage::StageBot;
 use crate::view::SeatView;
 use mahjong_analysis::{acceptance, faan_shanten, shanten, HandView, UNREACHABLE};
 use mahjong_games::{Game, Policy};
@@ -571,13 +573,19 @@ pub enum Bot {
     Ev(EvBot),
     /// The race over all four players' chances (B28, [`crate::race`]).
     Race(RaceBot),
+    /// The route-first bots `chain` and `route` ([`crate::route`]).
+    Route(RouteBot),
+    /// The three-stage bot ([`crate::stage`]).
+    Stage(StageBot),
 }
 
 impl Bot {
     /// Builds a bot by name: `random`, `efficiency`, `value`, `defensive`,
     /// `closed` (value, never claims melds), `fast`, `ev` and `race` (with the
     /// heuristic belief; `ev:` and `race:` spec options are parsed by
-    /// [`crate::Agent`]).
+    /// [`crate::Agent`]), `chain`, `chain2` and `route` (route-first; `chain2`
+    /// reads the helper means named by `ROUTE_HELPERS`, `route` the table named
+    /// by `ROUTE_TABLE`; each panics without its file).
     pub fn by_name(name: &str) -> Option<Bot> {
         Some(match name {
             "ev" => Bot::Ev(EvBot::default()),
@@ -588,6 +596,18 @@ impl Bot {
             "defensive" => Bot::Value(Value::new(1.0)),
             "closed" => Bot::Value(Value::closed()),
             "fast" => Bot::Fast(Fast::default()),
+            "stage" => Bot::Stage(StageBot::default()),
+            "stage1" => Bot::Stage(StageBot::new(1, 1)),
+            "stage2" => Bot::Stage(StageBot::new(2, 1)),
+            // Brian's table test, 2026-11-16: pung rule 1 or 3, stage 3 from one
+            // or two from ready.
+            "stage-orig" => Bot::Stage(StageBot::new(1, 1)),
+            "stage-pung" => Bot::Stage(StageBot::new(3, 1)),
+            "stage-ready2" => Bot::Stage(StageBot::new(1, 2)),
+            "stage-both" => Bot::Stage(StageBot::new(3, 2)),
+            "chain" => Bot::Route(RouteBot::chain()),
+            "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
+            "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
             _ => return None,
         })
     }
@@ -602,6 +622,8 @@ impl Policy<State> for Bot {
             Bot::Fast(b) => b.choose(state, legal, rng),
             Bot::Ev(b) => b.choose(state, legal, rng),
             Bot::Race(b) => b.choose(state, legal, rng),
+            Bot::Route(b) => b.choose(state, legal, rng),
+            Bot::Stage(b) => b.choose(state, legal, rng),
         }
     }
 }

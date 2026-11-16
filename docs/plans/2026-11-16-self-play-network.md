@@ -77,7 +77,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 1 – The three-stage bot in the lab (sonnet)
 
-- [ ] **Task 1: bring the three-stage bot into the lab and reproduce its strength** (taken: slot 1, 2026-11-16 12:00)
+- [x] **Task 1: bring the three-stage bot into the lab and reproduce its strength**
   - Files: from `C:\Users\brian\.orchestrator\mahjong-watch\lab\crates` copy or merge
     `search/src/stage.rs`, `search/src/route.rs`, the changes in `search/src/bots.rs`,
     `search/src/lib.rs`, `search/src/agent.rs`, `analysis/src/lib.rs`, `analysis/src/target.rs`,

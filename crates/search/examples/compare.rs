@@ -8,7 +8,9 @@ fn main() {
     let deals: usize = args.get(4).and_then(|d| d.parse().ok()).unwrap_or(50);
     let agents: [Agent; 4] = std::array::from_fn(|i| Agent::parse(specs[i]).unwrap());
     let start = std::time::Instant::now();
-    let t = duplicate(&agents, deals, RuleSet::default(), 1);
+    // Optional sixth argument: the seed (default 1), so a long match can run in parts.
+    let seed: u64 = args.get(5).and_then(|d| d.parse().ok()).unwrap_or(1);
+    let t = duplicate(&agents, deals, RuleSet::default(), seed);
     let draws = t.draws;
     for (spec, r) in specs.iter().zip(&t.agents) {
         println!(

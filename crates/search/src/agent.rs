@@ -5,7 +5,8 @@
 //! Spec strings:
 //!
 //! * a bot name: `random`, `efficiency`, `value`, `defensive`, `closed`, `fast`, `ev`,
-//!   `race`;
+//!   `race`, `chain`, `chain2`, `route` (`chain2` needs the env var `ROUTE_HELPERS`,
+//!   `route` needs `ROUTE_TABLE`);
 //! * `race` with options, e.g. `race:horizon=8,tie_margin=0.5,threat=0.2` and
 //!   `belief=models/belief.mjnn` ([`crate::race`], `docs/race-bot.md`; without
 //!   `belief=` it uses the heuristic belief);

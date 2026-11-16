@@ -17,6 +17,8 @@
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
 //!   chances.
 //! * [`reasons`]: reason keys (no text) for the `ev` bot and the network path.
+//! * [`route`]: the route-first bots `chain` and `route` (Brian's design, 2026-11-15).
+//! * [`stage`]: the three-stage bot `stage` (2026-11-16).
 //! * [`solo`]: offense-only estimates for each discard.
 //! * [`target_value`]: P(win), P(self-draw | win) and points by target plan
 //!   ([`target_tables`]).
@@ -38,7 +40,9 @@ pub mod passed;
 pub mod pimc;
 pub mod race;
 pub mod reasons;
+pub mod route;
 pub mod solo;
+pub mod stage;
 pub mod target_tables;
 pub mod target_value;
 pub mod tournament;
