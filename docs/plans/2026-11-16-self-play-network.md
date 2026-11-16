@@ -262,7 +262,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.
 
-- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]`
+- [ ] **Task 9: stage 3 only without a tile outside the leading line (two test bots)** (opus) `[parallel-ok]` (taken: slot 1, 2026-11-16 21:24)
   - Why: Brian, 2026-11-16, to the Mahjong watch session: "then make phase 3 the extra
     requirement that is found in phase 2 as well, no irrelevant tile for top priority route".
     Full brief (read it first): `C:\Users\brian\.orchestrator\mahjong-watch\brief-stage3-gate.md`. Today
