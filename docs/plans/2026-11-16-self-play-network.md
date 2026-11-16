@@ -185,7 +185,10 @@ watch session's plain work copy into this repository first, so the work has a hi
 ## Shared files and safety
 - `crates/search/src/bots.rs`, `lib.rs`, `agent.rs`: Task 1 only. `features.rs`, `cnn.rs`,
   `cnn.py`: Task 3 only. `ppo_cnn.py`: Task 5 only. `distill_cnn.py`: Task 4 only.
-  `crates/pybind`: Task 2 only.
+  `crates/pybind`: Task 2 only, except one additive function `encode_history` (and its
+  registration line) that Task 3 adds for its Rust-against-Python check; Task 3 may also touch
+  `crates/search/src/net.rs` so a model file can name the new input (orchestrator's call,
+  2026-11-16, on the Task 3 worker's question).
 - Tasks 1 and 3 run side by side in separate worktrees; each builds its own `target` folder.
 - Queue lanes: cpu for matches and data, gpu for the two training jobs. Run folders:
   `runs/rl-stage/` and `runs/ppo/smoke` only.
