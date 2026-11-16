@@ -219,7 +219,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     the doudizhu repository) names a cause by then, say in the board line whether it applies
     here. Do not change the fade or other training settings in this task.
 
-- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b
+- [ ] **Task 6: the 48-hour self-play run** — needs: Task 4, Task 5, Task 5b (taken: slot 3, 2026-11-16 22:00)
   - Files: `runs/rl-stage/` (not in git), `docs/board.md`.
   - Done when: the gpu-lane job of `experiments/stage/selfplay.ps1`, started from Task 4's
     network, has ended by the 48-hour limit or by a stop rule; `runs/rl-stage/log.json` holds
