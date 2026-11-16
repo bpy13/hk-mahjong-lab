@@ -35,6 +35,18 @@ with batched inference (GPU when there is one) for every game of a Rust
   teacher self-play run per ``min_faan`` (unpaired). With ``--init none`` the
   anchor is off (weight 0) unless ``--anchor-weight`` is given.
 * Entropy bonus as in ``ppo.py``.
+* **Opponent pool** (``--pool``; plan 2026-11-16 Task 5, :mod:`mahjong.rl.pool`): in
+  paired mode, each of the three other seats is drawn per hand: the current network
+  50 %, a random saved older network 30 %, the three-stage bot ``stage`` 20 % (in
+  Rust). A pool member is saved every ``--pool-minutes`` (120); every result
+  (``--eval-minutes``) plays ``--eval-deals`` (2,000) hands against three ``stage``
+  bots and against three copies of each earlier member; the run stops for good, with
+  the reason in ``<out>/stopped.txt``, when draws pass ``--draw-limit`` (15 %), when
+  four results in a row gain nothing on the best one, or when its time is up.
+* **Pull toward the init network** (``--pull W``): ``W * KL(init || net)`` on every
+  decision, fading linearly to zero by ``--pull-fade-hours``.
+* **History input**: a network with the ``history`` block gets it from
+  ``HkVecEnv.observe_history()``.
 
 Checkpoints every 30 minutes of training to ``<out>/ckpt-<iteration>.pt`` (network,
 optimizer) with ``<out>/state.json`` (hands, iteration, elapsed time, curriculum
@@ -50,7 +62,8 @@ CLI::
     python -m mahjong.rl.ppo_cnn --init <pt or none> (--minutes M | --hours H)
         --out runs/ppo/<run> [--seed S] [--resume] [--no-paired-reward]
         [--no-target-head] [--envs N] [--device cuda|cpu] [--baseline init|ev]
-        [--priority normal|above_normal]
+        [--priority normal|above_normal] [--pool] [--pool-minutes M] [--eval-deals N]
+        [--pull W] [--pull-fade-hours H] [--draw-limit X]
 """
 
 from __future__ import annotations
@@ -71,7 +84,9 @@ import torch
 import torch.nn.functional as F
 
 from mahjong._core import HkVecEnv, tournament
-from mahjong.rl.cnn import ORACLE_LEN, STATE_LEN, CnnConfig, SuitCNN, export
+from mahjong.rl.cnn import HISTORY_LEN, ORACLE_LEN, STATE_LEN, CnnConfig, SuitCNN, export
+from mahjong.rl.pool import CURRENT, OLDER, STAGE, STAGE_SPEC, Pool, draw_seats, pull_scale
+from mahjong.rl.pool import stop_reason as pool_stop_reason
 
 NUM_ACTIONS = 134
 WIN_CODES = (34, 104)
@@ -83,7 +98,7 @@ GROUPS = tuple(f"{k}/{s}" for k in KINDS for s in STRUCTURES)
 NUM_GROUPS = len(GROUPS)
 #: (fraction of the run, min_faan from then on).
 CURRICULUM = ((0.0, 0), (0.2, 1), (0.4, 3))
-ROLE_LEARNER, ROLE_BASELINE = 0, 1
+ROLE_LEARNER, ROLE_BASELINE, ROLE_OPPONENT = 0, 1, 2
 
 
 def no_power_throttling() -> None:
@@ -194,6 +209,20 @@ class PpoCnnConfig:
     opponents: str | None = None
     #: Stop after this many iterations (tests); None = run until the time is up.
     max_iterations: int | None = None
+    #: Opponent pool (plan 2026-11-16 Task 5): each other seat drawn per hand from the
+    #: current network, a saved older one and ``stage``; results against ``stage``
+    #: and the pool, with the stop rules of :func:`mahjong.rl.pool.stop_reason`.
+    pool: bool = False
+    #: Minutes of training between two networks kept in the pool.
+    pool_minutes: float = 120.0
+    #: Hands per result against three ``stage`` bots and against each pool member.
+    eval_deals: int = 2000
+    #: Weight of the pull ``KL(init || net)`` on every decision, toward the init network.
+    pull: float = 0.0
+    #: Hours of training by which the pull has faded (linearly) to zero.
+    pull_fade_hours: float = 24.0
+    #: Draw share above which a pool run stops (the plan's 15 %; tests raise it).
+    draw_limit: float = 0.15
 
 
 @dataclass
@@ -350,6 +379,11 @@ class Trainer:
         self.history: list[dict[str, Any]] = []
         self.stage = -1
         self.min_faan = -1
+        self.next_pool = cfg.pool_minutes * 60
+        self.stopped: str | None = None
+        self.steps = 0  # observe/step rounds (seeds the `stage` seats' random streams)
+        if cfg.pool and (not cfg.paired or cfg.opponents is not None):
+            raise ValueError("the opponent pool needs paired games and no --opponents")
 
         teacher_path = self.out / "teacher.pt"
         state_path = self.out / "state.json"
@@ -394,6 +428,34 @@ class Trainer:
         else:
             self.env = HkVecEnv(cfg.envs, env_seed, opponents=cfg.opponents, min_faan=0)
         self.buffer = Buffer(cfg.envs)
+        self.history_input = self.net.cfg.history
+        self.pool: Pool | None = Pool(self.out) if cfg.pool else None
+        # Who plays each absolute seat of each game this hand (the learner's own seat
+        # is drawn too and ignored); redrawn when the game's hand ends.
+        self.opp_kind = np.full((cfg.envs, 4), CURRENT, dtype=np.int64)
+        self.opp_member = np.full((cfg.envs, 4), -1, dtype=np.int64)
+        if self.pool is not None:
+            for i in range(cfg.envs):
+                self._draw_opponents(i)
+
+    def _draw_opponents(self, game: int) -> None:
+        assert self.pool is not None
+        self.opp_kind[game], self.opp_member[game] = draw_seats(self.rng, 4, len(self.pool))
+
+    def _observe(
+        self, env: HkVecEnv
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], bytes]:
+        """``env.observe()`` as arrays; the features carry the history block when the
+        network reads it."""
+        fb, ob, mb, ids, seats = env.observe()
+        n = len(ids)
+        f = np.frombuffer(fb, dtype=np.float32).reshape(n, STATE_LEN)
+        if self.history_input:
+            h = np.frombuffer(env.observe_history(), dtype=np.float32).reshape(n, HISTORY_LEN)
+            f = np.concatenate([f, h], axis=1)
+        o = np.frombuffer(ob, dtype=np.float32).reshape(n, ORACLE_LEN)
+        m = np.frombuffer(mb, dtype=np.uint8).reshape(n, NUM_ACTIONS)
+        return f, o, m, ids, bytes(seats)
 
     # --- Checkpoints ------------------------------------------------------------
 
@@ -407,6 +469,9 @@ class Trainer:
         self.elapsed = state["elapsed_s"]
         self.last_ckpt = self.elapsed
         self.next_eval = state["next_eval_s"]
+        self.next_pool = state.get("next_pool_s", self.next_pool)
+        self.stopped = state.get("stopped")
+        self.steps = state.get("steps", 0)
         self.anchor = state["anchor_weight"]
         s = state["stats"]
         self.stats = Stats(
@@ -448,6 +513,9 @@ class Trainer:
             "stage": self.stage,
             "min_faan": self.min_faan,
             "next_eval_s": self.next_eval,
+            "next_pool_s": self.next_pool,
+            "stopped": self.stopped,
+            "steps": self.steps,
             "anchor_weight": self.anchor,
             "stats": asdict(self.stats),
             "config": {
@@ -516,11 +584,8 @@ class Trainer:
         finished = 0
         paired_sum, draws, learner_wins = 0.0, 0, 0
         while finished < cfg.hands_per_iter:
-            fb, ob, mb, ids, seats = env.observe()
+            f, o, m, ids, seats = self._observe(env)
             n = len(ids)
-            f = np.frombuffer(fb, dtype=np.float32).reshape(n, STATE_LEN)
-            o = np.frombuffer(ob, dtype=np.float32).reshape(n, ORACLE_LEN)
-            m = np.frombuffer(mb, dtype=np.uint8).reshape(n, NUM_ACTIONS)
             if cfg.paired:
                 roles = np.frombuffer(env.observed_roles()[1], dtype=np.uint8).astype(np.int64)
             else:
@@ -530,6 +595,25 @@ class Trainer:
             values = np.zeros((n, 4), dtype=np.float32)
             base = roles == ROLE_BASELINE
             lrn = ~base
+            env_ids = np.asarray(ids, dtype=np.int64)
+            seat_arr = np.frombuffer(seats, dtype=np.uint8).astype(np.int64)
+            if self.pool is not None:
+                # Opponent seats (role 2) that the pool gives to an older network or
+                # to `stage`; the rest of role 2 is the current network, as before.
+                opp = roles == ROLE_OPPONENT
+                kind = self.opp_kind[env_ids, seat_arr]
+                member = self.opp_member[env_ids, seat_arr]
+                stage_rows = opp & (kind == STAGE)
+                older_rows = opp & (kind == OLDER)
+                lrn &= ~(stage_rows | older_rows)
+                if stage_rows.any():
+                    self.steps += 1
+                    rust = np.asarray(env.agent_actions(STAGE_SPEC, self.steps), dtype=np.int64)
+                    actions[stage_rows] = rust[stage_rows]
+                for j in np.unique(member[older_rows]):
+                    r = older_rows & (member == j)
+                    net = self.pool.net(int(j), self.device)
+                    actions[r], _, _ = self._act(net, f[r], o[r], m[r], greedy=False)
             if lrn.any():
                 actions[lrn], logp[lrn], values[lrn] = self._act(
                     self.net, f[lrn], o[lrn], m[lrn], greedy=False
@@ -538,7 +622,6 @@ class Trainer:
                 actions[base], _, _ = self._act(self.teacher, f[base], o[base], m[base], True)
             actions, forced = force_wins(actions, m)
             keep = (roles == ROLE_LEARNER) & ~forced & (m.sum(1) > 1)
-            env_ids = np.asarray(ids, dtype=np.int64)
             buf.add(
                 {
                     "feats": f[keep].astype(np.float16),
@@ -548,7 +631,7 @@ class Trainer:
                     "logp": logp[keep],
                     "value": values[keep],
                     # Rust hands Vec<u8> over as bytes.
-                    "seat": np.frombuffer(bytes(seats), dtype=np.uint8)[keep],
+                    "seat": np.frombuffer(seats, dtype=np.uint8)[keep],
                 },
                 env_ids[keep],
             )
@@ -562,6 +645,8 @@ class Trainer:
                     d["env"],
                     Outcome(np.asarray(d["deltas"]), float(d.get("paired", 0)), win_class),
                 )
+                if self.pool is not None:
+                    self._draw_opponents(d["env"])
                 finished += 1
                 if not d["wins"]:
                     draws += 1
@@ -595,11 +680,7 @@ class Trainer:
         done = 0
         classes: list[int] = []
         while done < self.cfg.teacher_hands:
-            fb, ob, mb, ids, _ = env.observe()
-            n = len(ids)
-            f = np.frombuffer(fb, dtype=np.float32).reshape(n, STATE_LEN)
-            o = np.frombuffer(ob, dtype=np.float32).reshape(n, ORACLE_LEN)
-            m = np.frombuffer(mb, dtype=np.uint8).reshape(n, NUM_ACTIONS)
+            f, o, m, _ids, _ = self._observe(env)
             a, _, _ = self._act(self.teacher, f, o, m, greedy=False)
             a, _ = force_wins(a, m)
             env.step(a.tolist())
@@ -627,6 +708,7 @@ class Trainer:
         old_logp, adv_t = t(d["logp"]), t(adv)
         returns, target = t(d["returns"]), t(d["target"].astype(np.int64))
         mult = torch.tensor(self.stats.anchor_mult, dtype=torch.float32, device=dev)
+        pull = cfg.pull * pull_scale(self.elapsed / 3600, cfg.pull_fade_hours)
         self.net.train()
         sums: dict[str, float] = {}
         steps = 0
@@ -666,6 +748,16 @@ class Trainer:
                     kl = (t_logp.exp() * (t_logp - logp_all)).masked_fill(mask == 0, 0.0).sum(1)
                     loss_a = (w * kl).mean()
                     loss = loss + loss_a
+                loss_p = torch.zeros((), device=dev)
+                if pull > 0:
+                    # The fading pull toward the init (imitation) network on every
+                    # decision (plan 2026-11-16 Task 5).
+                    with torch.no_grad():
+                        ppi, _, _ = self.teacher(x)
+                        p_logp = F.log_softmax(masked(ppi, mask), 1)
+                    kl = (p_logp.exp() * (p_logp - logp_all)).masked_fill(mask == 0, 0.0).sum(1)
+                    loss_p = pull * kl.mean()
+                    loss = loss + loss_p
                 self.opt.zero_grad(set_to_none=True)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)
@@ -675,12 +767,14 @@ class Trainer:
                     ("value_loss", loss_v),
                     ("target_loss", loss_t),
                     ("anchor_loss", loss_a),
+                    ("pull_loss", loss_p),
                     ("entropy", ent),
                 ):
                     sums[k] = sums.get(k, 0.0) + float(val.item())
                 steps += 1
         out = {k: v / max(1, steps) for k, v in sums.items()}
         out["decisions"] = float(n)
+        out["pull"] = pull
         out["advantage_std"] = float(reward.std())
         return out
 
@@ -711,6 +805,66 @@ class Trainer:
             "pattern_shares": a["pattern_shares"],
         }
 
+    def _match(self, agents: list[str]) -> dict[str, Any]:
+        """``eval_deals`` hands (walls x 4 seatings, the same walls every time) of the
+        first agent against the other three: its points per hand and rates."""
+        walls = max(1, self.cfg.eval_deals // 4)
+        r = tournament(agents, walls, 99, seatings=4)
+        a = r["agents"][0]
+        return {
+            "deals": a["hands"],
+            "mean": a["mean"],
+            "ci95": a["ci95"],
+            "win_rate": a["win_rate"],
+            "deal_in_rate": a["deal_in_rate"],
+            "draw_rate": r["draw_rate"],
+            "mean_faan": a["mean_faan"],
+        }
+
+    def evaluate_pool(self, draw_rate: float) -> dict[str, Any]:
+        """A result of the pool run: the network against three ``stage`` bots and
+        against three copies of each pool member saved so far. ``draw_rate``: the
+        self-play draw share of the iteration just played."""
+        assert self.pool is not None
+        path = self.out / "eval.mjnn"
+        export(self.net, path)
+        me = f"net:path={path}"
+        out: dict[str, Any] = {
+            "hours": round(self.elapsed / 3600, 4),
+            "iteration": self.iteration,
+            "vs_stage": self._match([me] + [STAGE_SPEC] * 3),
+            "vs_pool": [],
+        }
+        for i, m in enumerate(self.pool.members):
+            res = self._match([me] + [f"net:path={self.pool.mjnn(i)}"] * 3)
+            out["vs_pool"].append({"member": m.name, "member_hours": m.hours, **res})
+        # Self-play draw share since the previous result (this iteration included).
+        since: list[float] = [draw_rate]
+        for e in reversed(self.history):
+            if "eval" in e:
+                break
+            since.append(e["draw_rate"])
+        out["train_draw_rate"] = round(float(np.mean(since)), 5)
+        return out
+
+    def results(self) -> list[dict[str, Any]]:
+        """The pool results so far (against ``stage``, with the self-play draw share),
+        oldest first, as :func:`mahjong.rl.pool.stop_reason` reads them."""
+        return [
+            {**e["eval"]["vs_stage"], "train_draw_rate": e["eval"]["train_draw_rate"]}
+            for e in self.history
+            if "eval" in e and "vs_stage" in e["eval"]
+        ]
+
+    def stop(self, reason: str) -> None:
+        """Ends the run for good: the reason goes to the state (a resume ends at once)
+        and to ``<out>/stopped.txt``."""
+        self.stopped = reason
+        tmp = self.out / "stopped.txt.tmp"
+        tmp.write_text(f"{reason}\nafter {self.elapsed / 3600:.2f} h, iteration {self.iteration}\n")
+        os.replace(tmp, self.out / "stopped.txt")
+        print(f"ppo_cnn: stopped: {reason}", flush=True)
+
     # --- Main loop --------------------------------------------------------------
 
     def run(self) -> dict[str, Any]:
@@ -719,7 +873,9 @@ class Trainer:
         session_hands0 = self.hands
         start_elapsed = self.elapsed
         last_log = 0.0
-        while self.elapsed < cfg.seconds:
+        if self.stopped:
+            print(f"ppo_cnn: this run has stopped ({self.stopped}); nothing to do", flush=True)
+        while self.elapsed < cfg.seconds and not self.stopped:
             if cfg.max_iterations is not None and self.iteration >= cfg.max_iterations:
                 break
             stage, min_faan = stage_of(self.elapsed / cfg.seconds, cfg.curriculum)
@@ -761,16 +917,36 @@ class Trainer:
                     for g, x in enumerate(self.stats.anchor_mult)
                     if x > 1.0001
                 }
+            saved = False
             if self.elapsed >= self.next_eval:
-                entry["eval"] = self.evaluate()
+                entry["eval"] = (
+                    self.evaluate() if self.pool is None else self.evaluate_pool(info["draw_rate"])
+                )
                 self.next_eval += cfg.eval_minutes * 60
+            if self.pool is not None and self.elapsed >= self.next_pool:
+                # After the result, so a result is measured against earlier members only.
+                entry["pool_added"] = self.pool.add(
+                    self.net, self.elapsed / 3600, self.iteration
+                ).name
+                self.next_pool += cfg.pool_minutes * 60
+                saved = True
             print("ppo_cnn", json.dumps(entry), flush=True)
             self.history.append(entry)
-            if self.elapsed - self.last_ckpt >= cfg.ckpt_minutes * 60:
+            if self.pool is not None and "eval" in entry:
+                reason = pool_stop_reason(self.results(), cfg.draw_limit)
+                if reason is not None:
+                    entry["stop"] = reason
+                    self.stop(reason)
+                saved = True
+            if saved or self.elapsed - self.last_ckpt >= cfg.ckpt_minutes * 60:
+                # A result or a new pool member is saved at once, so a restart
+                # neither repeats nor loses it.
                 self.checkpoint()
             if "eval" in entry or time.time() - last_log >= cfg.log_seconds:
                 self.write_log()
                 last_log = time.time()
+        if self.pool is not None and not self.stopped and self.elapsed >= cfg.seconds:
+            self.stop(f"time: {cfg.seconds / 3600:g} h of training reached")
         ckpt = self.checkpoint()
         self.write_log()
         self.net.save(self.out / "final.pt")
@@ -831,6 +1007,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--torch-threads", type=int, default=1)
     ap.add_argument(
+        "--pool",
+        action="store_true",
+        help="opponents per seat: current 50 %%, older saved 30 %%, stage 20 %% (Task 5)",
+    )
+    ap.add_argument("--pool-minutes", type=float, default=120.0)
+    ap.add_argument("--eval-deals", type=int, default=2000)
+    ap.add_argument("--pull", type=float, default=0.0)
+    ap.add_argument("--pull-fade-hours", type=float, default=24.0)
+    ap.add_argument("--draw-limit", type=float, default=0.15)
+    ap.add_argument(
         "--priority",
         choices=tuple(PRIORITY_CLASSES),
         default="normal",
@@ -877,6 +1063,12 @@ def main(argv: list[str] | None = None) -> None:
         max_iterations=args.max_iterations,
         torch_threads=args.torch_threads,
         opponents=args.opponents,
+        pool=args.pool,
+        pool_minutes=args.pool_minutes,
+        eval_deals=args.eval_deals,
+        pull=args.pull,
+        pull_fade_hours=args.pull_fade_hours,
+        draw_limit=args.draw_limit,
     )
     train(cfg)
 
