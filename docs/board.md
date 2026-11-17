@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 8 (end-of-run review of the self-play plan), reviewing since 2026-11-17 12:10
 
 
 ## Results
