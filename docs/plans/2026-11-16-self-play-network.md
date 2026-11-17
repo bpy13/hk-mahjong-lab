@@ -259,7 +259,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 4 – Measure and report (sonnet)
 
-- [ ] **Task 7: final measurement and report to Brian** (checkpoint) — needs: Task 6 (cpu job 182 ended 17 Nov 11:32, exit 0: 40,000 deals, network -0.09 +- 0.22 per hand against three `stage` bots (win 23.7 %, deal-in 18.3 %, 5.1 faan), so the pass mark is not met; outputs in `runs/rl-stage/final/` (`vs-stage-40000.txt`, `table-4000.txt`, `dealin.txt`). Finish: add best-network numbers (best.pt = hour 6, iteration 797; best.mjnn = its int8 export), the 2-hourly curve (log.json: -0.26, +0.31, +0.48, -0.54, -0.88, each +- 2.0, win 22-24 %, deal-in 17-18 %), the pass-mark sentence to docs/study-results/self-play-network.md, post the inbox question, board line, tick) (taken: slot 1, 2026-11-17 12:00)
+- [x] **Task 7: final measurement and report to Brian** (checkpoint) — needs: Task 6 (cpu job 182 ended 17 Nov 11:32, exit 0: 40,000 deals, network -0.09 +- 0.22 per hand against three `stage` bots (win 23.7 %, deal-in 18.3 %, 5.1 faan), so the pass mark is not met; outputs in `runs/rl-stage/final/` (`vs-stage-40000.txt`, `table-4000.txt`, `dealin.txt`). Finish: add best-network numbers (best.pt = hour 6, iteration 797; best.mjnn = its int8 export), the 2-hourly curve (log.json: -0.26, +0.31, +0.48, -0.54, -0.88, each +- 2.0, win 22-24 %, deal-in 17-18 %), the pass-mark sentence to docs/study-results/self-play-network.md, post the inbox question, board line, tick)
   - Files: `experiments/stage/final.ps1` (cpu lane), `docs/study-results/self-play-network.md`,
     `docs/inbox.md`, `docs/board.md`.
   - Done when: the study file holds, for the best saved network: 40,000 deals against three

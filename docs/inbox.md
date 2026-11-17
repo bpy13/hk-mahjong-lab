@@ -7,6 +7,13 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 - FYI (no answer needed): the shared `mahjong` env's editable install still points at `hk-mahjong-lab-3\python`, not the workers clone (a permission check refused the repoint, 2026-11-16). Harmless while jobs set `PYTHONPATH`. Tell the orchestrator if you want it repointed after job 154 ends.
 
+- **The self-play network did not beat the three-stage bot (-0.09 ± 0.22 per hand over 40,000 deals). Keep training, put it into the game, or stop?**
+  - What it is: Task 7's final measurement. Best network (hour 6 of a 10 h run that stopped itself on its stall rule, 1.29 M hands) against three `stage` bots: -0.09 ± 0.22 per hand, win 23.7 % (stage 23.9-24.1 %), deal-in 18.3 % (stage 18.4-18.8 %). At one table of 4,000 deals: network +0.65, teacher -0.17, `stage` +1.33, `value` -1.81 (each ± 0.7). Pass mark (above zero against `stage`) is not met.
+  - Example: the 2-hourly results were -0.26, +0.31, +0.48, -0.54, -0.88 (each ± 2.0): no trend. Report: `docs/study-results/self-play-network.md`.
+  - Why it matters: GPU time is a shared lane; putting a bot level with `stage` into the game adds nothing.
+  - Options: (a) stop here and keep `stage` as the best bot; (b) train further with changed settings (e.g. lower learning rate, larger deal count per result) as a new plan; (c) put the network into the game anyway.
+  - Default: (a).
+
 ## Answered
 
 - **Task 20 is done: the race bot now scores -1.97 per hand against three `value` bots (was -9.4). Should the loop stay queued?**

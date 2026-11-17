@@ -82,3 +82,47 @@ clone. `stage` is the strict gate-1 bot (Task 9). Settings unchanged from Task 4
 - Match (draws 5.7 %): network -0.11 +- 0.71 (win 23.9 %, deal-in 18.9 %, faan 5.1); the three
   `stage` seats -0.21, -0.17, +0.49 (each +- 0.70). Inside noise of `stage`; Task 6 starts from it.
 - Task 9's match did not show the strict bot clearly weaker than `stage-gate0`: no inbox note.
+
+## Task 7: final measurement of the best network (cpu job 182, 2026-11-17)
+
+Network: `runs/rl-stage/best.pt` (hour 6, iteration 797 of the 10.00 h run, job 167) exported
+as `best.mjnn` (int8). Outputs in `runs/rl-stage/final/` (`final.ps1`, exit 0, ended 11:32).
+
+### 40,000 deals, best network + three `stage` bots (seats rotated, draws 5.6 %)
+| Seat | Points per hand | 95 % range | Win | Deal-in | Avg faan |
+|---|---|---|---|---|---|
+| network | **-0.09** | ± 0.22 (-0.31 to +0.13) | 23.7 % | 18.3 % | 5.1 |
+| `stage` | -0.20 | ± 0.22 | 23.9 % | 18.8 % | 5.1 |
+| `stage` | +0.31 | ± 0.22 | 24.1 % | 18.4 % | 5.1 |
+| `stage` | -0.01 | ± 0.22 | 24.1 % | 18.5 % | 5.1 |
+
+### 4,000 deals at one table (draws 6.2 %)
+| Seat | Points per hand | 95 % range | Win | Deal-in | Avg faan |
+|---|---|---|---|---|---|
+| best network | +0.65 | ± 0.70 | 23.7 % | 18.6 % | 5.1 |
+| teacher (imitation net) | -0.17 | ± 0.67 | 23.8 % | 18.4 % | 5.0 |
+| `stage` | +1.33 | ± 0.70 | 25.0 % | 18.3 % | 5.1 |
+| `value` | -1.81 | ± 0.64 | 23.0 % | 18.3 % | 4.8 |
+
+### Deal-in breakdown (`dealin`, 20,000 deals, strict `stage` vs three `value`)
+Full table in `runs/rl-stage/final/dealin.txt`. `stage` deal-in 18.52 % per hand (value 18.57 %),
+22.3 points paid per deal-in (value 23.9). By stage: stage 1 discards give 9.2 % of hands a
+deal-in (12.4 discards per hand), stage 3 give 8.5 % (2.5 discards per hand, 34 per 1000
+discards, the riskiest), stage 2 0.8 %. By tile: honours 30.2 per 1000 discards (value 24.7), 3-7
+tiles 9.4 (value 10.7).
+
+### The 2-hourly curve (job 167, 2,000 deals each vs three `stage`, each ± 2.0)
+| Hour | Points per hand | Win | Deal-in |
+|---|---|---|---|
+| 2 | -0.26 | 22-24 % | 17-18 % |
+| 4 | +0.31 | | |
+| 6 (best) | +0.48 | | |
+| 8 | -0.54 | | |
+| 10 | -0.88 | | |
+
+(Win and deal-in ranges are over the five results; per-result values are in `runs/rl-stage/log.json`.)
+
+### Pass mark
+**Not met.** The best network scores -0.09 ± 0.22 per hand against three `stage` bots over
+40,000 deals: its range holds zero, so it is level with `stage`, not above it. The run's 1.29 M
+hands brought no measurable gain over the imitation start (-0.11 ± 0.71).
