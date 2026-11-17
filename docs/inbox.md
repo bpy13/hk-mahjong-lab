@@ -7,6 +7,9 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 - FYI (no answer needed): the shared `mahjong` env's editable install still points at `hk-mahjong-lab-3\python`, not the workers clone (a permission check refused the repoint, 2026-11-16). Harmless while jobs set `PYTHONPATH`. Tell the orchestrator if you want it repointed after job 154 ends.
 
+
+## Answered
+
 - **The self-play network did not beat the three-stage bot (-0.09 ± 0.22 per hand over 40,000 deals). Keep training, put it into the game, or stop?**
   - What it is: Task 7's final measurement. Best network (hour 6 of a 10 h run that stopped itself on its stall rule, 1.29 M hands) against three `stage` bots: -0.09 ± 0.22 per hand, win 23.7 % (stage 23.9-24.1 %), deal-in 18.3 % (stage 18.4-18.8 %). At one table of 4,000 deals: network +0.65, teacher -0.17, `stage` +1.33, `value` -1.81 (each ± 0.7). Pass mark (above zero against `stage`) is not met.
   - Example: the 2-hourly results were -0.26, +0.31, +0.48, -0.54, -0.88 (each ± 2.0): no trend. Report: `docs/study-results/self-play-network.md`.
@@ -14,8 +17,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) stop here and keep `stage` as the best bot; (b) train further with changed settings (e.g. lower learning rate, larger deal count per result) as a new plan; (c) put the network into the game anyway.
   - Default: (a).
   - Card sent 2026-11-17, card 3 (facts checked against `runs/rl-stage/final/*.txt` and `stopped.txt`).
-
-## Answered
+  - Brian (2026-11-17): "yes sure, go ahead with the 5 test runs, higher priority than big2" (to the five runs proposed by the self-play analysis; for mahjong: one 4-hour low-noise run, plan Task 10; the keep / stop choice follows its result).
 
 - **Task 20 is done: the race bot now scores -1.97 per hand against three `value` bots (was -9.4). Should the loop stay queued?**
   - What it is: the "3-20 times too high" win chance came from measuring in race-versus-race logs, where nobody wins; against `value` the old constants were nearly right. The real cause was that in quiet early hands the race bot picked pure offence's discard in only 25 % of positions (target 95 %). It now takes a wider tie margin when no opponent is likely close (smooth, no switch), and `a`, `b`, `q` and a hazard multiplier were refitted on the `value` field. Details: `docs/study-results/race-bot.md` (Task 20), `docs/race-bot.md` §14.

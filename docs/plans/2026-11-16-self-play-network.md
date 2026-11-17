@@ -275,6 +275,15 @@ watch session's plain work copy into this repository first, so the work has a hi
     `docs/open-items.md`, and `docs/architecture.md` and `docs/rl.md` name the three-stage bot,
     the new input version and the pool.
 
+## Phase 5 – One low-noise run: can self-play show a gain at all (opus)
+
+- [ ] **Task 10: a 4-hour self-play run with less noise and an accurate hourly score** (opus) (checkpoint) `[parallel-ok]`
+  - Why: (Brian, 2026-11-17: "yes sure, go ahead with the 5 test runs, higher priority than big2"). The analysis `docs/study-results/2026-11-17-self-play-analysis.md` (faults M1, M2; experiment 4): the 10-hour run was held at its start by the fading pull, its stop rule needed a jump of 2 points a hand, and its training score (learner minus the frozen start on the same tiles) stayed flat at about -0.7.
+  - What: same start network and pool as Task 6. Changes, each a setting with a test where code changes: the pull toward the start constant at 0.02 (no fade); 4,096 hands per update; one pass per update; learning rate 3e-5; the stall rule off for this run (the collapse rule stays); every hour print and store the mean paired difference (learner minus frozen start, points a hand) with its 95 % range over that hour's hands, plus entropy and distance from the start. Run 4 hours through `jobq.ps1` (gpu lane, job name `rl-lownoise`), from a frozen code copy as Task 6 did; check `mahjong.__file__` in its first log line.
+  - Files: `python/mahjong/rl/ppo_cnn.py`, `python/mahjong/rl/pool.py`, their tests, a new job script beside `selfplay.ps1`, `docs/study-results/self-play-network.md` (new section "Low-noise run").
+  - Done when: the section holds the hourly table (the start is about -0.7) and one sentence on its meaning: a rise to -0.3 or better = the signal is there once noise is cut; flat = self-play at this speed will not lift this network. Then a 40,000-deal match of the end network against three strict `stage` bots (cpu lane) beside the earlier -0.09 +- 0.22. Post the result as an inbox question for Brian (train long with per-decision credit, or stop). Tests pass.
+  - Queue: this job runs ahead of big2's gpu jobs (Brian's words above); it shares the gpu lane with the Dou Dizhu test jobs (`ddz-12*`), one at a time, in the order they were added.
+
 ## Shared files and safety
 - Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
   additive method `HkVecEnv.observe_history()` to `crates/pybind/src/rl.rs` and owns it; Task 4
