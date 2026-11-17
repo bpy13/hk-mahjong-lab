@@ -206,7 +206,8 @@ with their defaults.
   (old belief: 6 of 6) and deal_in `within: false` in 2 of 6 for both. belief-v2 is no worse than the
   old model, but the strict "within" check is not passed by either. Missing: a decision whether
   "passes its existing checks" means "no worse than the old model" (then tick) or "every bucket within".
-- **Task 18 closed on Brian's ruling (slot 1, 2026-11-11).** A recorded calibration miss counts as done (hk-games reply 2026-11-11). Held-out calibration of belief-v2 (old belief model in brackets), predicted vs observed per wall-progress bucket (uns/belief-v2/eval.json; within = observed inside the 95 % interval of the prediction):
+- **Task 18 closed on Brian's ruling (slot 1, 2026-11-11).** A recorded calibration miss counts as done (hk-games reply 2026-11-11). Held-out calibration of belief-v2 (old belief model in brackets), predicted vs observed per wall-progress bucket (
+uns/belief-v2/eval.json; within = observed inside the 95 % interval of the prediction):
 
   | head | bucket | n | predicted | observed | within | old: predicted / observed |
   |---|---|---|---|---|---|---|
@@ -249,3 +250,10 @@ its test tools were merged from the Mahjong watch work copy. Left out on purpose
 ## Task 2b of the self-play plan (2026-11-16)
 - `models/race-belief.mjnn` in the worker clone: the race loop's file of 11 Nov (md5 `b480cdce79f90794f3cea46a60c9de61`) is kept as `race-belief.mjnn.loop-2026-11-11`; the standalone checkout's file (md5 `9b3ca693f04416879f0ac579c1200e34`) is now `race-belief.mjnn`, and `model_files.rs` passes with it.
 - Not done: pointing the shared `mahjong` env's `mahjong.pth` back at `hk-mahjong-lab-workers\python`. The permission check refused the write; the orchestrator said to skip it (job 154 runs from `hk-mahjong-lab-3`). It still points at `hk-mahjong-lab-3\python`; harmless while every job sets `PYTHONPATH` and checks `mahjong.__file__`.
+
+## Task 8 of the self-play plan: end-of-run review (2026-11-17)
+Review in `docs/study-results/review-self-play-network.md`. Judgment calls left as they are:
+- **The stall rule's "best" is not the highest mean.** `pool.stop_reason` counts a result as a gain when it beats, by that result's 95 % range, the last result that itself counted as a gain (not the highest mean so far). More lenient than the plan's wording; the ended run stops identically either way; `best.pt` uses the highest mean. A new training plan should pick one reading and say it in `log.json`'s stop message (today's names hour 2's -0.26 as "the best" while `best.pt` is hour 6's +0.48).
+- **Every 2-hourly result uses the same 500 walls** (`ppo_cnn._match`, seed 99): results are comparable across hours but correlated; the ± 2.0 range per result stays. More deals per result (Brian's inbox option b) is the fix if training continues.
+- **The worker checkout holds 2 of the 15 golden model files**, so `model_files.rs` and `test_cnn_history.py`'s old-checkpoint checks skip most files here; they ran in full in Task 3 against `repo\hk-mahjong-lab\models`.
+

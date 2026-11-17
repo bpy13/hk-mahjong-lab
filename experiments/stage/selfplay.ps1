@@ -5,8 +5,10 @@
 # that fades linearly to zero by hour 24; a checkpoint every 30 min, a pool member per 2 h;
 # every 2 h a result of 2,000 deals against three `stage` bots and against each earlier pool
 # member in runs\rl-stage\log.json; stops at 48 h of training time (across restarts) or by
-# the plan's rules (draws above 15 %, or four results in a row without a gain), written to
-# runs\rl-stage\stopped.txt. Do not change these settings between restarts (Task 6).
+# the plan's rules (draws above 15 %, four results in a row without a gain, or a collapse: two
+# results in a row below the best by more than the sum of the two 95 % ranges), written to
+# runs\rl-stage\stopped.txt; the best result's network is kept as runs\rl-stage\best.pt.
+# Do not change these settings between restarts (Task 6).
 #
 # Resumable: adding the job again continues from the last checkpoint (state.json); a run that
 # has stopped exits at once.

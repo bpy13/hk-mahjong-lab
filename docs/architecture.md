@@ -62,6 +62,29 @@ shortlist match the original. Python: `HkState.from_position(...)`.
 
 **`crates/analysis`** and **`crates/search`**: see [solver.md](solver.md).
 
+Three pieces from the self-play plan (2026-11-16, [ADR 0003](decisions/0003-self-play-network.md)):
+
+* **The three-stage bot `stage`** (`crates/search/src/stage.rs`, lines of play in
+  `route.rs`; bot names in `bots.rs`; tools `examples/compare.rs`, `dealin.rs`,
+  `stage_speed.rs`, `fit_routes.rs`): a rule bot with no tables that leads with
+  the closest of half flush, all pungs, thirteen orphans and all chows, and plays
+  stage 1 (throw tiles outside the line), stage 2 (every tile fits: distance, faan,
+  helping tiles) or stage 3 (ready or one from ready: winning tiles times points).
+  Since Task 9 `stage` is the strict form (stage 3 only when no tile lies outside
+  the leading line); `stage-gate0` is the earlier form, `stage-gate2` keeps a ready
+  hand in stage 3. It is the baseline of the self-play run: +2.62 ± 0.21 per hand
+  against three `value` bots over 40,000 deals (`docs/study-results/stage3-gate.md`,
+  `three-stage-bot.md`).
+* **The `history` network input** (`features::encode_history`, 3,460 floats; Python
+  reference `mahjong.rl.cnn.encode_history`): every discard of every seat in order,
+  each marked drawn-and-thrown or from the hand and claimed or not. A separate input
+  version named in the model file, so every earlier network loads unchanged
+  ([rl.md §2](rl.md)).
+* **The opponent pool** (`python/mahjong/rl/pool.py`, `ppo_cnn --pool`, job scripts
+  in `experiments/stage/`): in self-play each of the learner's three opponents is
+  drawn per hand (current network 50 %, a saved older network 30 %, `stage` 20 %),
+  with the stop rules and the kept best network ([rl.md §4](rl.md)).
+
 **`crates/pybind`**: everything above as plain Python values (tiles and actions
 are `int`, results are dicts). `python/mahjong/_core.pyi` documents and types it.
 

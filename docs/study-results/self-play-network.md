@@ -80,7 +80,7 @@ clone. `stage` is the strict gate-1 bot (Task 9). Settings unchanged from Task 4
 - Training: 6 epochs of 2.8 M rows in 17.7 minutes; agreement by epoch 87.4, 89.8, 91.6, 92.5,
   92.9, 93.1 %; target head 98.6 %; int8 agrees with fp32 on 99.6 % of 1,000 rows.
 - Match (draws 5.7 %): network -0.11 +- 0.71 (win 23.9 %, deal-in 18.9 %, faan 5.1); the three
-  `stage` seats -0.21, -0.17, +0.49 (each +- 0.70). Inside noise of `stage`; Task 6 starts from it.
+  `stage` seats -0.21, -0.17, +0.49 (+- 0.69, 0.70, 0.70). Inside noise of `stage`; Task 6 starts from it.
 - Task 9's match did not show the strict bot clearly weaker than `stage-gate0`: no inbox note.
 
 ## Task 7: final measurement of the best network (cpu job 182, 2026-11-17)
@@ -112,15 +112,17 @@ discards, the riskiest), stage 2 0.8 %. By tile: honours 30.2 per 1000 discards 
 tiles 9.4 (value 10.7).
 
 ### The 2-hourly curve (job 167, 2,000 deals each vs three `stage`, each ± 2.0)
-| Hour | Points per hand | Win | Deal-in |
-|---|---|---|---|
-| 2 | -0.26 | 22-24 % | 17-18 % |
-| 4 | +0.31 | | |
-| 6 (best) | +0.48 | | |
-| 8 | -0.54 | | |
-| 10 | -0.88 | | |
+| Hour | Iteration | Points per hand | Win | Deal-in | Draws | Self-play draws |
+|---|---|---|---|---|---|---|
+| 2 | 292 | -0.26 ± 2.02 | 23.0 % | 17.0 % | 5.4 % | 6.4 % |
+| 4 | 556 | +0.31 ± 2.02 | 24.5 % | 17.3 % | 5.6 % | 6.4 % |
+| 6 (best) | 797 | +0.48 ± 2.03 | 22.9 % | 17.2 % | 6.4 % | 6.5 % |
+| 8 | 1020 | -0.54 ± 1.86 | 22.0 % | 17.1 % | 5.9 % | 6.8 % |
+| 10 | 1262 | -0.88 ± 2.03 | 23.6 % | 17.6 % | 5.6 % | 6.6 % |
 
-(Win and deal-in ranges are over the five results; per-result values are in `runs/rl-stage/log.json`.)
+(From `runs/rl-stage/log.json`, filled in by the Task 8 review. `stopped.txt` says "4 results in
+a row without a gain on the best (-0.26 ± 2.02 per hand)": the stall rule compares the four
+newest results with the best result *before* them, which is hour 2's; `best.pt` is hour 6's.)
 
 ### Pass mark
 **Not met.** The best network scores -0.09 ± 0.22 per hand against three `stage` bots over

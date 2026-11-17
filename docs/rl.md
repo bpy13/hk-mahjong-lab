@@ -227,6 +227,33 @@ budget is used) or given to change it. Hands in progress at the stop are lost.
 Hands per hour count learner games (in paired mode each is played twice). Feature
 encoding in Rust (`observe`) is the bottleneck, not the GPU.
 
+**Imitation of the three-stage bot, then self-play against a pool** (plan
+2026-11-16, `docs/study-results/self-play-network.md`). The start is a
+distillation of the rule bot `stage` (strict form, see `solver.md` §2): about
+3 million of its decisions with the full discard history are logged as labels of
+layout 3 (`examples/label.rs`, `experiments/stage/imitation_data.ps1`) and
+`distill_cnn --passed --history` fits the suit-shared CNN on them
+(`experiments/stage/imitation.ps1`; held-out agreement 93.1 %, -0.11 ± 0.71 per
+hand against three `stage` over 4,000 deals, file `models/stage-imitation.pt`).
+Self-play is `ppo_cnn --pool` (`experiments/stage/selfplay.ps1`, gpu lane,
+resumable): each of the learner's three opponents is drawn per hand (current
+network 50 %, a random saved older network 30 %, `stage` 20 %;
+`mahjong.rl.pool`, members in `<out>/pool/`); paired reward against the frozen
+imitation network; a pull `--pull 0.1` × KL(imitation ‖ net) on every decision
+that fades linearly to zero by `--pull-fade-hours 24`; a pool member saved every
+`--pool-minutes 120`; every `--eval-minutes 120` a result of `--eval-deals 2000`
+against three `stage` bots (not `value`) and against each earlier member (points
+per hand, 95 % range, win, deal-in and draw share) appended to `log.json`. Stops,
+written to `stopped.txt`: draws above `--draw-limit 0.15`; a stall (four results in
+a row with no gain beyond the 95 % range of the best earlier result); a collapse
+(two results in a row below the best by more than the sum of the two ranges); or
+the time budget across restarts. The network of the best result is kept as
+`best.pt` (and `best.mjnn`); `log.json` names it. Related flags: `--opponents
+<spec>` freezes the three other seats on one agent (an exploiter run),
+`--priority above_normal` raises the Windows priority class when other jobs load
+every core. The 2026-11-17 run stopped by the stall rule after 10 hours; its best
+network scored -0.09 ± 0.22 per hand against three `stage` over 40,000 deals.
+
 **Network + search** (`netpimc` agent). The network proposes the candidates
 and its top choice is the baseline that PIMC must beat by two standard errors of
 the paired difference (as in Phase 1). Rollouts are played either by the `fast`
@@ -240,3 +267,8 @@ python experiments/phase3_rl.py             # the full study (about 5.3 hours on
 ```
 
 Stages resume: a stage whose model already exists in `models/` is skipped.
+
+The self-play run of the 2026-11-16 plan goes through the job queue, from a frozen copy of
+the checkout (`experiments/stage/selfplay.ps1 -Freeze` once, then the `jobq.ps1 add -Lane gpu`
+line in that script's header; `imitation_data.ps1` and `imitation.ps1` make its start,
+`final.ps1` measures the best network over 40,000 deals).

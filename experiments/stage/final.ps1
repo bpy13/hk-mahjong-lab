@@ -13,7 +13,7 @@ $py = 'C:\Users\brian\miniconda3\envs\mahjong\python.exe'
 $env:PYTHONPATH = Join-Path $root 'python'
 $where = & $py -c "import mahjong, mahjong._core; print(mahjong.__file__)"
 Write-Output "mahjong.__file__ = $where"
-if (-not $where -or -not $where.StartsWith($root)) { Write-Output "mahjong is not imported from $root"; exit 1 }
+if (-not $where -or -not ([IO.Path]::GetFullPath($where)).StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { Write-Output "mahjong is not imported from $root"; exit 1 }
 
 $out = Join-Path $root 'runs\rl-stage\final'
 New-Item -ItemType Directory -Force $out | Out-Null

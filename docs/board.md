@@ -1,10 +1,10 @@
 # Board
 
 ## Workers
-- slot 1: Task 8 (end-of-run review of the self-play plan), reviewing since 2026-11-17 12:10
 
 
 ## Results
+- Task 8 (slot 1, 2026-11-17): ticked; end-of-run review of commits 7b03646..3d20935 by two helpers (correctness on fable, scripts/docs on sonnet): no bugs on the main paths; fixed one wrong ± in the study file, filled the 2-hourly curve table, hardened the checkout guard in three job scripts (ordinal, case-insensitive), corrected `versus.ps1`'s queue line; `docs/architecture.md`, `rl.md` and `solver.md` now name the three-stage bot, the `history` input and the opponent pool; judgment calls (stall-rule reference, one seed for all 2-hourly results, golden-model coverage in this checkout) in open-items; report `docs/study-results/review-self-play-network.md`; fmt, clippy, cargo test, pytest (120 passed, 10 skipped) pass; no paid API calls.
 - Task 7 (slot 1, 2026-11-17): ticked; cpu job 182 exit 0: best network (hour 6, iteration 797) -0.09 ± 0.22 per hand vs three `stage` over 40,000 deals (win 23.7 %, deal-in 18.3 %), one table of 4,000: network +0.65, teacher -0.17, `stage` +1.33, `value` -1.81 (each ± 0.7); pass mark not met; report in study-results/self-play-network.md, inbox question posted; no paid API calls.
 - Task 6 (slot 1, 2026-11-17): ticked; gpu job 167 ran 10.00 h of 48 (1,262 iterations, 1,294,117 hands) and ended by its stall rule ("4 results in a row without a gain on the best"), exit 0; best result against three `stage` bots (2,000 deals): +0.48 ± 2.03 per hand at hour 6 (`runs/rl-stage/best.pt`); other results -0.26, +0.31, -0.54, -0.88 (each ±2.0); win 22-24 %, deal-in 17-18 %. The 2-hourly result is too noisy (±2.0) for the stall rule to see a gain of the size hoped for, so Task 7's 40,000 deals decide. Checkout `hk-mahjong-lab-workers` must stay; no paid API calls.
 - Task 4b (slot 1, 2026-11-17): ticked; jobs 165 and 166 exit 0; strict-`stage` imitation net `models/stage-imitation.pt`: held-out agreement 93.1 % +- 0.11 (pass >= 90 %), -0.11 +- 0.71 per hand vs three strict `stage` over 4,000 deals (pass >= -1.0), win 23.9 %, deal-in 18.9 %; study-results/self-play-network.md; old outputs kept as `*-gate0`; no paid API calls.
