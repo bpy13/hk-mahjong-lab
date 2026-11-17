@@ -269,7 +269,7 @@ watch session's plain work copy into this repository first, so the work has a hi
     met. An inbox question gives Brian these numbers and asks what happens next (keep training,
     put it into the game, or stop). Nothing is copied into hk-games.
 
-- [ ] **Task 8: end-of-run review** (fable: end-of-run review) — needs: Task 7
+- [ ] **Task 8: end-of-run review** (fable: end-of-run review) — needs: Task 7 (taken: slot 1, 2026-11-17 12:05)
   - Done when: the review of this plan's commits is in `docs/study-results/` or the repo's
     review folder, plain bugs are fixed and verified, judgment calls are in
     `docs/open-items.md`, and `docs/architecture.md` and `docs/rl.md` name the three-stage bot,
