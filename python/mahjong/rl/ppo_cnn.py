@@ -44,7 +44,14 @@ with batched inference (GPU when there is one) for every game of a Rust
   the reason in ``<out>/stopped.txt``, when draws pass ``--draw-limit`` (15 %), when
   four results in a row gain nothing on the best one, or when its time is up.
 * **Pull toward the init network** (``--pull W``): ``W * KL(init || net)`` on every
-  decision, fading linearly to zero by ``--pull-fade-hours``.
+  decision, fading linearly to zero by ``--pull-fade-hours``; ``--no-pull-fade`` keeps
+  it constant (plan 2026-11-16 Task 10).
+* **Hourly training score** (paired mode, Task 10): every hour of training the mean
+  paired difference over that hour's learner hands (learner minus the frozen start,
+  raw points a hand) with its 95 % range, the mean entropy and the distance from the
+  start (mean ``KL(init || net)``) are printed and kept in ``<out>/hourly.json``,
+  ``<out>/hourly.txt`` and the log entry (``"hour"``). ``--no-stall`` turns the pool's
+  stall rule off (the draw and collapse rules stay).
 * **Passed and history inputs**: a network that reads the passed block or the
   ``history`` block gets them from ``HkVecEnv.observe_passed()`` and
   ``observe_history()``, after the features in that order.
@@ -64,7 +71,7 @@ CLI::
         --out runs/ppo/<run> [--seed S] [--resume] [--no-paired-reward]
         [--no-target-head] [--envs N] [--device cuda|cpu] [--baseline init|ev]
         [--priority normal|above_normal] [--pool] [--pool-minutes M] [--eval-deals N]
-        [--pull W] [--pull-fade-hours H] [--draw-limit X]
+        [--pull W] [--pull-fade-hours H | --no-pull-fade] [--draw-limit X] [--no-stall]
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import sys
 import time
@@ -99,6 +107,7 @@ from mahjong.rl.pool import (
     OLDER,
     STAGE,
     STAGE_SPEC,
+    HourStats,
     Pool,
     best_result,
     draw_seats,
@@ -241,6 +250,10 @@ class PpoCnnConfig:
     pull_fade_hours: float = 24.0
     #: Draw share above which a pool run stops (the plan's 15 %; tests raise it).
     draw_limit: float = 0.15
+    #: The pool's stall rule (four results without a gain); off for Task 10's run.
+    stall: bool = True
+    #: Minutes of training per row of the hourly training score (60; tests shorten it).
+    score_minutes: float = 60.0
 
 
 @dataclass
@@ -420,6 +433,10 @@ class Trainer:
         self.next_pool = cfg.pool_minutes * 60
         self.stopped: str | None = None
         self.steps = 0  # observe/step rounds (seeds the `stage` seats' random streams)
+        # The hourly training score (Task 10): the open hour's sums and the rows so far.
+        self.hour = HourStats()
+        self.next_hour = cfg.score_minutes * 60
+        self.hourly: list[dict[str, Any]] = []
         if cfg.pool and (not cfg.paired or cfg.opponents is not None):
             raise ValueError("the opponent pool needs paired games and no --opponents")
 
@@ -456,6 +473,7 @@ class Trainer:
             # are played again, so their entries go.
             log = json.loads((self.out / "log.json").read_text())
             self.history = [e for e in log if e["iter"] <= self.iteration]
+            self.hourly = [e["hour"] for e in self.history if "hour" in e]
 
         env_seed = cfg.seed * 7919 + self.iteration
         if cfg.paired:
@@ -502,6 +520,9 @@ class Trainer:
         self.stopped = state.get("stopped")
         self.steps = state.get("steps", 0)
         self.anchor = state["anchor_weight"]
+        self.next_hour = state.get("next_hour_s", self.next_hour)
+        if "hour_stats" in state:
+            self.hour = HourStats(**state["hour_stats"])
         s = state["stats"]
         self.stats = Stats(
             teacher={int(k): v for k, v in s["teacher"].items()},
@@ -546,6 +567,8 @@ class Trainer:
             "stopped": self.stopped,
             "steps": self.steps,
             "anchor_weight": self.anchor,
+            "next_hour_s": self.next_hour,
+            "hour_stats": asdict(self.hour),
             "stats": asdict(self.stats),
             "config": {
                 k: str(v) if isinstance(v, Path) else v for k, v in asdict(self.cfg).items()
@@ -611,7 +634,7 @@ class Trainer:
         cfg, env, buf = self.cfg, self.env, self.buffer
         self.net.eval()
         finished = 0
-        paired_sum, draws, learner_wins = 0.0, 0, 0
+        paired_sum, paired_sq, draws, learner_wins = 0.0, 0.0, 0, 0
         while finished < cfg.hands_per_iter:
             f, o, m, ids, seats = self._observe(env)
             n = len(ids)
@@ -686,6 +709,7 @@ class Trainer:
                     classes = [c for s, c, _f, _b in d["wins"] if s == learner]
                     self.seat_hands += 1
                     paired_sum += d["paired"]
+                    paired_sq += d["paired"] ** 2
                     teacher = [c for s, c, _f, _b in d["baseline_wins"] if s == learner]
                     self.stats.add_teacher(d["min_faan"], teacher, 1)
                 learner_wins += len(classes)
@@ -699,6 +723,8 @@ class Trainer:
             "learner_win_rate": learner_wins / finished / (1 if cfg.paired else 4),
             "paired_mean": paired_sum / finished if cfg.paired else None,
         }
+        if cfg.paired:
+            self.hour.add_hands(finished, paired_sum, paired_sq)
         return batch, info
 
     def measure_teacher(self, min_faan: int) -> None:
@@ -778,14 +804,16 @@ class Trainer:
                     loss_a = (w * kl).mean()
                     loss = loss + loss_a
                 loss_p = torch.zeros((), device=dev)
+                # The distance from the init (imitation) network, KL(init || net) per
+                # decision: the pull on every decision (plan 2026-11-16 Task 5) and
+                # the hourly gauge (Task 10).
+                with torch.no_grad():
+                    ppi, _, _ = self.teacher(x)
+                    p_logp = F.log_softmax(masked(ppi, mask), 1)
+                kl = (p_logp.exp() * (p_logp - logp_all)).masked_fill(mask == 0, 0.0).sum(1)
+                dist = kl.mean()
                 if pull > 0:
-                    # The fading pull toward the init (imitation) network on every
-                    # decision (plan 2026-11-16 Task 5).
-                    with torch.no_grad():
-                        ppi, _, _ = self.teacher(x)
-                        p_logp = F.log_softmax(masked(ppi, mask), 1)
-                    kl = (p_logp.exp() * (p_logp - logp_all)).masked_fill(mask == 0, 0.0).sum(1)
-                    loss_p = pull * kl.mean()
+                    loss_p = pull * dist
                     loss = loss + loss_p
                 self.opt.zero_grad(set_to_none=True)
                 loss.backward()
@@ -798,6 +826,7 @@ class Trainer:
                     ("anchor_loss", loss_a),
                     ("pull_loss", loss_p),
                     ("entropy", ent),
+                    ("distance", dist),
                 ):
                     sums[k] = sums.get(k, 0.0) + float(val.item())
                 steps += 1
@@ -907,6 +936,40 @@ class Trainer:
             b = evals[i]["eval"]["best"]
         entry["eval"]["best"] = b
 
+    def close_hour(self, partial: bool = False) -> dict[str, Any]:
+        """Ends the open hour of training: its row (:meth:`HourStats.summary`) is
+        printed and written to ``<out>/hourly.json`` and ``hourly.txt``; returns it."""
+        row = self.hour.summary(round(self.next_hour / (self.cfg.score_minutes * 60)), partial)
+        row["iteration"] = self.iteration
+        row["hours"] = round(self.elapsed / 3600, 4)
+        self.hourly.append(row)
+        self.hour = HourStats()
+        self.next_hour += self.cfg.score_minutes * 60
+        print(
+            f"ppo_cnn: hour {row['hour']}: paired difference {row['paired_mean']:+.3f} "
+            f"+- {row['ci95']:.3f} points a hand over {row['hands']:,} hands, entropy "
+            f"{row['entropy']:.4f}, distance {row['distance']:.4f}",
+            flush=True,
+        )
+        tmp = self.out / "hourly.json.tmp"
+        tmp.write_text(json.dumps(self.hourly, indent=1))
+        os.replace(tmp, self.out / "hourly.json")
+        lines = [
+            "| Hour | Hands | Learner minus frozen start, points a hand | 95 % range "
+            "| Entropy | Distance from start |",
+            "|---|---|---|---|---|---|",
+        ]
+        for r in self.hourly:
+            mark = " (part)" if r.get("partial") else ""
+            lines.append(
+                f"| {r['hour']}{mark} | {r['hands']:,} | {r['paired_mean']:+.2f} "
+                f"| +- {r['ci95']:.2f} | {r['entropy']:.3f} | {r['distance']:.3f} |"
+            )
+        tmp = self.out / "hourly.txt.tmp"
+        tmp.write_text("\n".join(lines) + "\n")
+        os.replace(tmp, self.out / "hourly.txt")
+        return row
+
     def stop(self, reason: str) -> None:
         """Ends the run for good: the reason goes to the state (a resume ends at once)
         and to ``<out>/stopped.txt``."""
@@ -945,6 +1008,8 @@ class Trainer:
             t2 = time.time()
             if self.anchor > 0:
                 self.stats.update_anchor(min_faan)
+            if cfg.paired:
+                self.hour.add_update(losses["entropy"], losses["distance"])
             self.iteration += 1
             self.elapsed = start_elapsed + (time.time() - session_start)
             session_hours = max(1e-9, (time.time() - session_start) / 3600)
@@ -969,6 +1034,9 @@ class Trainer:
                     if x > 1.0001
                 }
             saved = False
+            if cfg.paired and self.elapsed >= self.next_hour:
+                entry["hour"] = self.close_hour()
+                saved = True
             if self.elapsed >= self.next_eval:
                 entry["eval"] = (
                     self.evaluate() if self.pool is None else self.evaluate_pool(info["draw_rate"])
@@ -985,7 +1053,7 @@ class Trainer:
             self.history.append(entry)
             if self.pool is not None and "eval" in entry:
                 self.keep_best(entry)
-                reason = pool_stop_reason(self.results(), cfg.draw_limit)
+                reason = pool_stop_reason(self.results(), cfg.draw_limit, cfg.stall)
                 if reason is not None:
                     entry["stop"] = reason
                     self.stop(reason)
@@ -994,11 +1062,14 @@ class Trainer:
                 # A result or a new pool member is saved at once, so a restart
                 # neither repeats nor loses it.
                 self.checkpoint()
-            if "eval" in entry or time.time() - last_log >= cfg.log_seconds:
+            if "eval" in entry or "hour" in entry or time.time() - last_log >= cfg.log_seconds:
                 self.write_log()
                 last_log = time.time()
         if self.pool is not None and not self.stopped and self.elapsed >= cfg.seconds:
             self.stop(f"time: {cfg.seconds / 3600:g} h of training reached")
+        if self.stopped and cfg.paired and self.hour.hands > 0:
+            # The hands after the last full hour of a run that has ended.
+            self.close_hour(partial=True)
         ckpt = self.checkpoint()
         self.write_log()
         self.net.save(self.out / "final.pt")
@@ -1066,8 +1137,23 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--pool-minutes", type=float, default=120.0)
     ap.add_argument("--eval-deals", type=int, default=2000)
     ap.add_argument("--pull", type=float, default=0.0)
-    ap.add_argument("--pull-fade-hours", type=float, default=24.0)
+    fade = ap.add_mutually_exclusive_group()
+    fade.add_argument("--pull-fade-hours", type=float, default=24.0)
+    fade.add_argument(
+        "--no-pull-fade", action="store_true", help="keep the pull constant (Task 10)"
+    )
     ap.add_argument("--draw-limit", type=float, default=0.15)
+    ap.add_argument(
+        "--score-minutes",
+        type=float,
+        default=60.0,
+        help="minutes per row of the hourly training score",
+    )
+    ap.add_argument(
+        "--no-stall",
+        action="store_true",
+        help="no stop after four results without a gain (Task 10); draws and collapse stay",
+    )
     ap.add_argument(
         "--priority",
         choices=tuple(PRIORITY_CLASSES),
@@ -1119,8 +1205,10 @@ def main(argv: list[str] | None = None) -> None:
         pool_minutes=args.pool_minutes,
         eval_deals=args.eval_deals,
         pull=args.pull,
-        pull_fade_hours=args.pull_fade_hours,
+        pull_fade_hours=math.inf if args.no_pull_fade else args.pull_fade_hours,
         draw_limit=args.draw_limit,
+        stall=not args.no_stall,
+        score_minutes=args.score_minutes,
     )
     train(cfg)
 

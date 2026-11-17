@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -117,6 +118,80 @@ def test_pull_scale() -> None:
     assert pull_scale(12, 24) == 0.5
     assert pull_scale(24, 24) == 0.0 and pull_scale(30, 24) == 0.0
     assert pull_scale(1, 0) == 0.0
+    # Task 10: an infinite fade keeps the pull constant.
+    assert pull_scale(0, math.inf) == 1.0 and pull_scale(1000, math.inf) == 1.0
+
+
+def test_stall_rule_can_be_turned_off() -> None:
+    # Task 10: with stall=False four flat results do not stop the run; the draw and
+    # collapse rules still do.
+    from mahjong.rl.pool import stop_reason
+
+    def r(mean: float, draws: float = 0.05) -> dict[str, Any]:
+        return {"mean": mean, "ci95": 0.5, "draw_rate": draws, "train_draw_rate": 0.05}
+
+    flat = [r(-1.0), r(-0.6), r(-0.9), r(-0.7), r(-0.55)]
+    assert "stalled" in (stop_reason(flat) or "")
+    assert stop_reason(flat, stall=False) is None
+    assert "draws" in (stop_reason([*flat, r(-0.6, draws=0.2)], stall=False) or "")
+    why = stop_reason([r(-1.0), r(0.0), r(-0.2), r(-1.2), r(-1.5)], stall=False)
+    assert why is not None and "collapse" in why
+
+
+def test_hour_stats_summary() -> None:
+    # Task 10: mean paired difference with 1.96 standard errors over the hour's hands,
+    # mean entropy and distance over its updates.
+    from mahjong.rl.pool import HourStats
+
+    rng = np.random.default_rng(1)
+    hs = HourStats()
+    xs = rng.normal(-0.7, 53.0, size=40_000)
+    for chunk in np.array_split(xs, 10):
+        hs.add_hands(len(chunk), float(chunk.sum()), float((chunk**2).sum()))
+    hs.add_update(0.2, 0.05)
+    hs.add_update(0.3, 0.07)
+    row = hs.summary(3)
+    assert row["hour"] == 3 and row["hands"] == 40_000 and row["updates"] == 2
+    assert abs(row["paired_mean"] - xs.mean()) < 1e-3
+    assert abs(row["ci95"] - 1.96 * xs.std(ddof=1) / math.sqrt(len(xs))) < 1e-3
+    assert row["entropy"] == 0.25 and row["distance"] == 0.06
+    assert "partial" not in row and hs.summary(4, partial=True)["partial"] is True
+
+
+def test_low_noise_run_writes_hourly_rows_and_resumes(tmp_path: Path) -> None:
+    # Task 10's settings on a tiny run: constant pull, one pass, no stall rule, and a
+    # row of the training score per (here 0.0001-minute) "hour", kept across a resume.
+    import json
+
+    import torch
+    from mahjong.rl.cnn import CnnConfig, SuitCNN
+    from mahjong.rl.ppo_cnn import main
+
+    torch.manual_seed(4)
+    init = tmp_path / "init.pt"
+    SuitCNN(CnnConfig(**SMALL)).save(init)
+    out = tmp_path / "run"
+    args = ["--init", str(init), "--out", str(out), "--envs", "8", "--device", "cpu"]
+    args += ["--hands-per-iter", "8", "--pool", "--no-curriculum", "--eval-deals", "4"]
+    args += ["--epochs", "1", "--lr", "3e-5", "--pull", "0.02", "--no-pull-fade", "--no-stall"]
+    args += ["--draw-limit", "1.0", "--score-minutes", "0.0001", "--minutes", "60"]
+    main([*args, "--max-iterations", "2"])
+    log = json.loads((out / "log.json").read_text())
+    assert all(e["pull"] == 0.02 for e in log)
+    assert all(e["distance"] >= 0 for e in log)
+    hourly = json.loads((out / "hourly.json").read_text())
+    assert [h["hour"] for h in hourly] == [1, 2]
+    assert [e["hour"] for e in log if "hour" in e] == hourly
+    for h, e in zip(hourly, log, strict=True):
+        assert h["hands"] == 8 and h["updates"] == 1
+        assert abs(h["paired_mean"] - e["paired_mean"]) < 1e-3
+        assert h["entropy"] == round(e["entropy"], 5)
+    assert (out / "hourly.txt").read_text().count("\n") == 4
+    state = json.loads((out / "state.json").read_text())
+    assert state["config"]["stall"] is False and state["config"]["pull_fade_hours"] == math.inf
+    main([*args, "--resume", "--max-iterations", "3"])
+    hourly = json.loads((out / "hourly.json").read_text())
+    assert [h["hour"] for h in hourly] == [1, 2, 3]
 
 
 def test_pool_members_persist(tmp_path) -> None:  # type: ignore[no-untyped-def]

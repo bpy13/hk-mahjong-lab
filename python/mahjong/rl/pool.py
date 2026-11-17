@@ -8,12 +8,14 @@ older network is saved, its share goes to the current network.
 Older networks are kept in ``<run>/pool/`` (``member-<n>.pt`` and ``.mjnn``, listed in
 ``members.json``); :class:`Pool` adds one, loads them for play and lists them for the
 2-hourly results. :func:`stop_reason` holds the plan's stop rules, :func:`pull_scale`
-the fading pull toward the imitation network.
+the fading pull toward the imitation network, :class:`HourStats` the hourly training
+score (plan 2026-11-16 Task 10).
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,10 +111,58 @@ class Pool:
 
 def pull_scale(hours: float, fade_hours: float) -> float:
     """Factor of the pull toward the imitation network: 1 at the start, falling in a
-    straight line to 0 at ``fade_hours`` of training (0 from then on)."""
+    straight line to 0 at ``fade_hours`` of training (0 from then on). ``fade_hours``
+    infinite: 1 throughout, a constant pull (Task 10's ``--no-pull-fade``)."""
     if fade_hours <= 0:
         return 0.0
+    if math.isinf(fade_hours):
+        return 1.0
     return max(0.0, 1.0 - hours / fade_hours)
+
+
+@dataclass
+class HourStats:
+    """Running sums for one hour of training (plan 2026-11-16 Task 10): the paired
+    difference of every learner hand (learner minus the frozen start on the same tiles,
+    raw points), and per update the entropy and the distance from the start
+    (mean ``KL(init || net)`` over the update's decisions)."""
+
+    hands: int = 0
+    total: float = 0.0
+    squares: float = 0.0
+    updates: int = 0
+    entropy: float = 0.0
+    distance: float = 0.0
+
+    def add_hands(self, n: int, total: float, squares: float) -> None:
+        self.hands += n
+        self.total += total
+        self.squares += squares
+
+    def add_update(self, entropy: float, distance: float) -> None:
+        self.updates += 1
+        self.entropy += entropy
+        self.distance += distance
+
+    def summary(self, hour: int, partial: bool = False) -> dict[str, Any]:
+        """The hour's row: mean paired difference (points a hand) with its 95 % range
+        (1.96 standard errors over the hour's hands), mean entropy and distance."""
+        n = max(1, self.hands)
+        mean = self.total / n
+        var = max(0.0, self.squares / n - mean * mean) * n / max(1, n - 1)
+        u = max(1, self.updates)
+        row: dict[str, Any] = {
+            "hour": hour,
+            "hands": self.hands,
+            "paired_mean": round(mean, 4),
+            "ci95": round(1.96 * math.sqrt(var / n), 4),
+            "entropy": round(self.entropy / u, 5),
+            "distance": round(self.distance / u, 5),
+            "updates": self.updates,
+        }
+        if partial:
+            row["partial"] = True
+        return row
 
 
 def best_result(results: list[dict[str, Any]]) -> int | None:
@@ -122,7 +172,9 @@ def best_result(results: list[dict[str, Any]]) -> int | None:
     return max(range(len(results)), key=lambda i: (results[i]["mean"], -i))
 
 
-def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -> str | None:
+def stop_reason(
+    results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT, stall: bool = True
+) -> str | None:
     """Why the run must stop after the latest of ``results`` (the 2-hourly results
     against three ``stage`` bots, oldest first: ``mean``, ``ci95``, ``draw_rate``,
     and optionally ``train_draw_rate``, the self-play draw share since the previous
@@ -133,7 +185,8 @@ def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -
     * Collapse: each of the last two results lies below the best earlier result (before
       those two) by more than the sum of its own and that result's 95 % half-widths.
     * Stall: four results in a row none of which gains on the best earlier one, a
-      gain being a mean above that result's mean + its 95 % half-width.
+      gain being a mean above that result's mean + its 95 % half-width. Off with
+      ``stall=False`` (Task 10's low-noise run); the other rules stay.
     """
     if not results:
         return None
@@ -154,6 +207,8 @@ def stop_reason(results: list[dict[str, Any]], draw_limit: float = DRAW_LIMIT) -
                 f"{last['mean']:+.2f}) are below the best earlier one "
                 f"({best['mean']:+.2f} +- {best['ci95']:.2f}) by more than the ranges"
             )
+    if not stall:
+        return None
     best, since = results[0], 0
     for r in results[1:]:
         if r["mean"] > best["mean"] + best["ci95"]:
