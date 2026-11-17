@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 7 (final measurement), waiting on cpu job 182 `rl-stage-final` (queued 2026-11-17; a later run writes the report)
 
 
 ## Results
