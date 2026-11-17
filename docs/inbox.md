@@ -13,6 +13,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Why it matters: GPU time is a shared lane; putting a bot level with `stage` into the game adds nothing.
   - Options: (a) stop here and keep `stage` as the best bot; (b) train further with changed settings (e.g. lower learning rate, larger deal count per result) as a new plan; (c) put the network into the game anyway.
   - Default: (a).
+  - Card sent 2026-11-17, card 3 (facts checked against `runs/rl-stage/final/*.txt` and `stopped.txt`).
 
 ## Answered
 
