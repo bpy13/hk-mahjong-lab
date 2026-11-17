@@ -128,3 +128,20 @@ newest results with the best result *before* them, which is hour 2's; `best.pt` 
 **Not met.** The best network scores -0.09 ± 0.22 per hand against three `stage` bots over
 40,000 deals: its range holds zero, so it is level with `stage`, not above it. The run's 1.29 M
 hands brought no measurable gain over the imitation start (-0.11 ± 0.71).
+
+## Low-noise run (Task 10, gpu job 189, started 2026-11-17 14:08)
+Why: the analysis `2026-11-17-self-play-analysis.md` (faults M1, M2; experiment 4) found the
+10-hour run held at its start by the fading pull, its stall rule blind to any realistic gain, and
+its training score (learner minus the frozen start on the same tiles) flat at about -0.7.
+
+Settings (`experiments/stage/lownoise.ps1`, frozen copy `runs/rl-lownoise/pkg`): same start
+(`models/stage-imitation.pt`, the same weights as Task 6's teacher) and pool (current 50 %, older
+30 %, `stage` 20 %, a member every 2 h); pull toward the start constant at 0.02 (`--no-pull-fade`);
+4,096 hands per update; one pass; learning rate 3e-5; stall rule off (`--no-stall`; draw and
+collapse rules on, a result of 2,000 deals against three `stage` every hour); 4 hours of training.
+Each hour's row: the mean paired difference over that hour's learner hands (raw points a hand,
+95 % range = 1.96 standard errors), the mean entropy and the distance from the start (mean
+`KL(start || network)` per decision), from `runs/rl-lownoise/hourly.txt`.
+
+Hourly table and meaning: pending job 189. The end network's 40,000-deal match against three
+strict `stage` bots (beside Task 7's -0.09 ± 0.22): pending cpu job 191.

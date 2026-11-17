@@ -24,12 +24,30 @@
 # -DryRun: a check of this script on the cpu (4 threads), 6 minutes, a score row and a result
 # every 2 minutes (200 deals), 256 hands per update, in runs\ppo\smoke\lownoise-dry, without
 # freezing (runs this checkout's python folder).
-param([string]$Init = 'models\stage-imitation.pt', [switch]$Freeze, [switch]$DryRun)
+#
+# -Final (cpu lane, after the run): the end network runs\rl-lownoise\final.mjnn plus three strict
+# `stage` bots, 40,000 deals (seats rotated, Task 7's compare.exe in runs\rl-stage\bin), into
+# runs\rl-lownoise\final\vs-stage-40000.txt; set beside Task 7's -0.09 +- 0.22.
+#   jobq.ps1 add -Lane cpu -Label rl-lownoise-final -After <run job> -Script "<this file>" -ScriptArgs "-Final"
+param([string]$Init = 'models\stage-imitation.pt', [switch]$Freeze, [switch]$DryRun, [switch]$Final)
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $python = 'C:\Users\brian\miniconda3\envs\mahjong\python.exe'
 $runs = Join-Path $repo 'runs\rl-lownoise'
 $pkg = Join-Path $runs 'pkg'
+
+if ($Final) {
+    $net = Join-Path $runs 'final.mjnn'
+    $compare = Join-Path $repo 'runs\rl-stage\bin\compare.exe'
+    foreach ($f in $net, $compare, (Join-Path $runs 'stopped.txt')) {
+        if (-not (Test-Path $f)) { Write-Output "missing $f (the run has not ended)"; exit 1 }
+    }
+    $dir = Join-Path $runs 'final'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $env:RAYON_NUM_THREADS = if ($env:HKQ_THREADS) { $env:HKQ_THREADS } else { '16' }
+    & $compare "net:path=$net" stage stage stage 40000 1 | Out-File -Encoding utf8 (Join-Path $dir 'vs-stage-40000.txt')
+    exit $LASTEXITCODE
+}
 
 if ($Freeze) {
     if (-not (Test-Path (Join-Path $repo 'python\mahjong\_core.pyd'))) { Write-Output 'build mahjong._core first'; exit 1 }
