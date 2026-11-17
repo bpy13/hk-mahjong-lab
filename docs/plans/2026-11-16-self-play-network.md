@@ -259,7 +259,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 4 – Measure and report (sonnet)
 
-- [ ] **Task 7: final measurement and report to Brian** (checkpoint) — needs: Task 6
+- [ ] **Task 7: final measurement and report to Brian** (checkpoint) — needs: Task 6 (taken: slot 1, 2026-11-17 08:00)
   - Files: `experiments/stage/final.ps1` (cpu lane), `docs/study-results/self-play-network.md`,
     `docs/inbox.md`, `docs/board.md`.
   - Done when: the study file holds, for the best saved network: 40,000 deals against three
