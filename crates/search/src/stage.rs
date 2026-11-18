@@ -21,6 +21,7 @@
 
 use crate::bots::{after_claim, live_winning_tiles, rank_discards, Key as RankKey, Metric};
 use crate::ev::after_own_kong;
+use crate::giveup;
 use crate::route::{helpers_of, Route, RouteTarget};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, for_each_route_target, Structure, SuitPlan};
@@ -385,6 +386,9 @@ pub struct Note {
     /// 1, 2 or 3; 0 when no line is feasible (value-bot order).
     pub stage: u8,
     pub line: Option<Line>,
+    /// The give-up rule ([`crate::giveup`]) changed the discard: refused the
+    /// chosen tile, or kept folding after an earlier refusal.
+    pub gave_up: bool,
 }
 
 /// The three-stage bot. The number is the version of the stage 1 pung rule for a
@@ -415,11 +419,17 @@ pub struct Note {
 ///
 /// Leads other than the flush have no outside tile, so stage 3 starts there as
 /// with gate 0 (the watch session's reading).
+///
+/// `giveup` switches on the give-up rule for a ready hand ([`crate::giveup`],
+/// plan Task 11): `None` (the default) plays exactly as before; `Some(scale)`
+/// uses the measured figures with the push side's value times `scale`
+/// (`stage-fold` 1, `stage-fold-half` 0.5, `stage-fold-double` 2).
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
     pub ready: i8,
     pub gate: u8,
+    pub giveup: Option<f64>,
 }
 
 impl Default for StageBot {
@@ -435,12 +445,18 @@ impl StageBot {
             pung,
             ready,
             gate: 1,
+            giveup: None,
         }
     }
 
     /// The same bot with another stage 3 gate (0, 1 or 2).
     pub const fn with_gate(self, gate: u8) -> StageBot {
         StageBot { gate, ..self }
+    }
+
+    /// The same bot with the give-up rule (`Some(scale)`) or without (`None`).
+    pub const fn with_giveup(self, giveup: Option<f64>) -> StageBot {
+        StageBot { giveup, ..self }
     }
 
     /// Whether the gate lets a hand with an outside tile into stage 3 anyway:
@@ -511,6 +527,7 @@ impl StageBot {
             let note = Note {
                 stage: 0,
                 line: None,
+                gave_up: false,
             };
             return (ranked[0].0, note);
         }
@@ -537,6 +554,7 @@ impl StageBot {
         let note = Note {
             stage: 3,
             line: None,
+            gave_up: false,
         };
         (best.2, note)
     }
@@ -602,6 +620,7 @@ impl StageBot {
         let note = Note {
             stage: if stage1 { 1 } else { 2 },
             line: Some(lead),
+            gave_up: false,
         };
         (keyed[0].0, note)
     }
@@ -729,6 +748,35 @@ impl StageBot {
         }
     }
 
+    /// The give-up rule ([`crate::giveup`]) on the discard `tile` picked in
+    /// `note`'s stage: the tile to throw instead, or `None` to keep `tile`.
+    fn give_up(
+        &self,
+        state: &State,
+        view: &SeatView,
+        candidates: &[Tile],
+        tile: Tile,
+        note: Note,
+        scale: f64,
+    ) -> Option<Tile> {
+        let seat = view.seat;
+        if note.stage == 3 {
+            let fig = giveup::MEASURED;
+            if let Some(v) = giveup::judge(state, view, candidates, tile, &fig, scale) {
+                if v.gave_up {
+                    giveup::remember(state, seat, true);
+                    return Some(v.tile);
+                }
+                if giveup::folded(state, seat) {
+                    giveup::remember(state, seat, false);
+                }
+                return None;
+            }
+        }
+        // Not ready after the pick: a hand that gave up keeps folding.
+        giveup::folded(state, seat).then(|| giveup::fold_tile(state, seat, candidates))
+    }
+
     /// The action and the stage it came from.
     pub fn decide<R: Rng + ?Sized>(
         &self,
@@ -757,6 +805,15 @@ impl StageBot {
             })
             .collect();
         let (tile, note) = self.pick_discard(&view, &candidates, rng);
+        if let Some(scale) = self.giveup {
+            if let Some(t) = self.give_up(state, &view, &candidates, tile, note, scale) {
+                let note = Note {
+                    gave_up: true,
+                    ..note
+                };
+                return (Action::Discard(t), Some(note));
+            }
+        }
         // Kongs: never in stage 1; later, when the hand is no further from a win
         // afterwards (the value bot's rule).
         if note.stage >= 2 {
@@ -1112,6 +1169,16 @@ mod tests {
         assert_eq!(of("stage-both"), (3, 2, 0));
         assert_eq!(of("stage-gate1"), (3, 1, 1));
         assert_eq!(of("stage-gate2"), (3, 1, 2));
+        // The give-up rule (plan Task 11): off for every bot but the three test bots.
+        let fold = |name: &str| match crate::Bot::by_name(name) {
+            Some(crate::Bot::Stage(b)) => (b.pung, b.ready, b.gate, b.giveup),
+            _ => panic!("{name} is no three-stage bot"),
+        };
+        assert_eq!(fold("stage"), (3, 1, 1, None));
+        assert_eq!(StageBot::default().giveup, None);
+        assert_eq!(fold("stage-fold"), (3, 1, 1, Some(1.0)));
+        assert_eq!(fold("stage-fold-half"), (3, 1, 1, Some(0.5)));
+        assert_eq!(fold("stage-fold-double"), (3, 1, 1, Some(2.0)));
     }
 
     #[test]

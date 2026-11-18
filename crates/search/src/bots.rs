@@ -612,6 +612,12 @@ impl Bot {
             "stage-gate0" => Bot::Stage(StageBot::default().with_gate(0)),
             "stage-gate1" => Bot::Stage(StageBot::default()),
             "stage-gate2" => Bot::Stage(StageBot::default().with_gate(2)),
+            // Plan Task 11 (Brian, 2026-11-19: "if we equip this to the stage bot,
+            // what happens? can you try"): the give-up rule for a ready hand, with
+            // the push side's value times 1, 0.5 and 2. Test bots, not defaults.
+            "stage-fold" => Bot::Stage(StageBot::default().with_giveup(Some(1.0))),
+            "stage-fold-half" => Bot::Stage(StageBot::default().with_giveup(Some(0.5))),
+            "stage-fold-double" => Bot::Stage(StageBot::default().with_giveup(Some(2.0))),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
