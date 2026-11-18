@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 11 (give-up rule for the ready hand on `stage`), building; step 1 measured, matches next (2026-11-19)
 
 
 ## Results
