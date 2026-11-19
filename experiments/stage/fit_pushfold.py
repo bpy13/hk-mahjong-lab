@@ -472,6 +472,8 @@ def main() -> int:
     ap.add_argument("--holdout", type=int, default=5, help="deal %% N == 0 is held out")
     args = ap.parse_args()
 
+    # A few threads are enough for these small fits (and the labeller may be running).
+    torch.set_num_threads(4)
     d = load(args.csv)
     report = step2(d)
 
