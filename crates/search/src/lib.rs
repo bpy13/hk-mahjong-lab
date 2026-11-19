@@ -14,6 +14,7 @@
 //! * [`net`]: running trained networks.
 //! * [`passed`]: passed-tile safety and the risk-taking read (plan Tasks 14–15).
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
+//! * [`pushfold`]: the ready hand's push-or-fold choice learned from play-outs (plan Task 12).
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
 //!   chances.
 //! * [`reasons`]: reason keys (no text) for the `ev` bot and the network path.
@@ -39,6 +40,8 @@ pub mod log;
 pub mod net;
 pub mod passed;
 pub mod pimc;
+pub mod pushfold;
+pub mod pushfold_tables;
 pub mod race;
 pub mod reasons;
 pub mod route;

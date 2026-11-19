@@ -22,6 +22,7 @@
 use crate::bots::{after_claim, live_winning_tiles, rank_discards, Key as RankKey, Metric};
 use crate::ev::after_own_kong;
 use crate::giveup;
+use crate::pushfold;
 use crate::route::{helpers_of, Route, RouteTarget};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, for_each_route_target, Structure, SuitPlan};
@@ -424,12 +425,17 @@ pub struct Note {
 /// plan Task 11): `None` (the default) plays exactly as before; `Some(scale)`
 /// uses the measured figures with the push side's value times `scale`
 /// (`stage-fold` 1, `stage-fold-half` 0.5, `stage-fold-double` 2).
+///
+/// `pushfold` switches on the learned push-or-fold choice for a ready hand
+/// ([`crate::pushfold`], plan Task 12; bot `stage-fold-learned`): off by
+/// default. With both switches on, `giveup` decides.
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
     pub ready: i8,
     pub gate: u8,
     pub giveup: Option<f64>,
+    pub pushfold: bool,
 }
 
 impl Default for StageBot {
@@ -446,6 +452,7 @@ impl StageBot {
             ready,
             gate: 1,
             giveup: None,
+            pushfold: false,
         }
     }
 
@@ -457,6 +464,11 @@ impl StageBot {
     /// The same bot with the give-up rule (`Some(scale)`) or without (`None`).
     pub const fn with_giveup(self, giveup: Option<f64>) -> StageBot {
         StageBot { giveup, ..self }
+    }
+
+    /// The same bot with the learned push-or-fold choice on or off.
+    pub const fn with_pushfold(self, pushfold: bool) -> StageBot {
+        StageBot { pushfold, ..self }
     }
 
     /// Whether the gate lets a hand with an outside tile into stage 3 anyway:
@@ -748,8 +760,10 @@ impl StageBot {
         }
     }
 
-    /// The give-up rule ([`crate::giveup`]) on the discard `tile` picked in
-    /// `note`'s stage: the tile to throw instead, or `None` to keep `tile`.
+    /// The give-up rule ([`crate::giveup`], `scale` = `Some`) or the learned
+    /// push-or-fold choice ([`crate::pushfold`], `scale` = `None`) on the discard
+    /// `tile` picked in `note`'s stage: the tile to throw instead, or `None` to
+    /// keep `tile`. Both share Task 11's fold memory.
     fn give_up(
         &self,
         state: &State,
@@ -757,15 +771,23 @@ impl StageBot {
         candidates: &[Tile],
         tile: Tile,
         note: Note,
-        scale: f64,
+        scale: Option<f64>,
     ) -> Option<Tile> {
         let seat = view.seat;
         if note.stage == 3 {
-            let fig = giveup::MEASURED;
-            if let Some(v) = giveup::judge(state, view, candidates, tile, &fig, scale) {
-                if v.gave_up {
+            // (the tile to throw, whether the rule refused `tile`), when it applies.
+            let verdict = match scale {
+                Some(scale) => {
+                    let fig = giveup::MEASURED;
+                    giveup::judge(state, view, candidates, tile, &fig, scale)
+                        .map(|v| (v.tile, v.gave_up))
+                }
+                None => pushfold::judge(state, view, candidates, tile).map(|v| (v.tile, v.gave_up)),
+            };
+            if let Some((t, gave_up)) = verdict {
+                if gave_up {
                     giveup::remember(state, seat, true);
-                    return Some(v.tile);
+                    return Some(t);
                 }
                 if giveup::folded(state, seat) {
                     giveup::remember(state, seat, false);
@@ -805,8 +827,8 @@ impl StageBot {
             })
             .collect();
         let (tile, note) = self.pick_discard(&view, &candidates, rng);
-        if let Some(scale) = self.giveup {
-            if let Some(t) = self.give_up(state, &view, &candidates, tile, note, scale) {
+        if self.giveup.is_some() || self.pushfold {
+            if let Some(t) = self.give_up(state, &view, &candidates, tile, note, self.giveup) {
                 let note = Note {
                     gave_up: true,
                     ..note
@@ -1179,6 +1201,15 @@ mod tests {
         assert_eq!(fold("stage-fold"), (3, 1, 1, Some(1.0)));
         assert_eq!(fold("stage-fold-half"), (3, 1, 1, Some(0.5)));
         assert_eq!(fold("stage-fold-double"), (3, 1, 1, Some(2.0)));
+        // The learned choice (plan Task 12): on for `stage-fold-learned` only.
+        let learned = |name: &str| match crate::Bot::by_name(name) {
+            Some(crate::Bot::Stage(b)) => (b.giveup, b.pushfold),
+            _ => panic!("{name} is no three-stage bot"),
+        };
+        assert_eq!(learned("stage"), (None, false));
+        assert_eq!(learned("stage-fold"), (Some(1.0), false));
+        assert_eq!(learned("stage-fold-learned"), (None, true));
+        assert!(!StageBot::default().pushfold);
     }
 
     #[test]

@@ -618,6 +618,9 @@ impl Bot {
             "stage-fold" => Bot::Stage(StageBot::default().with_giveup(Some(1.0))),
             "stage-fold-half" => Bot::Stage(StageBot::default().with_giveup(Some(0.5))),
             "stage-fold-double" => Bot::Stage(StageBot::default().with_giveup(Some(2.0))),
+            // Plan Task 12: the push-or-fold choice learned from play-outs
+            // (`crate::pushfold`). A test bot, not the default.
+            "stage-fold-learned" => Bot::Stage(StageBot::default().with_pushfold(true)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
