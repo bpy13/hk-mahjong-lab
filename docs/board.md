@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 2: Task 12 (push-or-fold learned from play-outs), building labels and the bot, started 2026-11-19 15:30
 
 
 ## Results
