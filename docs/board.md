@@ -2,6 +2,7 @@
 
 ## Workers
 
+- slot 1: Task 16 (risk network on 300,000 deals), 2026-11-19 23:50: code pushed; jobs 265-274 queued (data cpu 265, fits gpu 266-269, checks cpu 270-273, summary cpu 274); waiting on the queue.
 
 ## Results
 - Task 14 (slot 1, 2026-11-19): ticked; learned push-or-fold choice with the exact danger input (`pushfold::Risk`: Task 13's exact figure where it is exactly 0 or 1, else the table; Task 15's network not used, its longer fit's check file did not exist at the start), bot `stage-fold-learned-exact` (off by default; Task 12's bot and weights untouched); labels on Task 12's deals with the exact layer (18,512 positions, 40 min direct): the exact figure touches `t` or `s` in 24 % of candidate decisions, always as exactly 0 (7.3 % of tiles in hand, truly dealing in 1.7 %), never as 1; model refitted: held-out fold set −1.13 ± 5 (check not met), oracle +0.88 a decision unchanged; matches 40,000 deals (run directly): −0.10 ± 0.22 vs three `stage`, +0.03 ± 0.17 paired, +2.64 ± 0.21 vs three `value` (plain `stage` +2.62); paired difference vs `stage-fold-learned` on the same deals and seats +0.001 ± 0.019: exact counting adds nothing to the learned choice, no gain over `stage`; section "With exact danger" in `docs/study-results/stage3-pushfold.md`; fmt, clippy, cargo test --workspace pass; no paid API calls.

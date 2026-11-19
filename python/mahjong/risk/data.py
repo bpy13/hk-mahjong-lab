@@ -10,6 +10,12 @@ existing sources say for every kind (``table_*``: Task 11's calibrated tables,
 ``exact_*``: Task 13's exact counting with the switch on, ``belief_*``: the belief
 model), per tile combined over the opponents and per opponent.
 
+Row layout 1 (Task 15) stores the six per-tile check columns as float32 and the
+``risk`` block one value per byte; layout 2 (Task 16, ``"layout": 2`` in ``meta.json``)
+stores them as float16 and packs two ``risk`` values per byte (value ``2i`` in the low
+half of byte ``i``, ``2i + 1`` in the high half): 3,613 bytes a row against 4,288. Both
+load; :func:`inputs` gives the same floats either way.
+
 Example::
 
     d = RiskData("runs/risk/data")
@@ -41,7 +47,10 @@ INPUT_LEN = STATE_LEN + HISTORY_LEN + RISK_LEN
 #: The plane of ``features`` holding the unseen copies / 4 (``features.rs``).
 UNSEEN_PLANE = 16
 
-#: The fields of one row, in order, as the Rust example writes them.
+#: Bytes of the packed ``risk`` block in layout 2.
+RISK_BYTES = (RISK_LEN + 1) // 2
+
+#: The fields of one row, in order, as the Rust example wrote them in layout 1.
 FIELDS: list[tuple[str, str, tuple[int, ...]]] = [
     ("deal", "<u4", ()),
     ("seat", "u1", ()),
@@ -70,6 +79,11 @@ FIELDS: list[tuple[str, str, tuple[int, ...]]] = [
     ("exact_points", "u1", (3, NUM_KINDS)),
 ]
 
+#: Layout 2: the same fields, the check columns as float16 and ``risk`` packed.
+FIELDS_V2: list[tuple[str, str, tuple[int, ...]]] = [
+    (n, "<f2" if d == "<f4" else d, (RISK_BYTES,) if n == "risk" else s) for n, d, s in FIELDS
+]
+
 Rows = np.ndarray[Any, np.dtype[Any]]
 
 
@@ -88,6 +102,9 @@ class RiskData:
             self.meta: dict[str, Any] = json.load(f)
         fields = [(str(n), str(d), tuple(int(x) for x in s)) for n, d, s in self.meta["fields"]]
         self.dtype = row_dtype(fields)
+        self.layout = int(self.meta.get("layout", 1))
+        if self.layout not in (1, 2):
+            raise ValueError(f"row layout {self.layout}: this reader knows 1 and 2")
         if self.dtype.itemsize != int(self.meta["row_bytes"]):
             raise ValueError(
                 f"row dtype has {self.dtype.itemsize} bytes, meta says {self.meta['row_bytes']}"
@@ -111,13 +128,27 @@ class RiskData:
         return np.concatenate([np.asarray(self.chunk(c)) for c in chunks])
 
 
+def risk_block(rows: Rows) -> npt.NDArray[np.float32]:
+    """The ``risk`` block as floats, ``(n, RISK_LEN)``, from either layout (told apart
+    by the stored width: one byte per value, or two values per byte)."""
+    raw = np.asarray(rows["risk"], dtype=np.uint8)
+    if raw.shape[1] == RISK_LEN:
+        return raw.astype(np.float32) / 4.0
+    if raw.shape[1] != RISK_BYTES:
+        raise ValueError(f"risk block of {raw.shape[1]} bytes: expected {RISK_LEN} or {RISK_BYTES}")
+    out = np.empty((raw.shape[0], 2 * RISK_BYTES), dtype=np.uint8)
+    out[:, 0::2] = raw & 15
+    out[:, 1::2] = raw >> 4
+    return out[:, :RISK_LEN].astype(np.float32) / 4.0
+
+
 def inputs(rows: Rows) -> npt.NDArray[np.float32]:
     """The network input, ``(n, INPUT_LEN)`` float32: features, history, risk block."""
     n = len(rows)
     x = np.empty((n, INPUT_LEN), dtype=np.float32)
     x[:, :STATE_LEN] = rows["features"].astype(np.float32)
     x[:, STATE_LEN : STATE_LEN + HISTORY_LEN] = unpack_history(np.asarray(rows["history"]))
-    x[:, STATE_LEN + HISTORY_LEN :] = rows["risk"].astype(np.float32) / 4.0
+    x[:, STATE_LEN + HISTORY_LEN :] = risk_block(rows)
     return x
 
 

@@ -11,6 +11,12 @@ the held-out chunks) goes to ``train.log`` (one JSON line per epoch), the weight
 ``ckpt.pt``; the best held-out epoch is kept as ``best.pt`` and exported next to it as
 ``risk.mjnn`` (and copied to ``--models/risk.mjnn`` when given). ``--resume`` continues
 from ``ckpt.pt``.
+
+Task 16: ``--train-chunks 0-289`` fits on a range of chunks (default: every chunk not held
+out), ``--select win`` picks and keeps the best epoch by the held-out ``win`` loss alone
+(default ``total``: ``win`` + 0.25 × ``pay``), and ``--patience N`` stops once ``N``
+epochs in a row have not improved on the best (0: never; the cosine schedule still
+spans ``--epochs``).
 """
 
 from __future__ import annotations
@@ -73,6 +79,12 @@ def train(args: argparse.Namespace) -> Path:
     data = RiskData(args.data)
     holdout = [int(c) for c in args.holdout_chunks]
     train_chunks = [c for c in data.chunks if c not in holdout]
+    if args.train_chunks:
+        lo, hi = (int(v) for v in args.train_chunks.split("-"))
+        wanted = set(range(lo, hi + 1))
+        train_chunks = [c for c in train_chunks if c in wanted]
+        if len(train_chunks) != len(wanted):
+            raise SystemExit(f"--train-chunks {args.train_chunks}: not every chunk is present")
     if not train_chunks or not holdout:
         raise SystemExit(f"chunks {data.chunks}: need training and held-out chunks")
     out = Path(args.out)
@@ -93,6 +105,7 @@ def train(args: argparse.Namespace) -> Path:
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(total_steps, 1))
     start_epoch = 0
     best = float("inf")
+    since_best = 0
     ckpt = out / "ckpt.pt"
     if args.resume and ckpt.exists():
         state = torch.load(ckpt, map_location="cpu", weights_only=False)
@@ -101,6 +114,10 @@ def train(args: argparse.Namespace) -> Path:
         sched.load_state_dict(state["sched"])
         start_epoch = int(state["epoch"]) + 1
         best = float(state["best"])
+        since_best = int(state.get("since_best", 0))
+        if state.get("stopped"):
+            log({"event": "resumed", "note": "the fit had already stopped; nothing to do"})
+            return out / "risk.mjnn"
     log(
         {
             "event": "start",
@@ -113,6 +130,10 @@ def train(args: argparse.Namespace) -> Path:
             "lr": args.lr,
             "epochs": args.epochs,
             "threads": args.threads,
+            "train_rows": sum(data.rows_in(c) for c in train_chunks),
+            "select": args.select,
+            "patience": args.patience,
+            "resumed_at": start_epoch,
         }
     )
     t_start = time.time()
@@ -156,11 +177,19 @@ def train(args: argparse.Namespace) -> Path:
             "minutes": (time.time() - t_start) / 60.0,
             "lr": sched.get_last_lr()[0],
         }
-        if ev["total"] < best:
-            best = ev["total"]
+        if ev[args.select] < best:
+            best = ev[args.select]
+            since_best = 0
             net.save(out / "best.pt")
             net.export(out / "risk.mjnn")
             entry["best"] = True
+        else:
+            since_best += 1
+        reason = None
+        if stop:
+            reason = f"time limit {args.minutes} min"
+        elif args.patience and since_best >= args.patience:
+            reason = f"held-out {args.select} loss not improved in {args.patience} epochs"
         torch.save(
             {
                 "net": net.state_dict(),
@@ -168,19 +197,28 @@ def train(args: argparse.Namespace) -> Path:
                 "sched": sched.state_dict(),
                 "epoch": epoch,
                 "best": best,
+                "since_best": since_best,
+                "stopped": reason is not None or epoch + 1 == args.epochs,
             },
             ckpt,
         )
         log(entry)
-        if stop:
-            log({"event": "stopped", "reason": f"time limit {args.minutes} min"})
+        if reason:
+            log({"event": "stopped", "reason": reason})
             break
     if args.models:
         models = Path(args.models)
         models.mkdir(parents=True, exist_ok=True)
         shutil.copy(out / "risk.mjnn", models / "risk.mjnn")
         shutil.copy(out / "best.pt", models / "risk.pt")
-    log({"event": "done", "best_holdout_total": best, "mjnn": str(out / "risk.mjnn")})
+    log(
+        {
+            "event": "done",
+            f"best_holdout_{args.select}": best,
+            "minutes": (time.time() - t_start) / 60.0,
+            "mjnn": str(out / "risk.mjnn"),
+        }
+    )
     return out / "risk.mjnn"
 
 
@@ -203,6 +241,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--device", default="cpu")
     p.add_argument("--seed", type=int, default=15)
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--train-chunks", default=None, help="a range 'lo-hi' of chunks to fit on")
+    p.add_argument("--select", choices=["total", "win"], default="total")
+    p.add_argument("--patience", type=int, default=0)
     return p.parse_args(argv)
 
 

@@ -3,6 +3,7 @@ Rust, and the check tables."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -148,3 +149,122 @@ def test_check_tables_score_a_perfect_and_a_flat_source() -> None:
     assert check.bin_name(0) == "0–0.5 %" and check.bin_name(9) == "25 % +"
     c = check.combine(np.array([[[0.5, 0.0], [0.5, 0.0], [0.0, 0.0]]]))
     assert np.allclose(c, [[0.75, 0.0]])
+
+
+def _synthetic_rows(n: int, seed: int, layout: int) -> np.ndarray:
+    """Rows with the content of a logged decision, in layout 1 or 2 (Task 16)."""
+    from mahjong.risk.data import FIELDS_V2, N_OPP, NUM_KINDS, RISK_BYTES, UNSEEN_PLANE
+
+    rng = np.random.default_rng(seed)
+    rows = np.zeros(n, dtype=row_dtype(FIELDS if layout == 1 else FIELDS_V2))
+    rows["deal"] = np.arange(n) // 30
+    rows["seat"] = np.arange(n) % 4
+    rows["wall"] = rng.integers(0, 90, n)
+    rows["thrown"] = rng.integers(0, NUM_KINDS, n)
+    rows["concealed"] = rng.choice([1, 4, 7, 10, 13], size=(n, N_OPP))
+    rows["shares"] = 1
+    rows["hand"] = (rng.random((n, NUM_KINDS)) < 0.3).astype(np.uint8)
+    feats = (rng.random((n, STATE_LEN)) < 0.2).astype(np.float16) * 0.25
+    feats[:, UNSEEN_PLANE * NUM_KINDS : (UNSEEN_PLANE + 1) * NUM_KINDS] = (
+        rng.integers(0, 5, (n, NUM_KINDS)) / 4.0
+    )
+    rows["features"] = feats
+    hist = rng.integers(0, 137, (n, 100)).astype(np.uint8)
+    hist[:, 96:] = rng.integers(0, 3, (n, 4))
+    rows["history"] = hist
+    risk = rng.integers(0, 5, (n, RISK_LEN)).astype(np.uint8)
+    if layout == 1:
+        rows["risk"] = risk
+    else:
+        padded = np.concatenate([risk, np.zeros((n, 2 * RISK_BYTES - RISK_LEN), np.uint8)], axis=1)
+        rows["risk"] = padded[:, 0::2] | (padded[:, 1::2] << 4)
+    win = (rng.random((n, N_OPP, NUM_KINDS)) < 0.02).astype(np.uint8)
+    rows["win"] = win
+    rows["points"] = win * 16
+    for f in ["table_tile", "exact_tile", "belief_tile"]:
+        rows[f] = rng.random((n, NUM_KINDS)) * 0.3
+    for f in ["table_loss", "exact_loss", "belief_loss"]:
+        rows[f] = rng.random((n, NUM_KINDS)) * 2
+    for f in ["table_p", "belief_p", "exact_p"]:
+        rows[f] = rng.random((n, N_OPP, NUM_KINDS)) * 0.2
+    rows["is_exact"] = 0
+    return rows
+
+
+def _write_data(path: Path, layout: int, chunks: list[np.ndarray], chunk_deals: int) -> None:
+    from mahjong.risk.data import FIELDS_V2
+
+    fields = FIELDS if layout == 1 else FIELDS_V2
+    path.mkdir(parents=True)
+    for i, rows in enumerate(chunks):
+        rows.tofile(path / f"chunk-{i:03d}.bin")
+    meta = {
+        "layout": layout,
+        "row_bytes": row_dtype(fields).itemsize,
+        "deals": chunk_deals * len(chunks),
+        "chunk_deals": chunk_deals,
+        "seed": 1,
+        "belief": None,
+        "bots": "stage",
+        "fields": [[n, d, list(s)] for n, d, s in fields],
+        "chunks": [{"chunk": i, "rows": len(r)} for i, r in enumerate(chunks)],
+    }
+    (path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_layout_2_rows_read_like_layout_1(tmp_path) -> None:
+    """Task 16's smaller rows (float16 check columns, two risk values a byte, 3,613 bytes)
+    give the same network input as Task 15's; both layouts load."""
+    from mahjong.risk.data import FIELDS_V2, inputs, risk_block
+
+    assert row_dtype(FIELDS_V2).itemsize == 3613 and row_dtype(FIELDS).itemsize == 4288
+    a = _synthetic_rows(120, 7, 1)
+    b = _synthetic_rows(120, 7, 2)
+    _write_data(tmp_path / "v1", 1, [a], 4)
+    _write_data(tmp_path / "v2", 2, [b], 4)
+    d1, d2 = RiskData(tmp_path / "v1"), RiskData(tmp_path / "v2")
+    assert (d1.layout, d2.layout) == (1, 2)
+    r1, r2 = d1.chunk(0), d2.chunk(0)
+    assert np.array_equal(inputs(r1), inputs(r2))
+    assert np.array_equal(risk_block(r1), risk_block(r2))
+    assert set(np.unique(risk_block(r2))) <= {0.0, 0.25, 0.5, 0.75, 1.0}
+    assert (
+        np.abs(r1["table_tile"].astype(np.float64) - r2["table_tile"].astype(np.float64)).max()
+        < 2e-4
+    )
+    assert np.array_equal(r1["win"], r2["win"])
+
+
+def test_fit_stops_on_held_out_loss_and_summary_tables_every_source(tmp_path) -> None:
+    """``--patience`` ends the fit once the held-out ``win`` loss stops improving, the fit
+    resumes as finished, and the summary scores every source on the same rows."""
+    from mahjong.risk import fit, summary
+
+    chunks = [_synthetic_rows(240, s, 2) for s in (1, 2, 3)]
+    data = tmp_path / "data"
+    _write_data(data, 2, chunks, 8)
+    out = tmp_path / "fit"
+    args = [
+        "--data", str(data), "--out", str(out), "--holdout-chunks", "2", "--train-chunks", "0-1",
+        "--holdout-rows", "200", "--epochs", "40", "--patience", "1", "--select", "win",
+        "--hidden", "16", "8", "--device", "cpu", "--threads", "2", "--batch", "64",
+    ]  # fmt: skip
+    fit.train(fit.parse_args(args))
+    log = [line for line in (out / "train.log").read_text(encoding="utf-8").splitlines() if line]
+    events = [json.loads(line)["event"] for line in log]
+    assert events[0] == "start" and "stopped" in events and events[-1] == "done"
+    assert (
+        events.count("epoch") < 40 and (out / "best.pt").exists() and (out / "risk.mjnn").exists()
+    )
+    fit.train(fit.parse_args([*args, "--resume"]))
+    assert "resumed" in (out / "train.log").read_text(encoding="utf-8")
+    text = summary.run(
+        summary.parse_args(
+            ["--data", str(data), "--chunks", "2", "--model", f"net={out}", "--threads", "2"]
+        )
+    )
+    for src in ["| table |", "| exact |", "| belief |"]:
+        assert text.count(src) == 2, src  # populations `all` and `hand`
+    assert text.count("| net |") == 3  # and the fits table
+    assert "#### The fits" in text and "| net | [16, 8] |" in text
+    assert "held-out win loss not improved" in text

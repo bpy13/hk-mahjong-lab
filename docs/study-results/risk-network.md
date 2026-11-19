@@ -339,3 +339,57 @@ the permission check (a write outside this checkout); the file is `models/risk.m
 gpu job 252): the one-thread p99 of 41 ms is load, the p50 of 5.3 ms is the network's own cost.
 
 No paid API calls.
+
+## 300,000 deals (plan Task 16)
+
+Brian, 2026-11-19, on the suggestion to train on far more deals: "first go ahead with the 300k
+deals to see if it's effective". Task 15's network scored 0.04839 on held-out log loss after its
+longer fit (job 262, 30 epochs at learning rate 5e-4; population `all`; 0.04946 after the
+first fit above), behind the table (0.04594), the exact figure (0.04620) and the belief
+model (0.04404), with 4.16 M parameters for 1.86 M decisions and a held-out loss still falling:
+the question is whether ten times the data moves it toward or past the belief model.
+
+### What was built
+
+* `risk_log` writes row layout 2 (`"layout": 2` in `meta.json`): the six per-tile check
+  columns as float16 and the `risk` block packed two values to a byte, 3,613 bytes a row
+  against 4,288 (16 % smaller; about 67 GB for 300,000 deals instead of 80). The `features`
+  block stays float16: two of its planes (the heuristic danger, the acceptance counts) are not
+  on a coarse grid, so bytes would have changed the input the network sees. Checked on seed
+  15's first 10 deals against Task 15's data: inputs, labels and the per-opponent figures are
+  identical, the check columns within float16 rounding (largest relative difference 0.05 %).
+  `python/mahjong/risk/data.py` reads both layouts (Task 15's 7.4 GB still load).
+* `fit.py`: `--train-chunks lo-hi` (the data size), `--select win` (the best epoch by the
+  held-out `win` loss alone, not `win + 0.25 × pay`: the `pay` head's noise picked epoch 8 of
+  30 in job 262 while `win` kept falling to epoch 12), `--patience N` (stop after N epochs
+  without a gain; the cosine schedule still spans `--epochs`); a resumed fit that had already
+  stopped does nothing (the queue restarts a job under its old id after a Windows restart).
+* `python -m mahjong.risk.summary`: the one table over several fits, streaming chunk by chunk
+  (the memory is one chunk's), with Task 15's ten-bin verdict, log loss, Brier, the above-50 %
+  and below-1 % calls, and a second table with each fit's size, epochs and minutes.
+* `experiments/stage/risk300k.ps1`: the steps as queue jobs (data, fit, big, check, summary).
+
+### Data
+
+cpu job 265: `risk_log --deals 300000 --chunk 1000 --seed 16 --belief models/belief.mjnn`
+(8 threads), 300 chunks of 1,000 whole deals under `runs/risk/data-300k` of the workers
+clone (not in git); chunks 290 to 299 (10,000 deals) are held out and never seen in fitting.
+C: had 1,150 GB free at the start. Rate at the start: about 9 s a chunk (about 62,000
+decisions). Wall time, rows and size: see below (written when the jobs end).
+
+### Fits
+
+Task 15's network and input unchanged (4,927 → 768 → 384 → 204; `features` + `history` +
+`risk`), the same recipe three times on the gpu: Adam, learning rate 5e-4 with cosine decay over
+12 epochs, batch 1,024, chunks in a fresh random order each epoch, the best epoch kept by the
+held-out `win` loss (200,000 held-out rows, about 3,200 deals, for the per-epoch figure), stop
+after 3 epochs without a gain. Gpu jobs 266 (chunks 0–29, 30,000 deals), 267 (0–99, 100,000),
+268 (0–289, 290,000); job 269 fits a larger network (4,927 → 1,536 → 768 → 204, about 8.9 M
+parameters) on all 290,000 only if the three took under 180 gpu minutes together. Cpu jobs
+270 to 273 run Task 15's checks (a) to (d) per fit on the 10,000 held-out deals (`check.md` in
+each fit folder), cpu job 274 the table below (`runs/risk/300k/summary.md`).
+
+### Results
+
+(Pending: jobs 265–274. The next run pastes `runs/risk/300k/summary.md` here, with the wall
+time and disk space of each step, and the verdict line.)

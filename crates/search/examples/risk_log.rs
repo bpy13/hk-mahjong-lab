@@ -20,6 +20,11 @@
 //! them). Rerunning resumes after the last complete chunk. Threads:
 //! `RAYON_NUM_THREADS`.
 //!
+//! Row layout 2 (Task 16; `"layout": 2` in `meta.json`): the six per-tile
+//! check columns are float16 and the `risk` block is packed two values to a
+//! byte (value `2i` in the low half of byte `i`, `2i + 1` in the high half),
+//! 3,613 bytes a row against layout 1's 4,288. The Python reader loads both.
+//!
 //! `--time`: on the discard decisions of `deals` deals (default 200), one
 //! thread, the time per decision of the network alone, of
 //! `Danger::from_belief` with the network set, and of the same without it
@@ -43,6 +48,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Row layout version written (`meta.json` `layout`).
+const LAYOUT: u32 = 2;
+
+/// Bytes of the packed `risk` block: two values (0 to 4) per byte.
+const RISK_BYTES: usize = RISK_LEN.div_ceil(2);
+
 /// The fields of one row, in order: name, numpy dtype, shape.
 const FIELDS: &[(&str, &str, &[usize])] = &[
     ("deal", "<u4", &[]),
@@ -57,15 +68,15 @@ const FIELDS: &[(&str, &str, &[usize])] = &[
     ("hand", "u1", &[NUM_KINDS]),
     ("features", "<f2", &[STATE_LEN]),
     ("history", "u1", &[HISTORY_BYTES]),
-    ("risk", "u1", &[RISK_LEN]),
+    ("risk", "u1", &[RISK_BYTES]),
     ("win", "u1", &[3, NUM_KINDS]),
     ("points", "u1", &[3, NUM_KINDS]),
-    ("table_tile", "<f4", &[NUM_KINDS]),
-    ("exact_tile", "<f4", &[NUM_KINDS]),
-    ("belief_tile", "<f4", &[NUM_KINDS]),
-    ("table_loss", "<f4", &[NUM_KINDS]),
-    ("exact_loss", "<f4", &[NUM_KINDS]),
-    ("belief_loss", "<f4", &[NUM_KINDS]),
+    ("table_tile", "<f2", &[NUM_KINDS]),
+    ("exact_tile", "<f2", &[NUM_KINDS]),
+    ("belief_tile", "<f2", &[NUM_KINDS]),
+    ("table_loss", "<f2", &[NUM_KINDS]),
+    ("exact_loss", "<f2", &[NUM_KINDS]),
+    ("belief_loss", "<f2", &[NUM_KINDS]),
     ("table_p", "<f2", &[3, NUM_KINDS]),
     ("belief_p", "<f2", &[3, NUM_KINDS]),
     ("exact_p", "<f2", &[3, NUM_KINDS]),
@@ -133,9 +144,17 @@ impl Writer<'_> {
             self.buf.extend_from_slice(&f16(x));
         }
     }
-    fn f32s(&mut self, xs: &[f64]) {
+    fn f16s_of(&mut self, xs: &[f64]) {
         for &x in xs {
-            self.buf.extend_from_slice(&(x as f32).to_le_bytes());
+            self.buf.extend_from_slice(&f16(x as f32));
+        }
+    }
+    /// Two values (0 to 4) per byte: `xs[2i]` low, `xs[2i + 1]` high.
+    fn nibbles(&mut self, xs: &[u8]) {
+        for pair in xs.chunks(2) {
+            debug_assert!(pair.iter().all(|&v| v < 16));
+            self.buf
+                .push(pair[0] | (pair.get(1).copied().unwrap_or(0) << 4));
         }
     }
 }
@@ -211,7 +230,7 @@ fn log_deal(deal: u32, deal_seed: u64, belief: Option<&BeliefModel>, out: &mut V
         encode_history(&state, &mut history);
         debug_assert!(history.iter().all(|v| v.is_finite()));
         encode_risk(&state, &mut risk);
-        w.u8s(
+        w.nibbles(
             &risk
                 .iter()
                 .map(|&v| (v * 4.0).round() as u8)
@@ -245,12 +264,12 @@ fn log_deal(deal: u32, deal_seed: u64, belief: Option<&BeliefModel>, out: &mut V
                 None => (f64::NAN, f64::NAN),
             })
             .collect();
-        w.f32s(&table.iter().map(|x| x.0).collect::<Vec<_>>());
-        w.f32s(&exact_fig.iter().map(|x| x.0).collect::<Vec<_>>());
-        w.f32s(&bel.iter().map(|x| x.0).collect::<Vec<_>>());
-        w.f32s(&table.iter().map(|x| x.1).collect::<Vec<_>>());
-        w.f32s(&exact_fig.iter().map(|x| x.1).collect::<Vec<_>>());
-        w.f32s(&bel.iter().map(|x| x.1).collect::<Vec<_>>());
+        w.f16s_of(&table.iter().map(|x| x.0).collect::<Vec<_>>());
+        w.f16s_of(&exact_fig.iter().map(|x| x.0).collect::<Vec<_>>());
+        w.f16s_of(&bel.iter().map(|x| x.0).collect::<Vec<_>>());
+        w.f16s_of(&table.iter().map(|x| x.1).collect::<Vec<_>>());
+        w.f16s_of(&exact_fig.iter().map(|x| x.1).collect::<Vec<_>>());
+        w.f16s_of(&bel.iter().map(|x| x.1).collect::<Vec<_>>());
         let per_opp = |b: &mahjong_search::Beliefs, r: usize| -> Vec<f32> {
             let s = &b.seats[opp(r)];
             kinds
@@ -313,7 +332,7 @@ fn write_meta(a: &Args, chunks: &[(u32, usize)]) {
         .map(|(c, rows)| format!("{{\"chunk\": {c}, \"rows\": {rows}}}"))
         .collect();
     let meta = format!(
-        "{{\n  \"layout\": 1,\n  \"row_bytes\": {},\n  \"deals\": {},\n  \"chunk_deals\": {},\n  \"seed\": {},\n  \"belief\": {},\n  \"bots\": \"stage\",\n  \"fields\": [\n    {}\n  ],\n  \"chunks\": [\n    {}\n  ]\n}}\n",
+        "{{\n  \"layout\": {LAYOUT},\n  \"row_bytes\": {},\n  \"deals\": {},\n  \"chunk_deals\": {},\n  \"seed\": {},\n  \"belief\": {},\n  \"bots\": \"stage\",\n  \"fields\": [\n    {}\n  ],\n  \"chunks\": [\n    {}\n  ]\n}}\n",
         row_bytes(),
         a.deals,
         a.chunk,
