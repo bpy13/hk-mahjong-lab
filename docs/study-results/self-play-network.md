@@ -129,7 +129,7 @@ newest results with the best result *before* them, which is hour 2's; `best.pt` 
 40,000 deals: its range holds zero, so it is level with `stage`, not above it. The run's 1.29 M
 hands brought no measurable gain over the imitation start (-0.11 ± 0.71).
 
-## Low-noise run (Task 10, gpu job 189, started 2026-11-17 14:08)
+## Low-noise run (Task 10, gpu job 252, 2026-11-19 14:44 to 18:48)
 Why: the analysis `2026-11-17-self-play-analysis.md` (faults M1, M2; experiment 4) found the
 10-hour run held at its start by the fading pull, its stall rule blind to any realistic gain, and
 its training score (learner minus the frozen start on the same tiles) flat at about -0.7.
@@ -143,5 +143,24 @@ Each hour's row: the mean paired difference over that hour's learner hands (raw 
 95 % range = 1.96 standard errors), the mean entropy and the distance from the start (mean
 `KL(start || network)` per decision), from `runs/rl-lownoise/hourly.txt`.
 
-Hourly table and meaning: pending job 189. The end network's 40,000-deal match against three
-strict `stage` bots (beside Task 7's -0.09 ± 0.22): pending cpu job 191.
+(Job 189, started 2026-11-17, was cancelled 28 minutes in on Brian's word; its folder is
+`runs/rl-lownoise-job189`. Job 252 is a fresh run with the same settings, exit 0, 4.02 h,
+161 updates, 659,682 hands.)
+
+| Hour | Hands | Learner minus frozen start, points a hand | 95 % range | Entropy | Distance from start |
+|---|---|---|---|---|---|
+| 1 | 176,198 | -0.86 | ± 0.25 | 0.213 | 0.101 |
+| 2 | 167,986 | -0.51 | ± 0.26 | 0.208 | 0.097 |
+| 3 | 151,600 | +0.04 | ± 0.28 | 0.207 | 0.096 |
+| 4 | 163,898 | +0.01 | ± 0.26 | 0.198 | 0.089 |
+
+Meaning: the paired difference rose from -0.86 in hour 1 to level with the start (+0.04, +0.01)
+in hours 3 and 4, past the -0.3 mark, with ranges that do not overlap hour 1's: once the noise is
+cut, the training signal is there, and the learner climbed back to the start's level in 4 hours.
+It did not go above the start. The hourly results of 2,000 deals against three `stage` bots
+(-0.58, -1.11, -0.92, -1.21 per hand at hours 1 to 4, each ± 2.0; win 22.6-23.4 %, deal-in
+18.4-19.2 %) are too noisy to show either change.
+
+End network (`runs/rl-lownoise/final.mjnn`, hour 4) against three strict `stage` bots over
+40,000 deals, beside Task 7's -0.09 ± 0.22: pending cpu job 253 `rl-lownoise-final` (queued
+behind another project's cpu job 199; writes `runs/rl-lownoise/final/vs-stage-40000.txt`).
