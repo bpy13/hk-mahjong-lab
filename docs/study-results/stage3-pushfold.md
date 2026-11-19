@@ -228,3 +228,106 @@ pair replays); a position where every play-out ends the same (empty wall, nobody
 tile) gives label 0 with standard error 0; `predict` matches the fit script's held-out rows;
 `judge` applies only to a ready push. `stage.rs`: every existing stage test unchanged (the
 switch is off); the bot names carry the switch (`stage`: off, `stage-fold-learned`: on).
+
+## With exact danger (Task 14, 2026-11-19)
+Brian, 2026-11-19, on testing Task 13's exact counting on Task 11's rule: "but we're redoing
+version B, so it doesn't make sense to build the new test on top of version B". So the exact
+figure is tested here, on the learned choice: Task 12's labels, model and bot again, with the
+danger and loss inputs of `t` and `s` from three layers together. **The risk input is Task 13's
+exact figure where it is exactly 0 or 1, else the table** (`pushfold::Risk`): Task 15's risk
+network was not better than the table on held-out deals (`risk-network.md`, verdict no on both
+points), and its longer fit (gpu job 262, check in cpu job 263, `runs/risk/fit-gpu/check.md` in
+checkout `hk-mahjong-lab-3`) had not written its check file when this task started (job 263 was
+still queued), so the network is not used, as the orchestrator's note says. Where an exactly
+counted opponent (1 or 4 concealed tiles) gives 1 for a tile, the danger is 1 and the loss its
+exact points; where every exactly counted opponent gives 0, their part is 0 and the table
+opponents' part stays (Task 11's calibration on it); everywhere else the table's figures, as
+Task 12 used them. Where two exactly counted opponents give 0 and a fraction, the tile reads the
+table (the figure is checked per tile, not per opponent). The safest tile `s` is chosen with
+the same figures, and so is the tile a folded hand throws; the model has Task 12's 31 inputs
+and shape, refitted on labels made with these figures (`pushfold_exact_tables.rs`). Bot
+`stage-fold-learned-exact` (`StageBot::exact`, off by default; `stage` and
+`stage-fold-learned` play exactly as before: Task 12's weights are untouched and the parity
+test covers both files).
+
+Code: `pushfold.rs` (`Risk`, `Source`, `fold_tile`, `Weights`, `TABLE_MODEL`, `EXACT_MODEL`,
+`predict_with`), `pushfold_exact_tables.rs`, `stage.rs` (the `exact` switch), `bots.rs` (the
+name), `examples/pushfold.rs` (`label-exact`, `diff`), `fit_pushfold.py` (the exact section,
+`--tables`). Outputs `runs\stage\t14-*.csv|txt|md` in the worker checkout
+`hk-mahjong-lab-workers`; everything ran directly (the labelling 9 + 31 min on 12 threads,
+the matches side by side, each under 2 hours).
+
+### The labels again, with the exact figure
+`pushfold label-exact 4500 24 1` and `pushfold label-exact 16000 24 2`: the same deals as
+Task 12 (4,092 + 14,420 = 18,512 rows against 18,527; a deal's candidate set can change).
+Mean label +18.75 ± 0.50 (Task 12: +18.78 ± 0.50); fold better in 16.4 %, clearly in 6.3 %.
+Candidate decisions in the labelled deals: 51,814 with the exact layer, 51,909 with the table
+alone; the table alone would have seen no decision in 0.3 % of the labelled positions.
+
+**How often the exact figure applies at these decisions.** Of the 100,149 tiles in hand at the
+labelled decisions, 7.3 % read exactly 0 (they truly deal in 1.68 % of the time: the "0" is
+against the exactly counted opponent only, the table part stays; the table alone said 1.79 %
+for them), and **none reads exactly 1**: the three-stage bot never chose a tile an opponent
+with one concealed tile was certain to win on (Task 13 found 4 such discards in 40,000 deals
+of four `stage`, at any stage). The exact figure touched `t` or `s` in 24.3 % of the labelled
+decisions (weighted by the deal's candidates; 21.1 % unweighted): `t` exact 0 in 1,075
+positions (5.8 %), `s` exact 0 in 3,823 (20.6 %); the safest tile `s` changed in 1.5 %.
+
+| group | positions | mean label (push − fold) | 95 % range | fold better | fold clearly better | `t` truly deals in | `s` truly deals in |
+|---|---|---|---|---|---|---|---|
+| `t` exact 1 (certain deal-in) | 0 | – | – | – | – | – | – |
+| `t` exact 0 | 1,075 | +16.74 | ±1.77 | 13.7 % | 3.3 % | 2.0 % | 2.9 % |
+| `t` from the table | 17,437 | +18.90 | ±0.51 | 16.6 % | 6.5 % | 5.9 % | 1.6 % |
+| `s` exact 0 | 3,823 | +15.99 | ±1.07 | 20.5 % | 9.3 % | 9.0 % | 1.5 % |
+| `s` from the table | 14,689 | +19.61 | ±0.56 | 15.1 % | 5.3 % | 4.6 % | 1.7 % |
+| `s` differs from the table's | 281 | +17.43 | ±3.38 | 16.0 % | 4.3 % | 4.7 % | 0.7 % |
+| no exact figure on `t` or `s` | 14,606 | +19.67 | ±0.56 | 15.1 % | 5.3 % | 4.6 % | 1.6 % |
+
+The risk input against the truth (ten bins, `t14-step2.md`) is the table's picture: the safest
+bin still 2.3× too low (0.40 % observed against 0.18 % predicted), the rest 0.90–1.13. The
+exact 0 moves 7.3 % of tiles a little down the scale (961 more tiles in the safest bin) and
+nothing else: at these decisions the exact layer never says "certain", only "not this one".
+
+### The model again
+Same fit (`fit_pushfold.py --tables crates/search/src/pushfold_exact_tables.rs`), training
+rows 14,806, held-out 3,706:
+
+| model | held-out MSE | says fold | mean label where it folds | 95 % range | gain per decision |
+|---|---|---|---|---|---|
+| ridge linear | 542.8 | 2.4 % | -0.40 | ±4.46 | +0.010 |
+| network 32×32 + linear skip (chosen) | 529.1 | 2.0 % | -1.13 | ±4.90 | +0.023 |
+| network + true deal-in of `t` and `s` (oracle) | 459.4 | 5.5 % | -15.97 | ±2.46 | +0.876 |
+| always push (`stage`) | 1076.5 | 0.0 % | – | – | -0.000 |
+| Task 12's network, for comparison | 534.0 | 1.2 % | -0.61 | ±5.19 | +0.008 |
+
+The held-out check (fold set below 0, 95 % range clear of it) is **not met**, as in Task 12:
+−1.13 ± 4.90. The gap to the oracle (+0.876 a decision) is unchanged, because the oracle's
+knowledge is which tile truly deals in, and the exact layer only ever removes a tile's danger
+against one short-handed opponent here; it never marks the dealing-in tile.
+
+### Matches
+40,000 deals, seed 1, run directly side by side (`compare` 4 threads each, 62 and 82 min;
+`pushfold diff` 8 threads, 83 min; `t14-compare-vs-stage.txt`, `t14-compare-vs-value.txt`, `t14-diff-vs-stage.txt`).
+`compare` plays each deal four times with the seats rotated (± over hands); `pushfold diff`
+plays each deal four times with each bot in every seat against three `stage`, the deal's four
+seatings one sample, and takes the paired difference deal by deal.
+
+| bot | against | tool | points per hand | win | deal-in | points paid per deal-in | ready hands that gave up | stage 3 deal-ins per 100 hands |
+|---|---|---|---|---|---|---|---|---|
+| `stage-fold-learned-exact` | three `stage` | `compare` | **−0.10 ± 0.22** (the `stage` seats +0.06, −0.06, +0.11) | 23.6 % | 18.2 % | – | – | – |
+| `stage-fold-learned-exact` | three `stage` | `pushfold diff` | **+0.03 ± 0.17** | 23.7 % | 17.6 % | 27.2 | 2.9 % | 7.62 |
+| `stage-fold-learned` (same deals and seats) | three `stage` | `pushfold diff` | +0.03 ± 0.17 | 23.8 % | 17.7 % | 27.2 | 2.1 % | 7.69 |
+| **paired difference `exact` − `learned`** | three `stage` | `pushfold diff` | **+0.001 ± 0.019** (95 % range over 40,000 deals) | | | | | |
+| `stage-fold-learned-exact` | three `value` | `compare` | **+2.64 ± 0.21** (`value` −0.81, −0.79, −1.04) | 24.9 % | 18.0 % | – | – | – |
+| `stage-fold-learned` (Task 12) | three `stage` | `compare` / `pushfold match` | −0.06 ± 0.22 / +0.03 ± 0.17 | 23.7 % / 23.8 % | 18.3 % / 17.7 % | 27.2 | 2.1 % | 7.69 |
+| `stage-fold-learned` (Task 12) | three `value` | `compare` | +2.64 ± 0.21 | 24.9 % | 18.2 % | – | – | – |
+| plain `stage` (Task 9, same deals) | three `value` | `compare` | +2.62 ± 0.21 | 25.1 % | 18.5 % | 22.2 | 0 | 8.0 |
+| Task 11's `stage-fold` | three `stage` | `giveup_log match` | −0.63 ± 0.17 | 21.9 % | 17.0 % | 27.0 | 17.2 % | 7.04 |
+| Task 11's `stage-fold` | three `value` | `giveup_log match` | +1.64 ± 0.19 | 23.0 % | 17.1 % | 22.5 | 16.8 % | 7.23 |
+
+The exact bot gives up in 2.9 % of its ready hands against 2.1 % for Task 12's bot (the model
+folds a little more often: 2.0 % of held-out positions against 1.2 %), and the two bots score
+the same points on the same deals to within 0.02 a hand.
+
+**Does exact counting add points per hand to the learned choice (95 % range clear of 0)?**
+**No.** The paired difference on the same 40,000 deals and seats is +0.001 ± 0.019 points a hand: exact counting changes the learned choice's result by nothing measurable, and both bots are level with plain `stage` (−0.10 ± 0.22 by `compare`, +0.03 ± 0.17 by the paired match; Task 12: −0.06 ± 0.22 and +0.03 ± 0.17). **Does the result gain over plain `stage`?** **No: level, as Task 12's bot.** −0.10 ± 0.22 against three `stage`, +2.64 ± 0.21 against three `value` where plain `stage` scores +2.62 ± 0.21. The reason is in the labels: at the decisions where the bot could fold, the exact figure reads 0 for 7.3 % of the tiles in hand and 1 for none, so it only ever tells the seat that a tile is safe against one short-handed opponent (and those tiles were already read as about 1.8 % dangerous by the table); it never names the tile that truly deals in, which is the whole gain the oracle shows (+0.88 a decision, about +0.55 a hand). A read of which opponent waits on which tile at 7 to 13 concealed tiles is what the choice still lacks. Nothing becomes the default: Brian decides after the numbers.
