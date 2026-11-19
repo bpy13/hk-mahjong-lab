@@ -17,6 +17,8 @@
 //! * [`pushfold`]: the ready hand's push-or-fold choice learned from play-outs (plan Task 12).
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
 //!   chances.
+//! * [`risk_net`]: the risk network in place of the danger tables (plan 2026-11-16
+//!   Task 15).
 //! * [`reasons`]: reason keys (no text) for the `ev` bot and the network path.
 //! * [`route`]: the route-first bots `chain` and `route` (Brian's design, 2026-11-15).
 //! * [`stage`]: the three-stage bot `stage` (2026-11-16).
@@ -33,6 +35,7 @@ pub mod cnn;
 pub mod danger;
 pub mod danger_tables;
 pub mod ev;
+pub mod exact_wait;
 pub mod features;
 pub mod giveup;
 pub mod labels;
@@ -44,6 +47,7 @@ pub mod pushfold;
 pub mod pushfold_tables;
 pub mod race;
 pub mod reasons;
+pub mod risk_net;
 pub mod route;
 pub mod solo;
 pub mod stage;
