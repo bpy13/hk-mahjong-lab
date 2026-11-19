@@ -24,12 +24,59 @@
 //! points, [`Danger::points_if_win`] and the 12-tile liability check
 //! [`Danger::liability_tile`]. `danger_check --belief <model>` measures the
 //! expected loss per wall-progress bucket. [`Danger::estimate`] is unchanged.
+//!
+//! **Exact counting** (plan Task 13, [`crate::exact_wait`]): with the switch on
+//! ([`with_exact`], off by default), an opponent holding 1 or 4 concealed tiles is
+//! read by listing its possible hands instead of the tables. One concealed tile:
+//! its per-tile chance is the exact share (1.0 when one kind is left, 0.0 for a
+//! kind no possible hand wins on); four: the table's (or belief's) chance that it
+//! is ready, spread over the possible ready hands. Its points per win follow the
+//! same list. The table opponents still go through the calibration curve; the
+//! exact ones do not. With the switch off every figure is as before.
 
 use crate::danger_tables::{CALIBRATION, THREAT, WAIT};
 use crate::ev::{Belief, Beliefs, FIRST_FAAN_BUCKET};
+use crate::exact_wait::exact_wait;
 use crate::passed::Passed;
 use mahjong_hk::{Event, Meld, State};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
+use std::cell::Cell;
+
+thread_local! {
+    static EXACT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether exact counting is on for this thread ([`with_exact`]).
+pub fn exact_on() -> bool {
+    EXACT.with(Cell::get)
+}
+
+/// Runs `f` with exact counting switched `on` for this thread (plan Task 13),
+/// restoring the previous setting afterwards (also on a panic).
+pub fn with_exact<T>(on: bool, f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            EXACT.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(EXACT.with(|c| c.replace(on)));
+    f()
+}
+
+/// [`Danger`]'s figures for one tile split into the table opponents and the
+/// exactly counted ones ([`Danger::split`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Split {
+    /// `1 - prod (1 - raw_o)` over the table opponents, before any calibration.
+    pub table_tile: f64,
+    /// `1 - prod (1 - p_o)` over the exactly counted opponents.
+    pub exact_tile: f64,
+    /// Expected loss from the table opponents (as [`Danger::expected_loss`]).
+    pub table_loss: f64,
+    /// Expected loss from the exactly counted opponents.
+    pub exact_loss: f64,
+}
 
 /// Number of wall-progress buckets in the threat table.
 pub const PROGRESS_BUCKETS: usize = 6;
@@ -193,6 +240,9 @@ struct Payment {
     claim4: [[f64; NUM_KINDS]; 4],
     /// Whether the unseen copies leave that claim possible at all.
     can_claim4: [[bool; NUM_KINDS]; 4],
+    /// Points per share of `o`'s win on each tile, for exactly counted
+    /// opponents (plan Task 13); `pay` is used for the others.
+    tile_pay: [[f64; NUM_KINDS]; 4],
 }
 
 /// Estimated danger of each tile for one seat.
@@ -208,6 +258,8 @@ pub struct Danger {
     calibrated: bool,
     /// Present only when built by [`Danger::from_belief`].
     payment: Option<Box<Payment>>,
+    /// Opponents read by exact counting (plan Task 13, switch on only).
+    exact: [bool; 4],
 }
 
 impl Danger {
@@ -232,21 +284,126 @@ impl Danger {
             raw,
             calibrated: true,
             payment: None,
+            exact: [false; 4],
         };
+        if exact_on() {
+            d.apply_exact(state, me);
+        }
         d.combine();
         d
     }
 
+    /// Replaces the figures of each opponent holding 1 or 4 concealed tiles by
+    /// exact counting ([`crate::exact_wait`]); the caller recombines.
+    fn apply_exact(&mut self, state: &State, me: usize) {
+        for o in (0..4).filter(|&o| o != me) {
+            let Some(e) = exact_wait(state, me, o) else {
+                continue;
+            };
+            self.exact[o] = true;
+            let ready = if !e.any_ready() {
+                0.0
+            } else if e.concealed == 1 {
+                1.0
+            } else {
+                self.threat[o]
+            };
+            self.threat[o] = ready;
+            for i in 0..NUM_KINDS {
+                self.raw[o][i] = ready * e.win[i];
+            }
+            if let Some(p) = self.payment.as_mut() {
+                let mut w = 0.0;
+                let mut paid = 0.0;
+                for i in 0..NUM_KINDS {
+                    p.p[o][i] = self.raw[o][i];
+                    p.tile_pay[o][i] = e.points[i];
+                    w += e.win[i];
+                    paid += e.win[i] * e.points[i];
+                }
+                if w > 0.0 {
+                    p.pay[o] = paid / w;
+                }
+            }
+        }
+    }
+
+    /// Whether opponent `seat` is read by exact counting (plan Task 13).
+    pub fn is_exact(&self, seat: usize) -> bool {
+        self.exact[seat]
+    }
+
+    /// The figures of tile `t` split into table and exact opponents; `None` when
+    /// no opponent is read exactly (the switch off, or nobody with 1 or 4
+    /// concealed tiles).
+    pub fn split(&self, t: Tile) -> Option<Split> {
+        if !self.exact.iter().any(|&e| e) {
+            return None;
+        }
+        let i = t.index() as usize;
+        let mut out = Split {
+            table_tile: 0.0,
+            exact_tile: 0.0,
+            table_loss: 0.0,
+            exact_loss: 0.0,
+        };
+        let (mut safe_table, mut safe_exact) = (1.0, 1.0);
+        for o in 0..4 {
+            let loss = self.loss_from(o, i);
+            if self.exact[o] {
+                safe_exact *= 1.0 - self.raw[o][i];
+                out.exact_loss += loss;
+            } else {
+                safe_table *= 1.0 - self.raw[o][i];
+                out.table_loss += loss;
+            }
+        }
+        out.table_tile = 1.0 - safe_table;
+        out.exact_tile = 1.0 - safe_exact;
+        if self.payment.is_none() {
+            // Built by `estimate`: 8 points per deal-in, on the calibrated table part.
+            out.table_loss = calibrate(out.table_tile) * 8.0;
+            out.exact_loss = out.exact_tile * 8.0;
+        }
+        Some(out)
+    }
+
+    /// Expected points lost to seat `o` alone on tile index `i` (payment only).
+    fn loss_from(&self, o: usize, i: usize) -> f64 {
+        match &self.payment {
+            Some(p) => {
+                let pay = if self.exact[o] {
+                    p.tile_pay[o][i]
+                } else {
+                    p.pay[o]
+                };
+                p.p[o][i] * pay * p.shares[o]
+            }
+            None => 0.0,
+        }
+    }
+
     /// `tiles` from `raw`: `1 − Π_o (1 − raw_o)`, through the calibration curve for
     /// the table estimate.
+    ///
+    /// Exactly counted opponents (plan Task 13) stay outside the curve:
+    /// `1 - (1 - calibrate(table part)) * prod_exact (1 - raw_o)`.
     fn combine(&mut self) {
         for i in 0..NUM_KINDS {
-            let safe: f64 = (0..4).map(|o| 1.0 - self.raw[o][i]).product();
-            self.tiles[i] = if self.calibrated {
+            let safe: f64 = (0..4)
+                .filter(|&o| !self.exact[o])
+                .map(|o| 1.0 - self.raw[o][i])
+                .product();
+            let table = if self.calibrated {
                 calibrate(1.0 - safe)
             } else {
                 1.0 - safe
             };
+            let exact: f64 = (0..4)
+                .filter(|&o| self.exact[o])
+                .map(|o| 1.0 - self.raw[o][i])
+                .product();
+            self.tiles[i] = 1.0 - (1.0 - table) * exact;
         }
     }
 
@@ -254,8 +411,11 @@ impl Danger {
     /// opponent's rate on each tile by [`Passed::factor`] (0 while that seat's
     /// passed-win lock holds on the tile, then rising with its 入章 since), and
     /// rebuilds [`Danger::tile`] and [`Danger::expected_loss`] from the result.
+    ///
+    /// Exactly counted opponents are left alone: counting already applies the
+    /// passed-win lock (rules §4.4).
     pub fn apply_passed(&mut self, passed: &Passed) {
-        for o in 0..4 {
+        for o in (0..4).filter(|&o| !self.exact[o]) {
             for t in Tile::all_kinds() {
                 let i = t.index() as usize;
                 if self.raw[o][i] > 0.0 {
@@ -295,6 +455,7 @@ impl Danger {
             three_exposed: [false; 4],
             claim4: [[0.0; NUM_KINDS]; 4],
             can_claim4: [[false; NUM_KINDS]; 4],
+            tile_pay: [[0.0; NUM_KINDS]; 4],
         };
         let mut raw = [[0.0f64; NUM_KINDS]; 4];
         let mut threat = [0.0f64; 4];
@@ -348,7 +509,11 @@ impl Danger {
             raw,
             calibrated: false,
             payment: Some(Box::new(pay)),
+            exact: [false; 4],
         };
+        if exact_on() {
+            d.apply_exact(state, me);
+        }
         d.combine();
         d
     }
@@ -360,7 +525,7 @@ impl Danger {
     pub fn expected_loss(&self, t: Tile) -> f64 {
         let i = t.index() as usize;
         match &self.payment {
-            Some(p) => (0..4).map(|o| p.p[o][i] * p.pay[o] * p.shares[o]).sum(),
+            Some(_) => (0..4).map(|o| self.loss_from(o, i)).sum(),
             None => self.tiles[i] * 8.0,
         }
     }

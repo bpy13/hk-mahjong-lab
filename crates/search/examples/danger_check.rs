@@ -15,13 +15,26 @@
 //!    against the observed rate. The PIMC part is off in this mode unless a
 //!    second number asks for it.
 //!
+//! 4. With `--exact <deals> [seed]` (plan Task 13): four `stage` bots; every
+//!    discard facing an opponent with 1 or 4 concealed tiles, the table figure
+//!    and the exact-counting figure ([`mahjong_search::exact_wait`]) in ten bins
+//!    side by side, and the check that a figure of exactly 1.0 always deals in to
+//!    that opponent and 0.0 never does.
+//!
 //! Games: seat 0 plays `value`, the others `defensive` (the UI's 中級).
 //! `cargo run --release -p mahjong-search --example danger_check -- [--belief <model>] [hands] [pimc_every]`
+//! `cargo run --release -p mahjong-search --example danger_check -- --exact 40000 1`
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
+use mahjong_search::danger::with_exact;
+use mahjong_search::ev::HeuristicBelief;
+use mahjong_search::exact_wait::exact_wait;
+use mahjong_search::giveup;
 use mahjong_search::{pimc, Belief, BeliefModel, Bot, Danger, PimcConfig};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
 
 const EDGES: [f64; 7] = [0.0, 0.01, 0.02, 0.04, 0.07, 0.10, 0.20];
 const PROGRESS_BUCKETS: usize = 6;
@@ -70,6 +83,11 @@ fn dealt_in(s: &State, seat: usize) -> bool {
 
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().map(String::as_str) == Some("--exact") {
+        let num = |i: usize, d: u64| raw.get(i).and_then(|x| x.parse().ok()).unwrap_or(d);
+        run_exact(num(1, 400), num(2, 1));
+        return;
+    }
     let mut belief: Option<BeliefModel> = None;
     let mut args: Vec<usize> = Vec::new();
     let mut i = 0;
@@ -271,4 +289,250 @@ fn main() {
             100.0 * aw
         );
     }
+}
+
+// ----- `--exact` (plan Task 13): exact counting against the tables. -----
+
+/// Danger bins of the exact check (upper edges, in %), as `giveup_log`.
+const EXACT_EDGES: [f64; 9] = [0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 25.0];
+const EXACT_BINS: usize = EXACT_EDGES.len() + 1;
+
+fn exact_bin(d: f64) -> usize {
+    EXACT_EDGES
+        .iter()
+        .position(|&e| 100.0 * d < e)
+        .unwrap_or(EXACT_EDGES.len())
+}
+
+#[derive(Clone, Copy, Default)]
+struct Cell {
+    n: f64,
+    d: f64,
+    hits: f64,
+}
+
+/// Which opponents a discard faced: 0 = one with 1 concealed tile, 1 = one with
+/// 4 (and none with 1).
+const GROUPS: usize = 2;
+
+#[derive(Clone, Copy, Default)]
+struct ExactLog {
+    deals: f64,
+    discards: f64,
+    /// Discards facing an exactly counted opponent, by group.
+    faced: [f64; GROUPS],
+    /// Opponent-discard pairs by concealed count (1, 4).
+    pairs: [f64; 2],
+    /// [group][bin], table figure and exact figure.
+    table: [[Cell; EXACT_BINS]; GROUPS],
+    exact: [[Cell; EXACT_BINS]; GROUPS],
+    /// Per opponent with 1 / 4 concealed tiles: pairs given exactly 1.0, and of
+    /// those how many that opponent won on; given 0.0, and how many it won on.
+    one: [f64; 2],
+    one_hit: [f64; 2],
+    zero: [f64; 2],
+    zero_hit: [f64; 2],
+    /// Discards where the exact figure differs from the table figure by more
+    /// than 0.01, and where the discarded tile's figure moved to exactly 0 or 1.
+    changed: f64,
+}
+
+impl ExactLog {
+    fn add(mut self, o: ExactLog) -> ExactLog {
+        self.deals += o.deals;
+        self.discards += o.discards;
+        self.changed += o.changed;
+        for g in 0..GROUPS {
+            self.faced[g] += o.faced[g];
+            for b in 0..EXACT_BINS {
+                for (a, x) in [
+                    (&mut self.table[g][b], o.table[g][b]),
+                    (&mut self.exact[g][b], o.exact[g][b]),
+                ] {
+                    a.n += x.n;
+                    a.d += x.d;
+                    a.hits += x.hits;
+                }
+            }
+        }
+        for k in 0..2 {
+            self.pairs[k] += o.pairs[k];
+            self.one[k] += o.one[k];
+            self.one_hit[k] += o.one_hit[k];
+            self.zero[k] += o.zero[k];
+            self.zero_hit[k] += o.zero_hit[k];
+        }
+        self
+    }
+}
+
+/// One deal of four `stage` bots; every discard facing an opponent with 1 or 4
+/// concealed tiles is checked. A miss (a 1.0 that did not deal in, a 0.0 that
+/// did) is printed to stderr with its deal seed.
+fn exact_deal(rules: &RuleSet, deal_seed: u64) -> ExactLog {
+    let bot = Bot::by_name("stage").unwrap();
+    let mut state = State::new_deal(*rules, &mut ChaCha8Rng::seed_from_u64(deal_seed));
+    let mut rng = ChaCha8Rng::seed_from_u64(deal_seed ^ 0x9e37_79b9);
+    let mut log = ExactLog {
+        deals: 1.0,
+        ..ExactLog::default()
+    };
+    while let Some(seat) = state.current_player() {
+        let legal = state.legal_actions_vec();
+        let action = bot.choose(&state, &legal, &mut rng);
+        let Action::Discard(t) = action else {
+            state.apply(action);
+            continue;
+        };
+        log.discards += 1.0;
+        let off = Danger::from_belief(&state, seat, &HeuristicBelief);
+        let on = with_exact(true, || Danger::from_belief(&state, seat, &HeuristicBelief));
+        let mut next = state.clone();
+        next.apply(action);
+        while next.in_claim() {
+            let l = next.legal_actions_vec();
+            let c = bot.choose(&next, &l, &mut rng);
+            next.apply(c);
+        }
+        let Some(split) = on.split(t) else {
+            state = next;
+            continue;
+        };
+        let winners: Vec<usize> = next.result().map_or(Vec::new(), |r| {
+            r.wins
+                .iter()
+                .filter(|w| !w.self_drawn && !w.robbed && w.from == Some(seat))
+                .map(|w| w.seat)
+                .collect()
+        });
+        let hit = !winners.is_empty();
+        let opps: Vec<usize> = (0..4).filter(|&o| o != seat && on.is_exact(o)).collect();
+        let group = if opps.iter().any(|&o| state.concealed_count(o) == 1) {
+            0
+        } else {
+            1
+        };
+        log.faced[group] += 1.0;
+        for &o in &opps {
+            let k = (state.concealed_count(o) == 4) as usize;
+            log.pairs[k] += 1.0;
+            let e = exact_wait(&state, seat, o).expect("exact opponent");
+            let ready = on.threat(o);
+            let p = ready * e.win[t.index() as usize];
+            let won = winners.contains(&o);
+            if p == 1.0 {
+                log.one[k] += 1.0;
+                log.one_hit[k] += won as u8 as f64;
+                if !won {
+                    eprintln!("MISS 1.0 not won: seed {deal_seed} seat {seat} opp {o} tile {t}");
+                }
+            } else if p == 0.0 {
+                log.zero[k] += 1.0;
+                log.zero_hit[k] += won as u8 as f64;
+                if won {
+                    eprintln!("MISS 0.0 won: seed {deal_seed} seat {seat} opp {o} tile {t}");
+                }
+            }
+        }
+        let table = giveup::danger_of(&off, t).0;
+        let exact = 1.0 - (1.0 - giveup::calibrate(split.table_tile)) * (1.0 - split.exact_tile);
+        if (exact - table).abs() > 0.01 {
+            log.changed += 1.0;
+        }
+        for (cells, d) in [
+            (&mut log.table[group], table),
+            (&mut log.exact[group], exact),
+        ] {
+            let c = &mut cells[exact_bin(d)];
+            c.n += 1.0;
+            c.d += d;
+            c.hits += hit as u8 as f64;
+        }
+        state = next;
+    }
+    log
+}
+
+fn print_exact_bins(title: &str, cells: &[Cell; EXACT_BINS]) {
+    println!("  {title}");
+    println!("  | predicted bin | discards | mean predicted | observed | 95 % range | observed / predicted |");
+    println!("  |---|---|---|---|---|---|");
+    for (i, c) in cells.iter().enumerate() {
+        if c.n == 0.0 {
+            continue;
+        }
+        let lo = if i == 0 { 0.0 } else { EXACT_EDGES[i - 1] };
+        let name = match EXACT_EDGES.get(i) {
+            Some(hi) => format!("{lo}–{hi} %"),
+            None => format!("{lo} % +"),
+        };
+        let pred = c.d / c.n;
+        let obs = c.hits / c.n;
+        let half = 1.96 * (obs * (1.0 - obs) / c.n).sqrt();
+        let ratio = if pred > 0.0 {
+            format!("{:.2}", obs / pred)
+        } else {
+            "–".to_string()
+        };
+        println!(
+            "  | {name} | {} | {:.2} % | {:.2} % | {:.2}–{:.2} % | {ratio} |",
+            c.n,
+            100.0 * pred,
+            100.0 * obs,
+            100.0 * (obs - half).max(0.0),
+            100.0 * (obs + half).min(1.0),
+        );
+    }
+}
+
+fn run_exact(deals: u64, seed: u64) {
+    let rules = RuleSet::default();
+    let start = std::time::Instant::now();
+    let log = (0..deals)
+        .into_par_iter()
+        .map(|i| exact_deal(&rules, seed.wrapping_mul(1_000_003).wrapping_add(i)))
+        .reduce(ExactLog::default, ExactLog::add);
+    println!(
+        "exact counting check: {deals} deals of four `stage` bots, seed {seed} ({:?})",
+        start.elapsed()
+    );
+    println!(
+        "discards {}; facing an opponent with 1 concealed tile: {}; with 4 (none with 1): {}",
+        log.discards, log.faced[0], log.faced[1]
+    );
+    println!(
+        "opponent-discard pairs: 1 concealed tile {}, 4 concealed tiles {}",
+        log.pairs[0], log.pairs[1]
+    );
+    for (k, name) in ["1 concealed tile", "4 concealed tiles"].iter().enumerate() {
+        println!(
+            "{name}: given exactly 1.0: {} (that opponent won on it: {}); given exactly 0.0: {} (won on it: {})",
+            log.one[k], log.one_hit[k], log.zero[k], log.zero_hit[k]
+        );
+    }
+    println!(
+        "discards whose figure moved by more than 1 point of a percent: {}",
+        log.changed
+    );
+    for (g, name) in [
+        "facing an opponent with 1 concealed tile",
+        "facing an opponent with 4 concealed tiles (none with 1)",
+    ]
+    .iter()
+    .enumerate()
+    {
+        println!("\n{name}");
+        print_exact_bins(
+            "table figure (Danger::from_belief, heuristic, through giveup::danger_of)",
+            &log.table[g],
+        );
+        print_exact_bins(
+            "exact figure (same, exact opponents outside the curve)",
+            &log.exact[g],
+        );
+    }
+    let misses = log.one[0] - log.one_hit[0] + log.one[1] - log.one_hit[1]
+        + log.zero_hit[0]
+        + log.zero_hit[1];
+    println!("\nmisses (1.0 not won on + 0.0 won on): {misses}");
 }

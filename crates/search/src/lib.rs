@@ -32,6 +32,7 @@ pub mod cnn;
 pub mod danger;
 pub mod danger_tables;
 pub mod ev;
+pub mod exact_wait;
 pub mod features;
 pub mod giveup;
 pub mod labels;
