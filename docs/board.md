@@ -2,6 +2,7 @@
 
 ## Workers
 - slot 2: Task 12 (push-or-fold learned from play-outs), building labels and the bot, started 2026-11-19 15:30
+- slot 1: Task 13 (exact danger by counting), building, started 2026-11-19 15:45
 
 
 ## Results
