@@ -1,7 +1,7 @@
 # Board
 
 ## Workers
-- slot 2: Task 12 (push-or-fold learned from play-outs), building labels and the bot, started 2026-11-19 15:30
+- slot 2: Task 12 (push-or-fold learned from play-outs): labels and fit done, three 40,000-deal matches running since 17:55, started 2026-11-19 14:44
 
 
 ## Results
