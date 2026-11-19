@@ -77,10 +77,53 @@ def load(paths: list[str]) -> dict[str, np.ndarray]:
                     cols.setdefault(h, []).append(v)
     out: dict[str, np.ndarray] = {}
     for h, v in cols.items():
-        if h in ("push", "fold"):
+        if h in ("push", "fold", "tiles"):
             out[h] = np.array(v)
         else:
             out[h] = np.array(v, dtype=np.float64)
+    return out
+
+
+def truth_table(d: dict[str, np.ndarray]) -> list[str]:
+    """The table's calibrated danger against the true deal-in of every tile in hand."""
+    if "tiles" not in d:
+        return []
+    dangers, hits, paid = [], [], []
+    for row in d["tiles"]:
+        for item in row.split(";"):
+            if not item:
+                continue
+            _tile, dang, pay = item.split(":")
+            dangers.append(float(dang))
+            paid.append(float(pay))
+            hits.append(float(pay) > 0)
+    dg, hit, pd = np.array(dangers), np.array(hits, dtype=float), np.array(paid)
+    out = [
+        f"\n### The table's calibrated danger against the truth ({len(dg):,} tiles in hand at "
+        "the labelled decisions)\n",
+        "| predicted bin | tiles | mean predicted | truly deals in | 95 % range | "
+        "observed ÷ predicted | points paid per tile |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    b = bins_of(dg, DANGER_EDGES)
+    names = bin_labels(DANGER_EDGES, lambda v: f"{100 * v:g} %")
+    for k, name in enumerate(names):
+        m = b == k
+        if not m.any():
+            continue
+        p = hit[m].mean()
+        half = 1.96 * math.sqrt(p * (1 - p) / m.sum())
+        out.append(
+            f"| {name} | {int(m.sum()):,} | {100 * dg[m].mean():.2f} % | {100 * p:.2f} % | "
+            f"{100 * max(p - half, 0):.2f}–{100 * (p + half):.2f} % | "
+            f"{p / max(dg[m].mean(), 1e-9):.2f} | {pd[m].mean():.2f} |"
+        )
+    share_in = hit.mean()
+    out.append(
+        f"\nOf all tiles, {100 * share_in:.2f} % truly deal in; the table gives one figure to "
+        "tiles that are in truth 0 or 1, so within a bin the truth is spread as the "
+        "observed rate says, and no model reading only the table can tell the two apart."
+    )
     return out
 
 
@@ -121,7 +164,7 @@ def table(
     out.append(f"\n### {title}\n")
     out.append(
         "| bin | positions | mean label (push − fold) | 95 % range | fold better | "
-        "fold clearly better | real-tiles pair |"
+        "fold clearly better | `t` truly deals in |"
     )
     out.append("|---|---|---|---|---|---|---|")
     for b, name in enumerate(names):
@@ -134,26 +177,37 @@ def table(
         r, _ = wmean_se(real[m], w[m])
         out.append(
             f"| {name} | {int(m.sum()):,} | {mean:+.2f} | ±{1.96 * s:.2f} | "
-            f"{100 * better:.1f} % | {100 * clearly:.1f} % | {r:+.2f} |"
+            f"{100 * better:.1f} % | {100 * clearly:.1f} % | {100 * r:.1f} % |"
         )
 
 
 def step2(d: dict[str, np.ndarray]) -> list[str]:
     y, se, w = d["label"], d["se"], d["n_eligible"]
-    real = d["real_push"] - d["real_fold"]
+    real = d["true_t"]
     out = [f"## Step 2: the labels read without a model ({len(y):,} positions)\n"]
     mean, s = wmean_se(y, w)
-    rmean, rs = wmean_se(real, w)
     better = float(np.sum(w * (y < 0)) / w.sum())
     clearly = float(np.sum(w * (y < -1.96 * se)) / w.sum())
+    tin = float(np.sum(w * d["true_t"]) / w.sum())
+    sin = float(np.sum(w * d["true_s"]) / w.sum())
     out.append(
         f"Mean label {mean:+.2f} ± {1.96 * s:.2f} points (push − fold, weighted by the "
         f"deal's candidate decisions); mean standard error of one position's label "
-        f"{float(se.mean()):.2f} over {int(d['samples'][0])} play-out pairs; the same "
-        f"pair on the deal's real hidden tiles {rmean:+.2f} ± {1.96 * rs:.2f}. "
+        f"{float(se.mean()):.2f} over {int(d['samples'][0])} play-out pairs. "
         f"Fold better (label < 0) in {100 * better:.1f} % of positions; clearly better "
-        f"(label < −1.96 × its standard error) in {100 * clearly:.1f} %."
+        f"(label < −1.96 × its standard error) in {100 * clearly:.1f} %. The chosen tile "
+        f"`t` truly deals in at {100 * tin:.2f} % of the decisions (mean calibrated danger "
+        f"{100 * float(np.sum(w * d['d_t']) / w.sum()):.2f} %), the safest tile `s` at "
+        f"{100 * sin:.2f} % (mean calibrated danger "
+        f"{100 * float(np.sum(w * d['d_s']) / w.sum()):.2f} %). The last column of each "
+        f"table is the share of decisions where `t` truly deals in."
     )
+    out += truth_table(d)
+    out.append("\n### The labels by what the seat sees\n")
+    m_in = d["true_t"] > 0
+    for name, m in [("`t` truly deals in", m_in), ("`t` is truly safe", ~m_in)]:
+        mm, ss = wmean_se(y[m], w[m])
+        out.append(f"- {name}: {int(m.sum()):,} positions, mean label {mm:+.2f} ± {1.96 * ss:.2f}")
     table(
         "By calibrated danger of the chosen tile `t`",
         bins_of(d["d_t"], DANGER_EDGES),
@@ -454,6 +508,28 @@ def main() -> int:
         pred_net = net(torch.tensor(z[val], dtype=torch.float32)).numpy().astype(np.float64)
     results[f"network {args.hidden}×{args.hidden} + linear skip"] = fold_check(
         pred_net, y[val], w[val]
+    )
+    # The oracle: the same network with the true deal-in of `t` and `s` added as
+    # inputs (not available to the bot). Its distance from the network above says
+    # how much of the error comes from the table's blunt danger figure.
+    oracle_cols = np.stack([d["true_t"], d["paid_t"], d["true_s"], d["paid_s"]], axis=1)
+    zo = np.hstack([z, oracle_cols / np.maximum(oracle_cols[train].std(0), 1e-9)])
+    net_o, _ = fit_net(
+        zo[train],
+        y[train],
+        w[train],
+        zo[val],
+        y[val],
+        w[val],
+        args.hidden,
+        args.epochs,
+        args.seed,
+        args.weight_decay,
+    )
+    with torch.no_grad():
+        pred_o = net_o(torch.tensor(zo[val], dtype=torch.float32)).numpy().astype(np.float64)
+    results["network + true deal-in of `t` and `s` (oracle, not for the bot)"] = fold_check(
+        pred_o, y[val], w[val]
     )
     always = fold_check(np.full(val.sum(), 1.0), y[val], w[val])
     results["always push (`stage`)"] = always

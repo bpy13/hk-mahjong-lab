@@ -9,20 +9,27 @@
 //! the deal-in EV and the opponent offensive EV." Here nothing is a formula: at a
 //! stage 3 decision where the chosen discard `t` leaves the hand ready and a
 //! tile `s` with a smaller expected loss exists, both choices are played out on
-//! the same re-dealt hidden tiles ([`label`]), and a small network fitted to the
+//! the true hands with the wall reshuffled ([`label`]), and a small network fitted to the
 //! mean difference in my points ([`predict`]; weights in `pushfold_tables.rs`,
 //! written by `experiments/stage/fit_pushfold.py`) decides for the bot
 //! `stage-fold-learned` ([`judge`]): fold when the predicted `push − fold` is
 //! below 0. An opponent's self-draw, a third player's deal-in and a drawn hand
 //! all land in the label by themselves.
 //!
-//! The play-outs: the hidden tiles are re-dealt with [`crate::world::sample_world`]
-//! (the lab's structured sampler: best-of-K hands, honours weighted), one world
-//! per sample, the same world and the same random stream for the push and the
-//! fold branch, so the two differ only in my discard. All four seats play `stage`
-//! after it; the folded hand keeps throwing its smallest-loss tile
-//! ([`crate::giveup::fold_tile`]) until a stage 3 discard leaves it ready again,
-//! then plays `stage` as before (Task 11's after-fold behaviour).
+//! The play-outs start from the TRUE state of the logged deal: every seat keeps
+//! the tiles it really holds, and only the order of the tiles still in the wall is
+//! shuffled again ([`world`]), one shuffle per sample, the same shuffle and the
+//! same random stream for the push and the fold branch, so the two differ only
+//! in my discard (the orchestrator's correction, 2026-11-19: re-dealing the
+//! opponents' hands would throw away the hands they built, so the label would not
+//! be the real cost of the tile; averaged over positions that look alike from the
+//! seat, labels from true hands are the expected result given what the seat sees.
+//! Brian: "The probability you feed is not the probability of losing with that
+//! tile"). All four seats play `stage` after the discard; the folded hand keeps
+//! throwing its smallest-loss tile ([`crate::giveup::fold_tile`]) until a stage 3
+//! discard leaves it ready again, then plays `stage` as before (Task 11's
+//! after-fold behaviour). [`truth`] records, for every tile the seat could throw,
+//! whether an opponent's real hand wins on it and what that costs.
 //!
 //! The model reads only what the seat can see ([`FEATURE_NAMES`]): the
 //! calibrated danger and loss of `t` and `s` ([`crate::giveup::danger_of`], the
@@ -40,11 +47,11 @@ use crate::giveup::{self, Outs, MEASURED};
 use crate::pushfold_tables::{B1, B2, B3, CHECK, HIDDEN, LIN, MEAN, SD, W1, W2, W3};
 use crate::stage::StageBot;
 use crate::view::SeatView;
-use crate::world::sample_world;
 use mahjong_analysis::faan_shanten;
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State};
-use mahjong_tiles::Tile;
+use mahjong_tiles::{Tile, TileCounts};
+use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -263,14 +270,63 @@ pub fn pair(world: &State, dec: &Decision, seed: u64) -> (i32, i32) {
     (p, f)
 }
 
-/// The hidden tiles re-dealt for `dec.seat`: sample `k` of the stream `seed`
-/// (the same `(seed, k)` always gives the same world).
+/// The true state with the undrawn wall reshuffled: sample `k` of the stream
+/// `seed` (the same `(seed, k)` always gives the same order). Every seat keeps
+/// the tiles it really holds.
 pub fn world(state: &State, dec: &Decision, seed: u64, k: u64) -> State {
     let mut rng = ChaCha8Rng::seed_from_u64(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ k);
-    sample_world(state, dec.seat, &mut rng)
+    let mut wall = state.wall().to_vec();
+    wall.shuffle(&mut rng);
+    let hands: [TileCounts; 4] = std::array::from_fn(|o| *state.hand(o));
+    state.redeal(dec.seat, &hands, wall)
 }
 
-/// The label of one decision over `samples` re-dealt worlds.
+/// What one tile of the seat's hand would really cost now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Truth {
+    pub tile: Tile,
+    /// Calibrated danger the bot sees ([`crate::giveup::danger_of`]).
+    pub danger: f64,
+    /// An opponent's real hand wins on it by discard (a legal win).
+    pub deals_in: bool,
+    /// Points the seat would pay (every winner declares; 0 when none).
+    pub paid: i32,
+}
+
+/// For every candidate discard of the seat on turn: whether an opponent's real
+/// hand wins on it, and the points it would cost (the engine settles the claim
+/// window with every possible winner declaring).
+pub fn truth(state: &State, view: &SeatView, candidates: &[Tile]) -> Vec<Truth> {
+    let danger = Danger::from_belief(state, view.seat, &HeuristicBelief);
+    candidates
+        .iter()
+        .map(|&t| {
+            let mut s = state.clone();
+            s.apply(Action::Discard(t));
+            while !s.is_terminal() && s.in_claim() {
+                let legal = s.legal_actions_vec();
+                let a = if legal.contains(&Action::Win) {
+                    Action::Win
+                } else {
+                    Action::Pass
+                };
+                s.apply(a);
+            }
+            let paid = s
+                .result()
+                .filter(|r| r.wins.iter().any(|w| w.from == Some(view.seat)))
+                .map_or(0, |r| -r.deltas[view.seat]);
+            Truth {
+                tile: t,
+                danger: giveup::danger_of(&danger, t).0,
+                deals_in: paid > 0,
+                paid,
+            }
+        })
+        .collect()
+}
+
+/// The label of one decision over `samples` wall orders.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Label {
     /// Mean of (my points after the push − my points after the fold).
@@ -283,7 +339,7 @@ pub struct Label {
 }
 
 /// Plays both choices out `samples` times from `state` (me on turn with 14
-/// tiles) on re-dealt hidden tiles and returns the label.
+/// tiles) with the true hands and a reshuffled wall, and returns the label.
 pub fn label(state: &State, dec: &Decision, samples: usize, seed: u64) -> Label {
     let (mut sum, mut sq, mut p_sum, mut f_sum) = (0.0, 0.0, 0.0, 0.0);
     for k in 0..samples as u64 {
@@ -517,11 +573,22 @@ mod tests {
         let b = world(&s, &d, 7, 0);
         assert_eq!(a.wall(), b.wall(), "the same seed gives the same wall");
         for o in 0..4 {
-            assert_eq!(a.hand(o), b.hand(o));
+            assert_eq!(a.hand(o), s.hand(o), "every seat keeps its true hand");
         }
-        assert_eq!(a.hand(0), s.hand(0), "my hand is kept");
+        let mut sorted = (a.wall().to_vec(), s.wall().to_vec());
+        sorted.0.sort();
+        sorted.1.sort();
+        assert_eq!(sorted.0, sorted.1, "the same tiles stay in the wall");
         let c = world(&s, &d, 7, 1);
-        assert!(c.wall() != a.wall() || (0..4).any(|o| c.hand(o) != a.hand(o)));
+        assert_ne!(c.wall(), a.wall(), "another sample is another order");
+        // The truth of every tile: 7p and the sou tiles win for nobody here (the
+        // opponents hold man tiles and the dragon pungs).
+        let view = SeatView::of(&s, 0);
+        let cands: Vec<Tile> = view.concealed.kinds().collect();
+        let t = truth(&s, &view, &cands);
+        assert_eq!(t.len(), cands.len());
+        assert!(t.iter().all(|x| !x.deals_in && x.paid == 0), "{t:?}");
+        assert!(t.iter().any(|x| x.danger > 0.0));
         // `pair` plays both choices from one world: the first discards differ,
         // nothing else before them.
         let (p, f) = pair(&a, &d, 3);

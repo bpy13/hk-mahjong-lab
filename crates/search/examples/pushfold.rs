@@ -5,12 +5,14 @@
 //! play each deal once. Every stage 3 discard that leaves the hand ready while a
 //! tile with a smaller expected loss exists is a candidate decision; one per deal
 //! is drawn at random (the deal's count of candidates is in the row, as a weight)
-//! and labelled: `samples` re-dealt worlds, each played out once with the chosen
-//! tile thrown and once with the safest tile thrown, on the same hidden tiles and
-//! random stream. The row holds the features ([`FEATURE_NAMES`]), the label
-//! (mean push − fold), its standard error, the two means and, as a check of the
-//! re-dealing, the same pair played on the deal's real hidden tiles. Rows are
-//! appended to the CSV in blocks, with a progress line per block.
+//! and labelled: `samples` reshuffles of the undrawn wall (every seat keeps its
+//! true hand), each played out once with the chosen tile thrown and once with the
+//! safest tile thrown, on the same wall order and random stream. The row holds
+//! the features ([`FEATURE_NAMES`]), the label (mean push − fold), its standard
+//! error, the two means, whether the chosen and the safest tile truly deal in
+//! (an opponent's real hand wins on it) and what that costs, and the same for
+//! every tile in hand (`tile:calibrated danger:points`). Rows are appended to the
+//! CSV in blocks, with a progress line per block.
 //!
 //! `pushfold match <bot> <opponent> <deals> [seed]`: step 5's detail columns, as
 //! Task 11's `giveup_log match`: each deal is played four times with `<bot>` in
@@ -78,15 +80,33 @@ fn label_deal(rules: &RuleSet, deal_seed: u64, samples: usize) -> Option<String>
     let n = found.len();
     let (pos, dec) = found.swap_remove(pick.gen_range(0..n as u32) as usize);
     let l = pushfold::label(&pos, &dec, samples, deal_seed);
-    let (rp, rf) = pushfold::pair(&pos, &dec, deal_seed ^ 0xabcd);
+    let view = SeatView::of(&pos, dec.seat);
+    let candidates = discards_in(&pos.legal_actions_vec());
+    let truth = pushfold::truth(&pos, &view, &candidates);
+    let of = |t: Tile| truth.iter().find(|x| x.tile == t).expect("a candidate");
+    let (tt, ts) = (of(dec.push), of(dec.fold));
     let mut row = format!("{deal_seed},{},{},{},{n}", dec.seat, dec.push, dec.fold);
     for x in dec.x {
         row.push_str(&format!(",{x}"));
     }
     row.push_str(&format!(
-        ",{},{},{},{},{},{rp},{rf}",
-        l.mean, l.se, l.samples, l.push_mean, l.fold_mean
+        ",{},{},{},{},{},{},{},{},{},",
+        l.mean,
+        l.se,
+        l.samples,
+        l.push_mean,
+        l.fold_mean,
+        tt.deals_in as u8,
+        tt.paid,
+        ts.deals_in as u8,
+        ts.paid
     ));
+    // Every tile in hand: `tile:calibrated danger:points paid` (0 = truly safe).
+    let tiles: Vec<String> = truth
+        .iter()
+        .map(|x| format!("{}:{:.5}:{}", x.tile, x.danger, x.paid))
+        .collect();
+    row.push_str(&tiles.join(";"));
     Some(row)
 }
 
@@ -105,7 +125,7 @@ fn run_label(deals: u64, samples: usize, seed: u64, out: &str) {
             header.push(',');
             header.push_str(name);
         }
-        header.push_str(",label,se,samples,push_mean,fold_mean,real_push,real_fold");
+        header.push_str(",label,se,samples,push_mean,fold_mean,true_t,paid_t,true_s,paid_s,tiles");
         writeln!(file, "{header}").expect("write");
     }
     let block = 500u64;
