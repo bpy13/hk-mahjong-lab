@@ -13,6 +13,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Why it matters: neither run has beaten `stage`; a long run costs many GPU hours in the shared lane (mahjong has priority). The rise says learning works; the end level says 4 hours was not enough to gain.
   - Options: (a) new plan: build per-decision credit with the critic, test it on a 4-hour run, then a long run if its hourly score goes above the start; (b) stop self-play and keep `stage` as the best bot; (c) run the same low-noise settings longer (e.g. 24 h) without code changes.
   - Default: (a), as the analysis set out beforehand.
+  - Card sent 2026-11-19 (orchestrator; figures checked against `runs/rl-lownoise/final/vs-stage-40000.txt` and the hourly table).
 
 ## Answered
 
