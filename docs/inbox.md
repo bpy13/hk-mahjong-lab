@@ -7,6 +7,13 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 - FYI (no answer needed): the shared `mahjong` env's editable install still points at `hk-mahjong-lab-3\python`, not the workers clone (a permission check refused the repoint, 2026-11-16). Harmless while jobs set `PYTHONPATH`. Tell the orchestrator if you want it repointed after job 154 ends.
 
+- **The 4-hour low-noise run ended level with the three-stage bot (+0.15 ± 0.23 per hand over 40,000 deals). Build per-decision credit and train long, or stop?**
+  - What it is: Task 10's run (gpu job 252, 4 h, 659,682 hands; pull to the start fixed at 0.02, 4,096 hands per update, learning rate 3e-5, stall rule off). Its training score (learner minus the frozen start on the same tiles) per hour: -0.86, -0.51, +0.04, +0.01 (each ± 0.26): it rose past the -0.3 mark set beforehand, back to the start's level, not above it. End network against three strict `stage` bots, 40,000 deals (cpu job 253): +0.15 ± 0.23, win 24.0 %, deal-in 18.5 % (the three `stage` seats -0.01, -0.06, -0.08). Task 7's 10-hour network: -0.09 ± 0.22.
+  - Example: report `docs/study-results/self-play-network.md`, section "Low-noise run". The analysis (`docs/study-results/2026-11-17-self-play-analysis.md`, experiment 4) said: a rise to -0.3 or better means the signal is there once the noise is cut, so the next step is per-decision credit (each decision gets its own advantage from the critic already in the network, instead of the whole hand's result) and a long run.
+  - Why it matters: neither run has beaten `stage`; a long run costs many GPU hours in the shared lane (mahjong has priority). The rise says learning works; the end level says 4 hours was not enough to gain.
+  - Options: (a) new plan: build per-decision credit with the critic, test it on a 4-hour run, then a long run if its hourly score goes above the start; (b) stop self-play and keep `stage` as the best bot; (c) run the same low-noise settings longer (e.g. 24 h) without code changes.
+  - Default: (a), as the analysis set out beforehand.
+  - Card sent 2026-11-19 (orchestrator; figures checked against `runs/rl-lownoise/final/vs-stage-40000.txt` and the hourly table).
 
 ## Answered
 
