@@ -621,6 +621,11 @@ impl Bot {
             // Plan Task 12: the push-or-fold choice learned from play-outs
             // (`crate::pushfold`). A test bot, not the default.
             "stage-fold-learned" => Bot::Stage(StageBot::default().with_pushfold(true)),
+            // Plan Task 14: the same choice with Task 13's exact danger where it is
+            // 0 or 1 as its input, and its own fitted model. A test bot.
+            "stage-fold-learned-exact" => {
+                Bot::Stage(StageBot::default().with_pushfold(true).with_exact(true))
+            }
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),

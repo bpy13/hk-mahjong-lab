@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 14 (learned push-or-fold with the exact danger input), labelling the play-outs with the exact layer on, then the fit and the 40,000-deal matches; since 2026-11-19 19:10.
 
 
 ## Results

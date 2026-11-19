@@ -429,6 +429,10 @@ pub struct Note {
 /// `pushfold` switches on the learned push-or-fold choice for a ready hand
 /// ([`crate::pushfold`], plan Task 12; bot `stage-fold-learned`): off by
 /// default. With both switches on, `giveup` decides.
+///
+/// `exact` gives the learned choice Task 13's exact danger figure where it is 0
+/// or 1 ([`crate::pushfold::Risk`], plan Task 14; bot `stage-fold-learned-exact`,
+/// its own fitted model): off by default; nothing without `pushfold`.
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
@@ -436,6 +440,7 @@ pub struct StageBot {
     pub gate: u8,
     pub giveup: Option<f64>,
     pub pushfold: bool,
+    pub exact: bool,
 }
 
 impl Default for StageBot {
@@ -453,6 +458,7 @@ impl StageBot {
             gate: 1,
             giveup: None,
             pushfold: false,
+            exact: false,
         }
     }
 
@@ -469,6 +475,11 @@ impl StageBot {
     /// The same bot with the learned push-or-fold choice on or off.
     pub const fn with_pushfold(self, pushfold: bool) -> StageBot {
         StageBot { pushfold, ..self }
+    }
+
+    /// The same bot with the exact danger layer of the learned choice on or off.
+    pub const fn with_exact(self, exact: bool) -> StageBot {
+        StageBot { exact, ..self }
     }
 
     /// Whether the gate lets a hand with an outside tile into stage 3 anyway:
@@ -782,7 +793,8 @@ impl StageBot {
                     giveup::judge(state, view, candidates, tile, &fig, scale)
                         .map(|v| (v.tile, v.gave_up))
                 }
-                None => pushfold::judge(state, view, candidates, tile).map(|v| (v.tile, v.gave_up)),
+                None => pushfold::judge(state, view, candidates, tile, self.exact)
+                    .map(|v| (v.tile, v.gave_up)),
             };
             if let Some((t, gave_up)) = verdict {
                 if gave_up {
@@ -795,8 +807,15 @@ impl StageBot {
                 return None;
             }
         }
-        // Not ready after the pick: a hand that gave up keeps folding.
-        giveup::folded(state, seat).then(|| giveup::fold_tile(state, seat, candidates))
+        // Not ready after the pick: a hand that gave up keeps folding (under the
+        // learned choice's figures when that is the rule in force).
+        giveup::folded(state, seat).then(|| {
+            if scale.is_none() && self.exact {
+                pushfold::fold_tile(state, seat, candidates, true)
+            } else {
+                giveup::fold_tile(state, seat, candidates)
+            }
+        })
     }
 
     /// The action and the stage it came from.
@@ -1203,13 +1222,15 @@ mod tests {
         assert_eq!(fold("stage-fold-double"), (3, 1, 1, Some(2.0)));
         // The learned choice (plan Task 12): on for `stage-fold-learned` only.
         let learned = |name: &str| match crate::Bot::by_name(name) {
-            Some(crate::Bot::Stage(b)) => (b.giveup, b.pushfold),
+            Some(crate::Bot::Stage(b)) => (b.giveup, b.pushfold, b.exact),
             _ => panic!("{name} is no three-stage bot"),
         };
-        assert_eq!(learned("stage"), (None, false));
-        assert_eq!(learned("stage-fold"), (Some(1.0), false));
-        assert_eq!(learned("stage-fold-learned"), (None, true));
-        assert!(!StageBot::default().pushfold);
+        assert_eq!(learned("stage"), (None, false, false));
+        assert_eq!(learned("stage-fold"), (Some(1.0), false, false));
+        assert_eq!(learned("stage-fold-learned"), (None, true, false));
+        // Plan Task 14: the exact layer on for `stage-fold-learned-exact` only.
+        assert_eq!(learned("stage-fold-learned-exact"), (None, true, true));
+        assert!(!StageBot::default().pushfold && !StageBot::default().exact);
     }
 
     #[test]

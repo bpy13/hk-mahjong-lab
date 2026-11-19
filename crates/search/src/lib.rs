@@ -44,6 +44,7 @@ pub mod net;
 pub mod passed;
 pub mod pimc;
 pub mod pushfold;
+pub mod pushfold_exact_tables;
 pub mod pushfold_tables;
 pub mod race;
 pub mod reasons;

@@ -2,10 +2,10 @@
 //! `experiments/stage/fit_pushfold.py`; do not edit.
 //! Fitted on 14,818 rows from runs\stage\t12-labels-seed1.csv, runs\stage\t12-labels-seed2.csv; network; held-out: says fold in 1.2 % of positions, mean label there -0.61 ± 5.19, gain per decision +0.008.
 
-use crate::pushfold::FEATURES;
+use crate::pushfold::{FEATURES, HIDDEN};
 
-/// Units per hidden layer.
-pub const HIDDEN: usize = 32;
+/// Units per hidden layer: `pushfold::HIDDEN`, the size this file was written with.
+const _: () = assert!(HIDDEN == 32);
 /// Input means and standard deviations (inputs are standardised first).
 #[rustfmt::skip]
 pub const MEAN: [f64; FEATURES] = [0.052770142555383405, 1.4768161384313028, 0.004236488554168381, 0.12559267559069673, 26.700956306462793, 37.68551824020596, 3.2404965463942426, 8.57648649954113, 61.60585422402551, 0.08906921702168767, 0.21245713181664494, 1.9844917805793045, 15.3386068032324, 31.253952367283585, 0.40440998889049895, 2.023474858716128, 0.12567421508960264, 30.71612809737719, 1.1850697966478287, 13.603873834709946, 0.08006086074481959, 0.13309415664396756, 31.841182437327923, 1.2430324107617254, 13.659662850794572, 0.06965174129353234, 0.13734422619910344, 32.63874800753514, 1.2994010529874898, 13.849925131623436, 0.07783896053712022];

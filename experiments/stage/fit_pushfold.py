@@ -13,6 +13,14 @@ Usage::
     python experiments/stage/fit_pushfold.py runs/stage/t12-labels-seed1.csv \
         --report runs/stage/t12-step2.md
 
+Plan Task 14 (labels from ``pushfold label-exact``, the exact danger figure where it
+is 0 or 1 as the input): the same fit into the second weight file, and a section on
+where the exact figure applied::
+
+    python experiments/stage/fit_pushfold.py runs/stage/t14-labels-seed1.csv \
+        runs/stage/t14-labels-seed2.csv --report runs/stage/t14-step2.md \
+        --tables crates/search/src/pushfold_exact_tables.rs
+
 Rows are weighted by ``n_eligible`` (one decision was drawn per deal, so a deal
 with many candidate decisions stands for all of them).
 """
@@ -77,30 +85,17 @@ def load(paths: list[str]) -> dict[str, np.ndarray]:
                     cols.setdefault(h, []).append(v)
     out: dict[str, np.ndarray] = {}
     for h, v in cols.items():
-        if h in ("push", "fold", "tiles"):
+        if h in ("push", "fold", "tiles", "s_table"):
             out[h] = np.array(v)
         else:
             out[h] = np.array(v, dtype=np.float64)
     return out
 
 
-def truth_table(d: dict[str, np.ndarray]) -> list[str]:
-    """The table's calibrated danger against the true deal-in of every tile in hand."""
-    if "tiles" not in d:
-        return []
-    dangers, hits, paid = [], [], []
-    for row in d["tiles"]:
-        for item in row.split(";"):
-            if not item:
-                continue
-            _tile, dang, pay = item.split(":")
-            dangers.append(float(dang))
-            paid.append(float(pay))
-            hits.append(float(pay) > 0)
-    dg, hit, pd = np.array(dangers), np.array(hits, dtype=float), np.array(paid)
+def danger_bins(title: str, dg: np.ndarray, hit: np.ndarray, pd: np.ndarray) -> list[str]:
+    """One ten-bin table of a danger figure against the true deal-in."""
     out = [
-        f"\n### The table's calibrated danger against the truth ({len(dg):,} tiles in hand at "
-        "the labelled decisions)\n",
+        f"\n### {title} ({len(dg):,} tiles in hand at the labelled decisions)\n",
         "| predicted bin | tiles | mean predicted | truly deals in | 95 % range | "
         "observed ÷ predicted | points paid per tile |",
         "|---|---|---|---|---|---|---|",
@@ -118,12 +113,116 @@ def truth_table(d: dict[str, np.ndarray]) -> list[str]:
             f"{100 * max(p - half, 0):.2f}–{100 * (p + half):.2f} % | "
             f"{p / max(dg[m].mean(), 1e-9):.2f} | {pd[m].mean():.2f} |"
         )
+    return out
+
+
+def truth_table(d: dict[str, np.ndarray]) -> list[str]:
+    """The danger input against the true deal-in of every tile in hand.
+
+    Task 12's rows carry ``tile:table danger:points``; Task 14's
+    ``tile:risk input:points:table danger``, where the risk input is the exact
+    figure where it is exactly 0 or 1, else the table.
+    """
+    if "tiles" not in d:
+        return []
+    dangers, tables, hits, paid = [], [], [], []
+    for row in d["tiles"]:
+        for item in row.split(";"):
+            if not item:
+                continue
+            parts = item.split(":")
+            dangers.append(float(parts[1]))
+            paid.append(float(parts[2]))
+            hits.append(float(parts[2]) > 0)
+            tables.append(float(parts[3]) if len(parts) > 3 else float(parts[1]))
+    dg, tb = np.array(dangers), np.array(tables)
+    hit, pd = np.array(hits, dtype=float), np.array(paid)
+    with_exact = bool(np.any(dg != tb))
+    out: list[str] = []
+    if with_exact:
+        out += danger_bins(
+            "The risk input (the exact figure where it is 0 or 1, else the table) against "
+            "the truth",
+            dg,
+            hit,
+            pd,
+        )
+        out += danger_bins("The table's calibrated danger alone against the truth", tb, hit, pd)
+        out.append("\n#### Where the exact figure applied\n")
+        out.append("| tiles | count | share of tiles | truly deal in | mean table danger |")
+        out.append("|---|---|---|---|---|")
+        for name, m in [
+            ("exactly 0 (the table part stays)", (dg != tb) & (dg < 1.0)),
+            ("exactly 1", dg == 1.0),
+            ("the table (no exact figure, or neither 0 nor 1)", dg == tb),
+        ]:
+            if not m.any():
+                out.append(f"| {name} | 0 | 0.0 % | – | – |")
+                continue
+            out.append(
+                f"| {name} | {int(m.sum()):,} | {100 * m.mean():.1f} % | "
+                f"{100 * hit[m].mean():.2f} % | {100 * tb[m].mean():.2f} % |"
+            )
+    else:
+        out += danger_bins("The table's calibrated danger against the truth", dg, hit, pd)
     share_in = hit.mean()
     out.append(
         f"\nOf all tiles, {100 * share_in:.2f} % truly deal in; the table gives one figure to "
         "tiles that are in truth 0 or 1, so within a bin the truth is spread as the "
         "observed rate says, and no model reading only the table can tell the two apart."
     )
+    return out
+
+
+def exact_section(d: dict[str, np.ndarray]) -> list[str]:
+    """Task 14: where the exact figure changed the decision's inputs."""
+    if "exact_t" not in d:
+        return []
+    y, se, w = d["label"], d["se"], d["n_eligible"]
+    out = ["\n### The exact figure at the labelled decisions\n"]
+    n_ex, n_tb = float(w.sum()), float(d["n_eligible_table"].sum())
+    out.append(
+        f"Candidate decisions in the labelled deals: {int(n_ex):,} with the exact layer on, "
+        f"{int(n_tb):,} with the table alone (a tile the exact figure calls safe makes a "
+        "safer `s` exist, or removes `t`'s loss)."
+    )
+    changed = (d["exact_t"] >= 0) | (d["exact_s"] >= 0)
+    s_changed = d["s_table"] != d["fold"]
+    not_table = d["table_eligible"] == 0
+    out.append(
+        f"Of the {len(y):,} labelled decisions, the exact figure applied to `t` or `s` in "
+        f"{100 * float(np.sum(w * changed) / w.sum()):.1f} % (weighted; unweighted "
+        f"{100 * changed.mean():.1f} %); the safest tile `s` differs from the table's in "
+        f"{100 * s_changed.mean():.1f} %; the table alone would not have seen a decision in "
+        f"{100 * not_table.mean():.1f} %."
+    )
+    out.append(
+        "\n| group | positions | mean label (push − fold) | 95 % range | fold better | "
+        "fold clearly better | `t` truly deals in | `s` truly deals in |"
+    )
+    out.append("|---|---|---|---|---|---|---|---|")
+    groups = [
+        ("`t` exact 1 (certain deal-in)", d["exact_t"] == 1),
+        ("`t` exact 0", d["exact_t"] == 0),
+        ("`t` from the table", d["exact_t"] < 0),
+        ("`s` exact 0", d["exact_s"] == 0),
+        ("`s` from the table", d["exact_s"] < 0),
+        ("`s` differs from the table's", s_changed),
+        ("no exact figure on `t` or `s`", ~changed),
+    ]
+    for name, m in groups:
+        if not m.any():
+            out.append(f"| {name} | 0 | – | – | – | – | – | – |")
+            continue
+        mean, s = wmean_se(y[m], w[m])
+        better = float(np.sum(w[m] * (y[m] < 0)) / w[m].sum())
+        clearly = float(np.sum(w[m] * (y[m] < -1.96 * se[m])) / w[m].sum())
+        rt = float(np.sum(w[m] * d["true_t"][m]) / w[m].sum())
+        rs = float(np.sum(w[m] * d["true_s"][m]) / w[m].sum())
+        out.append(
+            f"| {name} | {int(m.sum()):,} | {mean:+.2f} | ±{1.96 * s:.2f} | {100 * better:.1f} % | "
+            f"{100 * clearly:.1f} % | {100 * rt:.1f} % | {100 * rs:.1f} % |"
+        )
     return out
 
 
@@ -203,6 +302,7 @@ def step2(d: dict[str, np.ndarray]) -> list[str]:
         f"table is the share of decisions where `t` truly deals in."
     )
     out += truth_table(d)
+    out += exact_section(d)
     out.append("\n### The labels by what the seat sees\n")
     m_in = d["true_t"] > 0
     for name, m in [("`t` truly deals in", m_in), ("`t` is truly safe", ~m_in)]:
@@ -391,15 +491,22 @@ def write_tables(
     note: str,
 ) -> None:
     hidden = len(b1)
+    exact = "exact" in path.name
+    tables_arg = f" --tables {path.as_posix()}" if exact else ""
+    what = (
+        "with the exact danger input ([`crate::pushfold::EXACT_MODEL`])"
+        if exact
+        else "([`crate::pushfold::TABLE_MODEL`])"
+    )
     lines = [
-        "//! Weights of the push-or-fold model ([`crate::pushfold::predict`]). Generated by",
-        "//! `experiments/stage/fit_pushfold.py`; do not edit.",
+        f"//! Weights of the push-or-fold model {what}. Generated by",
+        f"//! `experiments/stage/fit_pushfold.py{tables_arg}`; do not edit.",
         f"//! {note}",
         "",
-        "use crate::pushfold::FEATURES;",
+        "use crate::pushfold::{FEATURES, HIDDEN};",
         "",
-        "/// Units per hidden layer.",
-        f"pub const HIDDEN: usize = {hidden};",
+        "/// Units per hidden layer: `pushfold::HIDDEN`, the size this file was written with.",
+        f"const _: () = assert!(HIDDEN == {hidden});",
         "/// Input means and standard deviations (inputs are standardised first).",
         "#[rustfmt::skip]",
         f"pub const MEAN: [f64; FEATURES] = {rust_floats(mean)};",
