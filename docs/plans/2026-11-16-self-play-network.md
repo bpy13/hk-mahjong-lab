@@ -326,6 +326,14 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Done when: `cargo test --workspace`, fmt and clippy pass; `docs/study-results/exact-danger.md` holds the counts, both danger check tables, the 1.0 and 0.0 check with zero misses, the match table and one line: does `stage-exact` gain points per hand over `stage` (95 % range clear of 0), is it level, or does it lose; pushed. Nothing becomes the default: Brian decides after the numbers. Tell the orchestrator at the end, so Task 12's learned choice can be run again with the exact figure as its input.
   - Notes: build with `CARGO_TARGET_DIR` set to a scratch folder outside every checkout; never rebuild `target\release` or `_core.pyd` inside a checkout. A concealed kong hides its tiles: treat them as the rules show them to the other seats.
 
+- [ ] **Task 14: the learned push-or-fold choice with the exact danger as its input, measured** (fable: label and model design open) (checkpoint) — needs: Task 12, Task 13
+  - Why: Brian, 2026-11-19, on testing exact counting on Task 11's give-up rule: "but we're redoing version B, so it doesn't make sense to build the new test on top of version B". So the exact figure of Task 13 is tested on Task 12's learned choice, not on Task 11's rule.
+  - What: Task 12's labels, model and bot again, with Task 13's switch on: wherever an opponent has one or four concealed tiles the danger and loss inputs of `t` and `s` are the exact ones. If Task 12's label step did not record what is needed to recompute the inputs, run it again. Refit the model; bot `stage-fold-learned-exact`.
+  - Measure: `compare stage-fold-learned-exact stage stage stage 40000 1` and against three `value`, beside `stage`, `stage-fold-learned` and Task 11's `stage-fold`: points per hand with its 95 % range, win rate, deal-in rate, points paid per deal-in; the difference `stage-fold-learned-exact` minus `stage-fold-learned` on the same seeds with its 95 % range; how many decisions the exact figure changed.
+  - Files: `crates/search/src/pushfold.rs` and its example, `crates/search/src/bots.rs` (the bot name), the fitting script, `docs/study-results/stage3-pushfold.md` (new section "With exact danger").
+  - Done when: `cargo test --workspace`, fmt and clippy pass; the section holds the table and one line: does exact counting add points per hand to the learned choice (95 % range clear of 0), and does the result gain over plain `stage`; pushed. Nothing becomes the default: Brian decides after the numbers. If Task 12 found that fold is better in under 2 % of positions and built no model, say so here and measure only how often the exact figure applies at these decisions.
+  - Notes: as Task 12's.
+
 ## Shared files and safety
 - Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
   additive method `HkVecEnv.observe_history()` to `crates/pybind/src/rl.rs` and owns it; Task 4
