@@ -162,5 +162,19 @@ It did not go above the start. The hourly results of 2,000 deals against three `
 18.4-19.2 %) are too noisy to show either change.
 
 End network (`runs/rl-lownoise/final.mjnn`, hour 4) against three strict `stage` bots over
-40,000 deals, beside Task 7's -0.09 ± 0.22: pending cpu job 253 `rl-lownoise-final` (queued
-behind another project's cpu job 199; writes `runs/rl-lownoise/final/vs-stage-40000.txt`).
+40,000 deals (cpu job 253 `rl-lownoise-final`, exit 0, 2026-11-19 20:05;
+`runs/rl-lownoise/final/vs-stage-40000.txt`), beside Task 7's best network of the 10-hour run:
+
+| Bot | Points a hand | 95 % range | Win | Deal-in | Avg faan |
+|---|---|---|---|---|---|
+| Low-noise end network (`final.mjnn`) | +0.15 | ± 0.23 | 24.0 % | 18.5 % | 5.1 |
+| `stage` (seat 2) | -0.01 | ± 0.22 | 24.1 % | 18.8 % | 5.1 |
+| `stage` (seat 3) | -0.06 | ± 0.22 | 24.0 % | 18.5 % | 5.1 |
+| `stage` (seat 4) | -0.08 | ± 0.23 | 23.9 % | 18.3 % | 5.1 |
+| Task 7: 10-hour run's best (`best.mjnn`, hour 6) | -0.09 | ± 0.22 | 23.7 % | 18.3 % | 5.1 |
+
+Draws 5.5 %. Meaning: the low-noise network is level with three `stage` bots (+0.15 ± 0.23, the
+range includes 0), as Task 7's network was; it is 0.24 a hand above Task 7's figure, inside the
+two ranges, so neither run beat the three-stage bot. Together with the hourly table: cutting the
+noise lets the learner recover from its early drop, but 4 hours of self-play at this speed bring
+it back to the start's level, not above it.
