@@ -21,8 +21,10 @@
 //! fill from a [`State`]: `features` ([`crate::features::encode`]), `oracle`
 //! (zeros at play time), `passed` ([`crate::features::encode_passed`]: the
 //! passed-tile record and 摸打 / 入章), `discards` ([`encode_discards`]: each opponent's last
-//! eight discards, one-hot) and `history` ([`crate::features::encode_history`]:
-//! every discard of every seat in order). Output names are the model's business (the belief
+//! eight discards, one-hot), `history` ([`crate::features::encode_history`]:
+//! every discard of every seat in order) and `risk` ([`crate::risk_net::encode_risk`]:
+//! per opponent each kind's relation to its exposed sets, its discards and the
+//! passed-win lock; plan 2026-11-16 Task 15). Output names are the model's business (the belief
 //! model's are listed in `docs/belief.md`); a `policy` slice, when present, is
 //! what [`NetPolicy`] reads. A v2 network without a `policy` slice is not a
 //! policy and [`Mlp::scores`] must not be called on it.
@@ -38,6 +40,7 @@
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
 use crate::features::{encode, encode_passed, ORACLE_LEN, PASSED_LEN, STATE_LEN};
 use crate::features::{encode_history, HISTORY_LEN};
+use crate::risk_net::{encode_risk, RISK_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
 use mahjong_tiles::NUM_KINDS;
@@ -266,6 +269,7 @@ impl Mlp {
                 "discards" => DISCARD_LEN,
                 "passed" => PASSED_LEN,
                 "history" => HISTORY_LEN,
+                "risk" => RISK_LEN,
                 other => return Err(format!("unknown input slice {other:?}")),
             };
             if s.range.len() != want || s.range.end > first.inp {
@@ -339,8 +343,8 @@ impl Mlp {
     }
 
     /// The input vector for `state`: every named input slice filled from public
-    /// information (`features`, `discards`, `passed`, `history`; `oracle` stays
-    /// zero).
+    /// information (`features`, `discards`, `passed`, `history`, `risk`; `oracle`
+    /// stays zero).
     ///
     /// # Panics
     /// Panics if the hand is over.
@@ -352,6 +356,7 @@ impl Mlp {
                 "discards" => encode_discards(state, &mut x[s.range.clone()]),
                 "passed" => encode_passed(state, &mut x[s.range.clone()]),
                 "history" => encode_history(state, &mut x[s.range.clone()]),
+                "risk" => encode_risk(state, &mut x[s.range.clone()]),
                 _ => {}
             }
         }

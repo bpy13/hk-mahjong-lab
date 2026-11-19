@@ -16,6 +16,8 @@
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
 //!   chances.
+//! * [`risk_net`]: the risk network in place of the danger tables (plan 2026-11-16
+//!   Task 15).
 //! * [`reasons`]: reason keys (no text) for the `ev` bot and the network path.
 //! * [`route`]: the route-first bots `chain` and `route` (Brian's design, 2026-11-15).
 //! * [`stage`]: the three-stage bot `stage` (2026-11-16).
@@ -42,6 +44,7 @@ pub mod passed;
 pub mod pimc;
 pub mod race;
 pub mod reasons;
+pub mod risk_net;
 pub mod route;
 pub mod solo;
 pub mod stage;

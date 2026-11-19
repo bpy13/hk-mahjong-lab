@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 3: Task 15 (risk network in place of the danger tables), logging data and fitting on the cpu, started 2026-11-19 16:05
 - slot 2: Task 12 (push-or-fold learned from play-outs), building labels and the bot, started 2026-11-19 15:30
 
 
