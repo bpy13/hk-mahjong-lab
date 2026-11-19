@@ -194,7 +194,7 @@ All three on 40,000 deals, seed 1, run directly (5 threads each, side by side, a
 `compare` plays each deal four times with the seats rotated (the plan's command; its ± treats
 hands as independent); `pushfold match` (Task 11's `giveup_log match` with the same columns)
 plays each deal four times with the bot in every seat and takes a deal's four seatings as one
-sample. Outputs `runs\stage	12-compare-vs-stage.txt`, `t12-compare-vs-value.txt`,
+sample. Outputs `runs\stage\t12-compare-vs-stage.txt`, `t12-compare-vs-value.txt`,
 `t12-match-vs-stage.txt`.
 
 | bot | against | tool | points per hand | win | deal-in | points paid per deal-in | ready hands that gave up | stage 3 deal-ins per 100 hands |
