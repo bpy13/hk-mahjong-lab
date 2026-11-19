@@ -190,7 +190,34 @@ leaves it ready again, when the model decides again (Task 11's fold memory, `giv
 The switch is off by default, so `stage` plays exactly as today.
 
 ## Step 5: matches
-PLACEHOLDER_STEP5
+All three on 40,000 deals, seed 1, run directly (5 threads each, side by side, about 1 h each).
+`compare` plays each deal four times with the seats rotated (the plan's command; its ± treats
+hands as independent); `pushfold match` (Task 11's `giveup_log match` with the same columns)
+plays each deal four times with the bot in every seat and takes a deal's four seatings as one
+sample. Outputs `runs\stage	12-compare-vs-stage.txt`, `t12-compare-vs-value.txt`,
+`t12-match-vs-stage.txt`.
+
+| bot | against | tool | points per hand | win | deal-in | points paid per deal-in | ready hands that gave up | stage 3 deal-ins per 100 hands |
+|---|---|---|---|---|---|---|---|---|
+| `stage-fold-learned` | three `stage` | `compare` | **−0.06 ± 0.22** (the `stage` seats +0.04, −0.04, +0.06) | 23.7 % | 18.3 % | – | – | – |
+| `stage-fold-learned` | three `stage` | `pushfold match` | **+0.03 ± 0.17** | 23.8 % | 17.7 % | 27.2 | 2.1 % | 7.69 |
+| `stage-fold-learned` | three `value` | `compare` | **+2.64 ± 0.21** (`value` −0.81, −0.80, −1.03) | 24.9 % | 18.2 % | – | – | – |
+| plain `stage` (Task 9, same deals) | three `value` | `compare` | +2.62 ± 0.21 | 25.1 % | 18.5 % | 22.2 | 0 | 8.0 (Task 11 step 1, four `stage`) |
+| Task 11's `stage-fold` | three `stage` | `giveup_log match` | −0.63 ± 0.17 | 21.9 % | 17.0 % | 27.0 | 17.2 % | 7.04 |
+| Task 11's `stage-fold` | three `value` | `giveup_log match` | +1.64 ± 0.19 | 23.0 % | 17.1 % | 22.5 | 16.8 % | 7.23 |
+
+**Does `stage-fold-learned` gain points per hand over `stage` (95 % range clear of 0)? No: it is
+level.** −0.06 ± 0.22 and +0.03 ± 0.17 against three `stage`, +2.64 ± 0.21 against three `value`
+where plain `stage` scores +2.62 ± 0.21. It gives up in 2.1 % of its ready hands (Task 11's rule:
+17 %) and loses nothing by it, which is what the held-out check predicted (a fold set with a mean
+label of −0.6 ± 5.2 and a gain of +0.008 a decision). The learned choice repairs Task 11's loss
+(−0.63) but finds no gain, because the gain is not visible from the seat: the labels say a fold
+pays on average only when the tile truly deals in (−15.1 ± 1.4 against +20.8 ± 0.5 when it is
+safe), and the belief's danger spreads one figure over tiles that are in truth 0 or 1. The oracle
+with the true deal-in would gain about +0.55 a hand, so the next step, if any, is a better read
+of which opponent waits on which tile (the trained belief model instead of the heuristic tables,
+or the discard history as input), not another rule shape. Nothing becomes the default bot: Brian
+decides.
 
 ## Tests
 `pushfold.rs` (5 tests): the decision needs a ready push and a safer tile (Task 11's test
