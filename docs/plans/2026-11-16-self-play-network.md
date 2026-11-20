@@ -408,7 +408,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 11 – The flush suit chosen by the neighbours' suits (opus)
 
-- [ ] **Task 21: in stage 1 a close choice of flush suit goes by the neighbours' suits** (opus) (checkpoint (taken: slot 1, 2026-11-21 04:48)
+- [ ] **Task 21: in stage 1 a close choice of flush suit goes by the neighbours' suits** (opus) (checkpoint) (taken: slot 1, 2026-11-21 04:48)
   - Why: Brian, 2026-11-21, after the defence trials of Task 20 showed no gain: "Let's try a different direction - for the 3 stage bot, during the first stage, when considering which flush for half flush, if top two choices were close (within 1 tiles), then always choose: 1. The one that is different from your 上家 2. The one that is the same as your 下家". (上家 is the seat that plays just before the bot, whose discards it may chow; 下家 is the seat that plays just after it, who may chow the bot's discards.)
   - What: a switch on the `stage` bot (a new field name, `stage-neighbour`; plain `stage` and every default stay as they are). Today `suit_order` in `crates/search/src/stage.rs` ranks the suits by flush distance, then most tiles, then pairs and neighbours, then fewest copies visible. With the switch on, in stage 1 only, when the two best suits are close, the order of those two is settled first by rule 1 (prefer the suit that is not 上家's), then, if rule 1 does not settle it, by rule 2 (prefer the suit that is 下家's); when neither settles it the present order stands.
   - Brian, 2026-11-21, on the order of the two rules: "Prefer 1 over 2, and choose both if possible". So reading (c) below is his: a suit that meets both rules is chosen when there is one; when the rules point to different suits, rule 1 wins.
