@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 18a (strict suit collector), building
 
 
 ## Results
