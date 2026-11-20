@@ -297,8 +297,9 @@ struct Stats {
     decisions: u64,
     flush: Vec<FlushCell>,
     strict: Strict,
-    /// Wall time of one `BeliefModel::run` call in microseconds (at most
-    /// `TIME_SAMPLES` kept; exact per call only with `RAYON_NUM_THREADS=1`).
+    /// Wall time of the first `BeliefModel::run` call at a decision (the later
+    /// two hit its cache) in microseconds; at most `TIME_SAMPLES` kept, exact
+    /// per call only with `RAYON_NUM_THREADS=1`.
     times: Vec<u32>,
 }
 
@@ -378,9 +379,11 @@ fn log_decision(
     let thrown = discards_of(state);
     stats.decisions += 1;
     let mut reads = [(f64::NAN, f64::NAN); 4];
-    for o in (0..4).filter(|&o| o != me) {
+    for (i, o) in (0..4).filter(|&o| o != me).enumerate() {
         let (net, table, race, micros) = readings(state, me, o, model);
-        if stats.times.len() < TIME_SAMPLES {
+        // The model caches its last outputs by position, so only the first
+        // call at a decision does the work: time that one.
+        if i == 0 && stats.times.len() < TIME_SAMPLES {
             stats.times.push(micros);
         }
         reads[o] = (net, table);
