@@ -11,6 +11,7 @@ repository before the training). The wording of this milestone is the orchestrat
 Done when:
 - Every task in `docs/plans/2026-11-16-self-play-network.md` is ticked, and Brian has the final
   measurement against the three-stage bot.
+- Brian, 2026-11-20, on the first round of "retrain the reading on the full discard order, then a bot that defends with it" (plan Tasks 19 and 20): "yes, of course the first round must show a gain before we consider the future rounds. In fact I would say if it show gains it already passes Milestone 1, and future finetuning can be modified later on". So a measured gain of the defending bot over the plain three-stage bot passes the milestone; later rounds are planned only after that.
 
 ## Earlier (reached): the 2026-11-09 plan built, with its strength checks
 Registered with the orchestrator on Brian's word (2026-11-10: "Yes, register it"), after the
