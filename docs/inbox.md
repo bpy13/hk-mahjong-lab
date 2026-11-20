@@ -12,6 +12,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) a ready-state table keyed by public discard facts (open sets × wall bucket × suit pattern × drawn-and-thrown run, 240 cells) fitted from these logs, behind a switch, then a 40,000-deal match of `stage` reading it against plain `stage`: about half a worker day, no GPU, reads West at about 48 %; (b) refit the belief network on a logged `stage` field with the `passed` block (it carries the 摸打/入章 flag and already loads) and the ready loss weighted up: one cpu hour of logging, a 10-minute GPU fit, the same match; mends the under-reading in every bin too; (c) both, (a) first; (d) leave it, the figure stays as it is.
   - Default: (a).
   - Asked by the Task 18 worker (slot 1), 2026-11-20; figures from `runs/belief-ready/stage-20000.md` and `value-20000.md` in the workers clone.
+  - Card sent 2026-11-20 (orchestrator; figures checked against `docs/study-results/belief-ready-read.md` sections 2 and 3).
 
 - FYI (no answer needed): the shared `mahjong` env's editable install still points at `hk-mahjong-lab-3\python`, not the workers clone (a permission check refused the repoint, 2026-11-16). Harmless while jobs set `PYTHONPATH`. Tell the orchestrator if you want it repointed after job 154 ends.
 
