@@ -792,8 +792,8 @@ score in the all-`stage` game of the same deal.
 | plain `stage` (same deals and seats) | +0.06 ± 0.17 | 24.1 % | 18.3 % | – | – | – | – | – |
 
 Times on 14 threads: `stage-ev` 51 min, `stage-fold` 64 min, `stage-fold-learned` 61 min, race 93 min
-(the matches with a network ran on about 4 cores: the model's shared per-state cache is behind
-one lock). Outputs `runs/t20/match-*.txt`. Task 11 measured `stage-fold` at −0.63 ± 0.17 and
+(every match ran on only 2 to 4 cores: Windows throttles windowless background processes, as slot 1
+found on 2026-11-21; the throttle can be lifted on the running process). Outputs `runs/t20/match-*.txt`. Task 11 measured `stage-fold` at −0.63 ± 0.17 and
 Task 12 `stage-fold-learned` at +0.03 ± 0.17 against three `stage` on other deals; both agree.
 
 One comparison came out above zero: Task 12's `stage-fold-learned` on its **old** reading (the
