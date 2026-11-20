@@ -10,9 +10,9 @@
 ``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
 ``race_log`` example); ``--init`` warm-starts from an earlier model (``warm_start``).
 Plan 2026-11-16 Task 19: ``--order`` feeds the discard and claim order (a layout 3
-log), ``--no-counts`` drops the copies head, ``--task19`` adds the ``state``, ``winner``
-and ``claim`` heads, ``--weight head=w`` scales a head's loss, ``--hours`` stops after
-the epoch that passes the limit.
+log), ``--no-counts`` drops the copies head, ``--task19`` adds the ``state``, ``winner``,
+``claim``, ``dealin`` and ``points`` heads, ``--weight head=w`` scales a head's loss,
+``--hours`` stops after the epoch that passes the limit.
 
 Each epoch visits every chunk once, in a fresh random order, loading ``--group``
 chunks at a time and shuffling the rows inside the group (a chunk is 500 hands,
@@ -240,7 +240,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--task19",
         action="store_true",
-        help="add the state, winner and claim heads (needs logs of layout 3)",
+        help="add the state, winner, claim, dealin and points heads (needs logs of layout 3)",
     )
     p.add_argument(
         "--weight",

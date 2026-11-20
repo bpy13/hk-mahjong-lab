@@ -23,12 +23,16 @@ With ``race=True`` (the race bot's network, ``docs/race-bot.md`` §6–7) two he
 * ``mode``: 3 logits over the mode of its last discard {push, detour, fold}.
 
 With ``task19=True`` (Brian's required outputs, plan 2026-11-16 Task 19) the heads
-``state`` (as above; a stage log never has a fold), ``winner`` (5 logits for the whole
-row: who wins the hand, relative seat 0–3, or a draw) and ``claim`` (34 logits per
-opponent: P(it would claim a discard of that kind into a meld now)) follow. Brian's
-34 numbers, P(deal-in or claim) per kind, are read out of ``tenpai``, ``waits`` and
-``claim`` (:func:`dealin_or_claim`), so either form (per opponent, or combined) is
-available.
+``state`` (as above; a stage log never has a fold), ``winner`` (9 logits for the whole
+row: who wins the hand and how, ``2 × relative seat`` for a self-drawn win and
+``2 × seat + 1`` for a win off a discard, 8 for a draw; Brian's five win chances are
+the pairs summed), ``claim`` (34 logits per opponent: P(it would claim a discard of
+that kind into a meld now)), ``dealin`` (34 logits per opponent: P(it wins on a
+discard of that kind now), the unconditional form of ``tenpai × waits``) and
+``points`` (one value: the observer's net points for the hand / :data:`POINTS_SCALE`)
+follow. Brian's 34 numbers, P(deal-in or claim) per kind, are read out of ``dealin``
+and ``claim`` (:func:`dealin_or_claim`), so either form (per opponent, or combined)
+is available. ``crates/search/src/belief.rs`` reads the same heads by these names.
 
 The output vector is the heads in that order, each holding its groups (three
 opponents, or one for ``winner``) contiguously (``counts`` first: opponent, tile,
@@ -86,11 +90,21 @@ N_STATES = 4
 N_MODES = 3
 RACE_HEADS: dict[str, int] = {"state": N_STATES, "mode": N_MODES}
 #: The Task 19 heads: ``state`` (shared with the race heads), ``winner`` (one group
-#: of five for the row), ``claim`` (34 per opponent).
-N_WINNERS = 5
-TASK19_HEADS: dict[str, int] = {"state": N_STATES, "winner": N_WINNERS, "claim": NUM_KINDS}
+#: of nine for the row), ``claim`` and ``dealin`` (34 per opponent), ``points`` (one
+#: value for the row).
+N_WINNERS = 9
+WINNER_DRAW = 8
+TASK19_HEADS: dict[str, int] = {
+    "state": N_STATES,
+    "winner": N_WINNERS,
+    "claim": NUM_KINDS,
+    "dealin": NUM_KINDS,
+    "points": 1,
+}
+#: The ``points`` head is the observer's net points divided by this (``belief.rs``).
+POINTS_SCALE = 32.0
 #: Heads with one group per row instead of one per opponent.
-ROW_HEADS = frozenset({"winner"})
+ROW_HEADS = frozenset({"winner", "points"})
 #: Count logits beyond the observer's unseen copies get this logit.
 MASK_LOGIT = -1e9
 
@@ -220,6 +234,8 @@ class BeliefNet(nn.Module):
                 block = block.reshape(n, N_OPP)
             elif name == "winner":
                 block = block.reshape(n, N_WINNERS)
+            elif name == "points":
+                block = block.reshape(n)
             parts[name] = block
         return parts
 
@@ -228,7 +244,8 @@ class BeliefNet(nn.Module):
         observer's ``unseen`` ``(n, 34)``; absent without the head), ``tenpai`` ``(n, 3)``,
         ``waits`` ``(n, 3, 34)``, ``faan`` ``(n, 3, 8)``, ``outcome`` ``(n, 3, 3)``; with
         the race heads also ``state`` ``(n, 3, 4)`` and ``mode`` ``(n, 3, 3)``; with the
-        Task 19 heads ``state``, ``winner`` ``(n, 5)`` and ``claim`` ``(n, 3, 34)``."""
+        Task 19 heads ``state``, ``winner`` ``(n, 9)``, ``claim`` and ``dealin``
+        ``(n, 3, 34)`` and ``points`` ``(n,)`` (in net points)."""
         p = self.split(out)
         probs = {
             "tenpai": torch.sigmoid(p["tenpai"]),
@@ -241,8 +258,11 @@ class BeliefNet(nn.Module):
         for name in ("state", "mode", "winner"):
             if name in p:
                 probs[name] = torch.softmax(p[name], dim=-1)
-        if "claim" in p:
-            probs["claim"] = torch.sigmoid(p["claim"])
+        for name in ("claim", "dealin"):
+            if name in p:
+                probs[name] = torch.sigmoid(p[name])
+        if "points" in p:
+            probs["points"] = p["points"] * POINTS_SCALE
         return probs
 
     def save(self, path: Path) -> None:
@@ -344,17 +364,17 @@ def unseen_from_features(features: torch.Tensor) -> torch.Tensor:
 
 
 def dealin_or_claim(
-    tenpai: torch.Tensor,
-    waits: torch.Tensor,
+    dealin: torch.Tensor,
     claim: torch.Tensor | None,
     unseen: torch.Tensor,
 ) -> torch.Tensor:
     """Brian's 34 numbers per row: P(some opponent wins on the kind or claims it into
     a meld if the observer throws it now), ``1 − Π_o (1 − d_o − (1 − d_o) c_o)`` with
-    ``d_o = tenpai_o × wait_o`` and ``c_o`` the claim head (0 without it); 0 for a kind
-    with no unseen copy. ``tenpai`` ``(n, 3)``, ``waits`` and ``claim`` ``(n, 3, 34)``,
-    ``unseen`` ``(n, 34)``; the same formula as ``BeliefOutput::dealin_or_claim``."""
-    d = tenpai[:, :, None] * waits
+    ``d_o`` the ``dealin`` head (or ``tenpai_o × wait_o`` without it) and ``c_o`` the
+    claim head (0 without it); 0 for a kind with no unseen copy. ``dealin`` and
+    ``claim`` ``(n, 3, 34)``, ``unseen`` ``(n, 34)``; the same formula as
+    ``BeliefOutput::dealin_or_claim``."""
+    d = dealin
     c = torch.zeros_like(d) if claim is None else claim
     none = (1.0 - d - (1.0 - d) * c).prod(dim=1)
     return (1.0 - none) * (unseen > 0)
@@ -379,8 +399,10 @@ class Batch:
     passed: torch.Tensor | None = None  # (n, PASSED_LEN) float16
     # Layout 3 (plan 2026-11-16 Task 19): the packed order and the new labels.
     order: torch.Tensor | None = None  # (n, ORDER_BYTES) uint8
-    winner: torch.Tensor | None = None  # (n,) int64: relative seat 0..3, 4 draw
+    winner: torch.Tensor | None = None  # (n,) int64: 2 × seat (+1 off a discard), 8 draw
     claim: torch.Tensor | None = None  # (n, 3, 34) float: would claim the kind
+    dealin: torch.Tensor | None = None  # (n, 3, 34) float: wins on the kind now
+    points: torch.Tensor | None = None  # (n,) float: observer's net points / POINTS_SCALE
 
     def __len__(self) -> int:
         return int(self.features.shape[0])
@@ -402,7 +424,8 @@ def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:
     """Targets and inputs from log rows (``mahjong.belief.logs``), on the CPU. A race
     log's ``opp_state`` and ``opp_mode`` fill :attr:`Batch.state` and :attr:`Batch.mode`;
     a layout 3 log's ``order``, ``opp_state``, ``winner`` and ``opp_claim`` fill
-    :attr:`Batch.order`, ``state``, ``winner`` and ``claim``."""
+    :attr:`Batch.order`, ``state``, ``winner`` and ``claim``; ``dealin`` is the waits
+    (``wins_on`` is already unconditional) and ``points`` the observer's ``deltas``."""
     features = torch.from_numpy(np.ascontiguousarray(rows["features"]))
     discards = torch.from_numpy(np.ascontiguousarray(rows["discards"][:, 1:4, :]))
     faan = np.clip(rows["opp_faan_now"].astype(np.int64), FAAN_MIN, FAAN_MAX) - FAAN_MIN
@@ -418,6 +441,9 @@ def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:
         extra["order"] = torch.from_numpy(np.ascontiguousarray(rows["order"]))
     if "opp_claim" in names:
         extra["claim"] = torch.from_numpy(rows["opp_claim"].astype(np.float32))
+    if "deltas" in names:
+        extra["points"] = torch.from_numpy(rows["deltas"][:, 0].astype(np.float32) / POINTS_SCALE)
+    waits = torch.from_numpy(rows["opp_waits"].astype(np.float32))
     return Batch(
         **extra,
         features=features,
@@ -425,7 +451,8 @@ def batch_from_rows(rows: np.ndarray[Any, np.dtype[Any]]) -> Batch:
         unseen=unseen_from_features(features),
         counts=torch.from_numpy(np.minimum(rows["opp_counts"], MAX_COPIES - 1).astype(np.int64)),
         tenpai=torch.from_numpy(rows["opp_tenpai"].astype(np.float32)),
-        waits=torch.from_numpy(rows["opp_waits"].astype(np.float32)),
+        waits=waits,
+        dealin=waits,
         faan=torch.from_numpy(faan),
         outcome=torch.from_numpy(rows["opp_won"].astype(np.int64)),
     )
@@ -439,8 +466,9 @@ def losses(net: BeliefNet, out: torch.Tensor, b: Batch) -> dict[str, torch.Tenso
     over rows and opponents; ``tenpai``, ``outcome``: cross-entropy; ``waits`` and
     ``faan``: cross-entropy over tenpai opponents only (zero weight otherwise); with
     the race heads and labels, ``state`` and ``mode``: cross-entropy; with the Task 19
-    heads and labels, ``state`` and ``winner``: cross-entropy, ``claim``: binary
-    cross-entropy summed over the 34 kinds.
+    heads and labels, ``state`` and ``winner``: cross-entropy, ``claim`` and ``dealin``:
+    binary cross-entropy summed over the 34 kinds, ``points``: Huber loss (δ = 1 on the
+    scaled value, i.e. 32 points).
     """
     p = net.split(out)
     n = out.shape[0]
@@ -466,6 +494,11 @@ def losses(net: BeliefNet, out: torch.Tensor, b: Batch) -> dict[str, torch.Tenso
     if "claim" in p and b.claim is not None:
         claim_nll = F.binary_cross_entropy_with_logits(p["claim"], b.claim, reduction="none")
         parts["claim"] = claim_nll.sum(-1).mean()
+    if "dealin" in p and b.dealin is not None:
+        dealin_nll = F.binary_cross_entropy_with_logits(p["dealin"], b.dealin, reduction="none")
+        parts["dealin"] = dealin_nll.sum(-1).mean()
+    if "points" in p and b.points is not None:
+        parts["points"] = F.smooth_l1_loss(p["points"], b.points)
     total = torch.zeros((), device=out.device)
     for k, v in parts.items():
         total = total + net.cfg.weight(k) * v
