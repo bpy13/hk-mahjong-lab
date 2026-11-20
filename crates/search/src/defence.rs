@@ -226,8 +226,8 @@ mod tests {
         else {
             panic!("stage-ev:belief= parses to a stage bot");
         };
-        assert!(bot.defence && bot.reading.is_some());
-        let model = bot.reading.clone().unwrap();
+        assert!(bot.defence && bot.reading != 0);
+        let model = bot.reading_model().unwrap();
         let mut rng = SmallRng::seed_from_u64(20);
         let mut checked = 0;
         for _ in 0..3 {
@@ -293,7 +293,7 @@ mod tests {
             else {
                 panic!("{name}:belief= parses to a stage bot");
             };
-            assert!(b.reading.is_some());
+            assert!(b.reading_model().is_some());
             assert_eq!(b.defence, name == "stage-ev");
         }
         let m = std::sync::Arc::new(BeliefModel::load(&path).unwrap());

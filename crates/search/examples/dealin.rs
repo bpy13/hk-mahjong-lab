@@ -169,7 +169,7 @@ fn main() {
         .map(|i| {
             play(
                 &rules,
-                bot.clone(),
+                bot,
                 seed.wrapping_mul(1_000_003).wrapping_add(i / 4),
                 (i % 4) as usize,
             )

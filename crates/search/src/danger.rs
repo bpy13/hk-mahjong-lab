@@ -64,6 +64,27 @@ thread_local! {
     static READING: RefCell<Option<Arc<BeliefModel>>> = const { RefCell::new(None) };
 }
 
+/// Belief models given to bots as their reading ([`register_reading`]).
+static REGISTERED: std::sync::RwLock<Vec<Arc<BeliefModel>>> = std::sync::RwLock::new(Vec::new());
+
+/// Keeps `model` for the life of the process and returns its id (1 and up), so
+/// a `Copy` bot can name it ([`crate::stage::StageBot::reading`]). The same
+/// `Arc` registered twice gets the same id.
+pub fn register_reading(model: Arc<BeliefModel>) -> u16 {
+    let mut list = REGISTERED.write().expect("reading registry");
+    if let Some(i) = list.iter().position(|m| Arc::ptr_eq(m, &model)) {
+        return (i + 1) as u16;
+    }
+    list.push(model);
+    u16::try_from(list.len()).expect("fewer than 65,536 readings")
+}
+
+/// The model registered under `id` ([`register_reading`]); `None` for 0.
+pub fn registered_reading(id: u16) -> Option<Arc<BeliefModel>> {
+    let i = usize::from(id).checked_sub(1)?;
+    REGISTERED.read().expect("reading registry").get(i).cloned()
+}
+
 /// The belief model set for this thread by [`with_reading`], if any.
 pub fn reading() -> Option<Arc<BeliefModel>> {
     READING.with(|r| r.borrow().clone())

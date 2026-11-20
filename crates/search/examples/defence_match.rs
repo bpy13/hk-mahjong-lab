@@ -252,7 +252,7 @@ mod scenario {
         let Ok(Agent::Bot(Bot::Stage(bot))) = Agent::parse(spec) else {
             panic!("{spec}: not a stage bot spec");
         };
-        let model = bot.reading.clone().expect("belief=... needed");
+        let model = bot.reading_model().expect("belief=... needed");
         let state = position();
         let view = SeatView::of(&state, 0);
         let candidates: Vec<Tile> = view.concealed.tiles();

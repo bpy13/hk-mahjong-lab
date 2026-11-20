@@ -630,6 +630,11 @@ impl Bot {
             // stage 3 and stage 0 from a Task 19 reading. Without `belief=...`
             // (see `crate::Agent`) it has no reading and plays as `stage`.
             "stage-ev" => Bot::Stage(StageBot::default().with_defence(true)),
+            // Plan Task 21 (Brian, 2026-11-21): in stage 1 a close choice between
+            // the two best flush suits goes by the neighbours' suits; close by
+            // flush distance, or (variant) by tile count. Test bots.
+            "stage-neighbour" => Bot::Stage(StageBot::default().with_neighbour(1)),
+            "stage-neighbour-tiles" => Bot::Stage(StageBot::default().with_neighbour(2)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
