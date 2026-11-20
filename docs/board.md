@@ -1,7 +1,7 @@
 # Board
 
 ## Workers
-
+- slot 2: Task 19 (belief network retrained on the discard order), started 2026-11-20 17:05, state: reading the code and designing the input and fit
 
 ## Results
 - Task 18a (slot 1, 2026-11-20): ticked; the suit collector who throws its own suit (`belief_ready.rs`, section 6 of `docs/study-results/belief-ready-read.md`), same 20,000 `stage` deals as Task 18 (seed 18, 445 s direct; Task 18's tables reproduced digit for digit); (1) Brian's simple count from the bot's own state: a stage 3 flush hand throwing its own suit is ready after it 59.8 ± 0.5 % (45,371 discards; half flush 58.0 %, full 90.2 %; 1 open set 49.1 %, 3–4 sets 76.6 %; last third 65.3 %), at its first own-suit discard of the hand 49.7 ± 0.7 %, one away in every other case (stage 3 is within one by definition); the other seats read it at 25.9 % (network) and 22.6 % (table), 11.4 % / 8.7 % with one open set; (2) strict collector seen from the discards (N clean discards with both other suits, open sets in x, x thrown since): N = 10 ready 49.6 %, ready or one away 85.5 %, concealed all x or honours 93.5 %, network 27.7 %; with no open set only 48.9 % within one; (3) swing at the first x discard (N = 10): true ready 16.2 → 42.5 → 62.0 % after the second, network 16.9 → 22.2 → 29.6 %; (4) an honour from a seat with no x in 8+ discards: ready 4.2 → 14.2 %, network 9.8 → 15.4 %; hand 2860: West's 2萬 makes it an N = 10 one-set collector (rows 38 % ready, swing 43 %, then 62 % after 8萬), network 5–12 %; South's 3索 with four 索 sets 72 % row, network 82–96 %; no 摸打/入章 input used; no bot or model changed; fmt, clippy, cargo test --workspace pass; no paid API calls.
