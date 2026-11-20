@@ -369,12 +369,18 @@ impl State {
                 s.hands[seat].add(t);
             }
         }
-        // §3.3: flower replacement in seat order, from the back.
+        // §3.3: flower replacement in seat order, from the back. Each player sets
+        // aside all their bonus tiles at once (so all eight can arrive together,
+        // #31), then draws the replacements.
         for (seat, d) in dealt.iter().enumerate() {
-            for &t in d.iter().filter(|t| t.is_bonus()) {
-                if s.place_bonus(seat, t) {
-                    return s;
-                }
+            let set_aside: Vec<Tile> = d.iter().copied().filter(|t| t.is_bonus()).collect();
+            for &t in &set_aside {
+                s.record_bonus(seat, t);
+            }
+            if s.flower_win(seat) {
+                return s;
+            }
+            for _ in &set_aside {
                 if !s.draw(seat, true) {
                     return s;
                 }
@@ -785,39 +791,37 @@ impl State {
 
     // ----- Transitions. -----
 
-    /// Places a bonus tile for `seat` (§5.3) and checks #31 and #32. Returns `true`
-    /// if that ended the hand.
+    /// Places a bonus tile for `seat` (§5.3) and checks the flower wins (#31,
+    /// #32). Returns `true` if that ended the hand.
     fn place_bonus(&mut self, seat: usize, tile: Tile) -> bool {
+        self.record_bonus(seat, tile);
+        self.flower_win(seat)
+    }
+
+    fn record_bonus(&mut self, seat: usize, tile: Tile) {
         self.bonus[seat] |= bit(tile);
         self.events.push(Event::Bonus {
             seat: seat as u8,
             tile,
         });
-        if self.bonus[seat] == 0xFF {
-            let score = Score::limit(vec![crate::faan::Pattern::EightImmortals], &self.rules);
-            self.finish(vec![NewWin {
-                seat,
-                score,
-                self_drawn: true,
-                from: None,
-                win_tile: None,
-            }]);
-            return true;
-        }
-        if let Some(holder) = (0..4).find(|&p| p != seat && self.bonus[p].count_ones() == 7) {
-            if self.bonus[holder] | self.bonus[seat] == 0xFF {
-                let score = Score::limit(vec![crate::faan::Pattern::SevenRobOne], &self.rules);
-                self.finish(vec![NewWin {
-                    seat: holder,
-                    score,
-                    self_drawn: false,
-                    from: Some(seat),
-                    win_tile: Some(tile),
-                }]);
-                return true;
-            }
-        }
-        false
+    }
+
+    /// A flower win (§7.4): a seat holding seven bonus tiles wins 花糊 (#32) at
+    /// once, all eight 大花糊 (#31). Paid like a self-drawn win by all three
+    /// others (§8.2). Nobody else wins on another seat's bonus tile. Returns
+    /// `true` if the hand ended.
+    fn flower_win(&mut self, seat: usize) -> bool {
+        let Some(score) = Score::flower_win(self.bonus[seat], &self.rules) else {
+            return false;
+        };
+        self.finish(vec![NewWin {
+            seat,
+            score,
+            self_drawn: true,
+            from: None,
+            win_tile: None,
+        }]);
+        true
     }
 
     /// Draws a playing tile for `seat`, replacing bonus tiles. Returns `false` if
@@ -1076,7 +1080,13 @@ impl State {
         {
             let share = self.rules.points(score.faan) as i32;
             let mut paid_by = [0i32; 4];
-            let liable = self.liable[seat].map(usize::from);
+            // §8.3 covers hands won with tiles; a flower win (§8.2) is always
+            // paid by all three others.
+            let liable = if score.is_flower_win() {
+                None
+            } else {
+                self.liable[seat].map(usize::from)
+            };
             match (liable, self_drawn, from) {
                 (Some(l), _, _) => paid_by[l] = 3 * share,
                 (None, true, _) => {

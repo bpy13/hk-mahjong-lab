@@ -358,28 +358,34 @@ class RefGame:
             for t in dealt[seat]:
                 if t < 34:
                     self.hands[seat][t] += 1
+        # §3.3: each seat sets aside all its bonus tiles at once (so all eight
+        # can arrive together, #31), then draws the replacements.
         for seat in range(4):
-            for t in dealt[seat]:
-                if t >= 34 and (self._place_bonus(seat, t) or not self._draw(seat, from_back=True)):
+            set_aside = [t for t in dealt[seat] if t >= 34]
+            self.bonus[seat].update(set_aside)
+            if self._flower_win(seat):
+                return
+            for _ in set_aside:
+                if not self._draw(seat, from_back=True):
                     return
         self.last_drawn = None
 
     # -- draws and bonus tiles --
     def _place_bonus(self, seat: int, tile: int) -> bool:
         self.bonus[seat].add(tile)
-        cap = self.rules.faan_cap
-        if self.bonus[seat] == ALL_BONUS:
-            self._finish([(seat, (cap, cap, True, [(31, cap)]), True, None, None)])
-            return True
-        for p in range(4):
-            if (
-                p != seat
-                and len(self.bonus[p]) == 7
-                and self.bonus[p] | self.bonus[seat] == ALL_BONUS
-            ):
-                self._finish([(p, (cap, cap, True, [(32, cap)]), False, seat, tile)])
-                return True
-        return False
+        return self._flower_win(seat)
+
+    def _flower_win(self, seat: int) -> bool:
+        """§7.5: seven bonus tiles win 花糊 (#32, 3 faan) at once, all eight 大花糊
+        (#31, 8 faan); paid by all three others, never under liability (§8.2).
+        Nobody wins on another seat's bonus tile."""
+        n = len(self.bonus[seat])
+        if n < 7:
+            return False
+        number, faan = (31, 8) if n == 8 else (32, 3)
+        faan = min(faan, self.rules.faan_cap)
+        self._finish([(seat, (faan, faan, False, [(number, faan)]), True, None, None)], flower=True)
+        return True
 
     def _draw(self, seat: int, from_back: bool) -> bool:
         while True:
@@ -455,13 +461,13 @@ class RefGame:
         s = score(c, self.melds[seat], self._ctx(seat, self.last_drawn, True), self.rules)
         return s if qualifies(s, self.rules) else None
 
-    def _finish(self, wins) -> None:
+    def _finish(self, wins, flower: bool = False) -> None:
         deltas = [0, 0, 0, 0]
         records = []
         for seat, sc, self_drawn, source, _tile in wins:
             share = self.rules.points(sc[0])
             paid = [0, 0, 0, 0]
-            liable = self.liable[seat]
+            liable = None if flower else self.liable[seat]
             if liable is not None:
                 paid[liable] = 3 * share
             elif self_drawn:

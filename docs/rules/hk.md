@@ -50,6 +50,9 @@ Terms used below:
 3. **Initial flower replacement.** Starting with the dealer and going in seat order,
    each player sets aside all bonus tiles in their hand and draws the same number of
    replacements from the back. This repeats until no hand holds a bonus tile.
+   The flower wins (§7.5) are checked after each player has set aside their
+   bonus tiles, before they draw the replacements, so a hand dealt all eight wins
+   大花糊 (#31) at once.
 4. Bonus tiles are always placed face up beside the hand and are never part of it.
 5. With the `flowers = off` variant, the 8 bonus tiles are removed before the
    shuffle, and §3.3, §5.3 and the flower patterns of §7 do not apply.
@@ -151,7 +154,8 @@ ends. A concealed kong can be robbed only for thirteen orphans (§5.1).
 
 A player who draws a bonus tile (including as a replacement) places it face up and
 draws a replacement from the back. They cannot discard bonus tiles, and nobody can
-claim them.
+claim them. A player whose seventh bonus tile this is wins at once (§7.5, #32);
+another player's bonus tile never gives anyone a win.
 
 ### 5.4 Kong replacement wins
 
@@ -171,7 +175,8 @@ Other forms such as seven pairs do not exist under these rules.
 
 A complete hand may be declared a win only if it scores **at least 3 faan**
 *(default; variant `min_faan`)* **without counting bonus-tile faan** (#3 無花,
-#4 正花, #5 一台花), or is a limit hand. Bonus-tile faan are added afterwards, to
+#4 正花, #5 一台花), or is a limit hand. The flower wins (§7.5) need no complete
+hand and no minimum: they are won on the bonus tiles alone. Bonus-tile faan are added afterwards, to
 the faan that are paid. For example, a hand worth 2 faan with two seat flowers
 cannot win, while a hand worth 3 faan with two seat flowers wins with 5.
 
@@ -235,13 +240,32 @@ Where a row says *replaces* another, only the larger of the two is counted.
 | 28 | 十八羅漢 Four kongs | four kongs and a pair | |
 | 29 | 天糊 Heavenly hand | | The dealer's hand is complete after the initial deal (and flower replacement) |
 | 30 | 地糊 Earthly hand | | A non-dealer wins on the dealer's first discard |
-| 31 | 八仙過海 Eight immortals | | A player collects all 8 bonus tiles; they win at once, as a self-draw |
-| 32 | 七搶一 Seven rob one | | A player holding 7 bonus tiles wins at once when another player draws the 8th. Paid as a discard win by the player who drew it |
 
-Patterns 29–32 do not require a complete hand form beyond what they state (29 and 30
-do require a complete hand).
+Patterns 29 and 30 require a complete hand.
 
-### 7.5 Worked examples
+### 7.5 Flower wins
+
+| # | Pattern | Faan | Condition |
+|---|---|---|---|
+| 31 | 大花糊 (八仙過海) All eight flowers | 8 | A player holds all 8 bonus tiles |
+| 32 | 花糊 Seven flowers | 3 | A player holds 7 bonus tiles |
+
+1. The holder wins at once, when the seventh bonus tile is placed (§5.3), or when
+   the deal's set-aside brings seven or eight (§3.3). They may not pass the win
+   and play on. In play the seventh always comes before the eighth, so #31 is won
+   only in the deal.
+2. The hand's own tiles add nothing, and no other pattern (#3–#5 included) is
+   added. Only when flowers are in play.
+3. It is paid like a self-drawn win: each of the three others pays 1 share of the
+   points of 3 (#32) or 8 (#31) faan (§8.2). The 12-tile liability (§8.3) does
+   not apply.
+4. There is no robbing flower win: a player holding seven bonus tiles does not win
+   when another player draws the eighth. (Until 2026-11-20 this table had 八仙過海
+   as a limit hand and 七搶一 "seven rob one", a win paid by the player who drew
+   the eighth. That is a Taiwanese rule, not a Hong Kong one; Brian's answer
+   (a), 2026-11-20.)
+
+### 7.6 Worked examples
 
 | Hand and situation | Faan |
 |---|---|
@@ -269,7 +293,7 @@ half of the previous doubling. (Variant `payout = full_spicy` 全辣 keeps doubl
 | On a discard (including robbing a kong, §5.2) | The discarder pays the winner **1 share**. The other two pay nothing |
 | Self-drawn | Each of the three opponents pays the winner 1 share |
 | Several winners on one discard (§4.1.3) | The discarder pays each winner 1 share of that winner's points |
-| 七搶一 (#32) | The player who drew the 8th bonus tile pays 1 share |
+| Flower win (#31, #32, §7.5) | Each of the three opponents pays the winner 1 share, with no liability (§8.3) |
 | Exhaustive draw (§9) | Nobody pays |
 
 Kongs carry no separate payment. Every hand is zero-sum.
@@ -279,7 +303,8 @@ Kongs carry no separate payment. Every hand is zero-sum.
 1. If a player's discard is claimed to form another player's **fourth exposed meld**,
    so that 12 of that player's tiles are showing, the discarder becomes **liable** for
    that player. (Concealed kongs do not count toward the four.)
-2. If that player then wins the hand, by discard or by self-draw, the liable player
+2. If that player then wins the hand, by discard or by self-draw (not by a flower
+   win, §7.5), the liable player
    pays **3 shares** and nobody else pays.
 3. This is the only liability rule *(default; variant `twelve_tile_liability = off`)*.
    Feeding the third dragon pung or the fourth wind pung does not create liability.

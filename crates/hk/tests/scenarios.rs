@@ -4,7 +4,8 @@
 mod common;
 use common::{deal, no_flowers, play, t};
 use mahjong_games::Game;
-use mahjong_hk::{Action, MultipleWinners, Pattern, RuleSet};
+use mahjong_hk::{Action, MultipleWinners, Pattern, PositionPhase, PositionSpec, RuleSet, State};
+use mahjong_tiles::{parse_tiles, TileCounts};
 
 use Action::*;
 
@@ -368,25 +369,101 @@ fn initial_flower_replacement_3_3() {
     assert_eq!(s.hand(0)[t("R")], 1);
 }
 
+/// Seat 1's hand: six bonus tiles and seven playing tiles.
+const SIX_FLOWERS: &str = "F1 F2 F3 F4 S1 S2 5s 6s 7s 8s E E W";
+
 #[test]
-fn eight_immortals_and_seven_rob_one_7_4() {
-    let rules = RuleSet::default();
+fn seven_flowers_wins_at_once_paid_by_all_7_5_32() {
+    // §7.5 #32 花糊, §8.2: seat 1 draws its seventh bonus tile in play and wins
+    // at once, 3 faan (8 points) from each other seat.
+    let hands = [
+        "9s 111m 222m 333m 444m 9m",
+        SIX_FLOWERS,
+        "123p 456p 789p RR NN",
+        "9s 9s W W G G Wh Wh 1p 2p 3p 6s 6s",
+    ];
+    let mut s = deal(RuleSet::default(), hands, "S3", "1s 2s 3s 4s 5m 6m");
+    assert_eq!(s.bonus(1), 0b0011_1111);
+    play(&mut s, &[(0, Discard(t("9m")))]);
+    let r = s.result().expect("the seventh flower ends the hand");
+    assert_eq!(r.wins.len(), 1);
+    let w = &r.wins[0];
+    assert_eq!(w.seat, 1);
+    assert!(w.self_drawn && w.win_tile.is_none());
+    assert_eq!(w.score.patterns, vec![(Pattern::SevenFlowers, 3)]);
+    assert_eq!((w.score.faan, w.score.limit), (3, false));
+    assert_eq!(r.deltas, [-8, 24, -8, -8]);
+}
+
+#[test]
+fn seven_flowers_in_the_deal_wins_at_once_7_5_32() {
+    // §3.3, #32: seven bonus tiles set aside in the deal end the hand there.
     let hands = [
         "9s 111m 222m 333m 444m 9m",
         "F1 F2 F3 F4 S1 S2 S3 5s 6s 7s 8s E E",
         "123p 456p 789p RR NN",
         "9s 9s W W G G Wh Wh 1p 2p 3p 6s 6s",
     ];
-    // Seat 1 draws the eighth bonus tile itself: a self-drawn limit hand.
-    let mut s = deal(rules, hands, "S4", "1s 2s 3s 4s 5m 6m 7m");
-    play(&mut s, &[(0, Discard(t("9m")))]);
-    let w = &s.result().unwrap().wins[0];
-    assert!(w.score.has(Pattern::EightImmortals));
-    assert_eq!(s.result().unwrap().deltas, [-128, 384, -128, -128]);
-    // Seat 2 draws it instead: seat 1 wins 七搶一, paid by seat 2.
-    let mut s = deal(rules, hands, "1s S4", "1s 2s 3s 4s 5m 6m 7m");
-    play(&mut s, &[(0, Discard(t("9m"))), (1, Discard(t("1s")))]);
-    let w = &s.result().unwrap().wins[0];
-    assert!(w.score.has(Pattern::SevenRobOne));
-    assert_eq!(s.result().unwrap().deltas, [0, 128, -128, 0]);
+    let s = deal(RuleSet::default(), hands, "", "1s 2s 3s 4s 5m 6m 7m");
+    let r = s.result().expect("ended in the deal");
+    assert_eq!(r.wins[0].seat, 1);
+    assert!(r.wins[0].score.has(Pattern::SevenFlowers));
+    assert_eq!(r.deltas, [-8, 24, -8, -8]);
+}
+
+#[test]
+fn all_eight_flowers_pays_8_faan_7_5_31() {
+    // §3.3, #31 大花糊: all eight bonus tiles are set aside together in the deal:
+    // 8 faan (64 points) from each other seat. Not a limit hand any more.
+    let hands = [
+        "9s 111m 222m 333m 444m 9m",
+        "F1 F2 F3 F4 S1 S2 S3 S4 5s 6s 7s 8s E",
+        "123p 456p 789p RR NN",
+        "9s 9s W W G G Wh Wh 1p 2p 3p 6s 6s",
+    ];
+    let s = deal(RuleSet::default(), hands, "", "1s 2s 3s 4s 5m 6m 7m 8m");
+    let r = s.result().expect("ended in the deal");
+    let w = &r.wins[0];
+    assert_eq!(w.seat, 1);
+    assert_eq!(w.score.patterns, vec![(Pattern::EightImmortals, 8)]);
+    assert_eq!((w.score.faan, w.score.limit), (8, false));
+    assert_eq!(r.deltas, [-64, 192, -64, -64]);
+}
+
+#[test]
+fn no_robbing_flower_win_7_5() {
+    // §7.5: the old 七搶一 is gone. Seat 1 holds seven bonus tiles (a position,
+    // since in play the seventh would have won at once); seat 2 declares a
+    // concealed kong and draws the eighth, S4, as its replacement. Nobody wins.
+    let rules = RuleSet::default();
+    let c = |s: &str| TileCounts::from_tiles(&parse_tiles(s).unwrap());
+    let spec = PositionSpec {
+        hands: [
+            c("123456789m 1234s"),
+            c("56789s 1234s EEE S"),
+            c("1111p 2345678p 9p WW"),
+            c("NNN WhWhWh GGG 5678m"),
+        ],
+        melds: Default::default(),
+        bonus: [
+            vec![],
+            parse_tiles("F1 F2 F3 F4 S1 S2 S3").unwrap(),
+            vec![],
+            vec![],
+        ],
+        river: vec![],
+        river_from_hand: vec![],
+        wall_remaining: 144 - 13 * 3 - 14 - 7,
+        to_move: 2,
+        phase: PositionPhase::Turn,
+        last_drawn: Some(t("W")),
+        kong_chain: 0,
+        liable: [None; 4],
+        passed_wins: Default::default(),
+    };
+    let mut s = State::from_position(rules, &spec).expect("valid position");
+    play(&mut s, &[(2, ConcealedKong(t("1p")))]);
+    assert!(s.result().is_none(), "{:?}", s.result());
+    assert_eq!(s.bonus(2), 0b1000_0000, "seat 2 keeps the eighth");
+    assert_eq!(s.current_player(), Some(2));
 }

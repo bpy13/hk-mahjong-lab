@@ -40,8 +40,11 @@ pub enum Pattern {
     FourKongs = 28,
     Heavenly = 29,
     Earthly = 30,
+    /// 大花糊 (八仙過海), all eight bonus tiles, 8 faan (§7.5).
     EightImmortals = 31,
-    SevenRobOne = 32,
+    /// 花糊, seven bonus tiles, 3 faan (§7.5). Row 32 was 七搶一 until
+    /// 2026-11-20; its English key "Seven rob one" is kept (see [`Pattern::english`]).
+    SevenFlowers = 32,
 }
 
 impl Pattern {
@@ -78,7 +81,7 @@ impl Pattern {
         Pattern::Heavenly,
         Pattern::Earthly,
         Pattern::EightImmortals,
-        Pattern::SevenRobOne,
+        Pattern::SevenFlowers,
     ];
 
     /// The row number in the faan table.
@@ -93,7 +96,13 @@ impl Pattern {
 
     /// A limit hand (§7.4), scoring the cap.
     pub fn is_limit(self) -> bool {
-        self.number() >= 21
+        (21..=30).contains(&self.number())
+    }
+
+    /// A flower win (§7.5): #31 大花糊 or #32 花糊, won at once on the bonus
+    /// tiles alone.
+    pub fn is_flower_win(self) -> bool {
+        matches!(self, Pattern::EightImmortals | Pattern::SevenFlowers)
     }
 
     /// A bonus-tile pattern (#3 無花, #4 正花, #5 一台花): added to the faan of a
@@ -138,12 +147,13 @@ impl Pattern {
             "十八羅漢",
             "天糊",
             "地糊",
-            "八仙過海",
-            "七搶一",
+            "大花糊",
+            "花糊",
         ][self as usize - 1]
     }
 
-    /// The English name, e.g. `Full flush`.
+    /// The English name, e.g. `Full flush`. It is also the app's text key, so it
+    /// never changes: rows 31 and 32 keep their pre-2026-11-20 names.
     pub fn english(self) -> &'static str {
         [
             "Self-drawn",
@@ -176,6 +186,9 @@ impl Pattern {
             "Four kongs",
             "Heavenly hand",
             "Earthly hand",
+            // Rows 31 and 32 keep their old English keys for compatibility (the
+            // app's text keys, stored stats): they no longer describe the rule.
+            // The rule is 大花糊 "All eight flowers" and 花糊 "Seven flowers".
             "Eight immortals",
             "Seven rob one",
         ][self as usize - 1]
@@ -234,6 +247,30 @@ impl Score {
             qualifying: rules.faan_cap,
             limit: true,
         }
+    }
+
+    /// The flower win (§7.5) of a seat holding the bonus tiles `bonus` (bit
+    /// mask as in [`WinContext::bonus`]): 花糊 (#32, 3 faan) with seven, 大花糊
+    /// (#31, 8 faan) with all eight, `None` with fewer or without flowers. The
+    /// hand's own tiles and the other bonus-tile patterns add nothing, and it
+    /// needs no minimum (§6).
+    pub fn flower_win(bonus: u8, rules: &RuleSet) -> Option<Score> {
+        if !rules.flowers {
+            return None;
+        }
+        let pattern = match bonus.count_ones() {
+            8 => (Pattern::EightImmortals, 8),
+            7 => (Pattern::SevenFlowers, 3),
+            _ => return None,
+        };
+        let mut score = Score::from_patterns(vec![pattern], rules);
+        score.qualifying = score.faan;
+        Some(score)
+    }
+
+    /// Whether this is a flower win (#31 or #32).
+    pub fn is_flower_win(&self) -> bool {
+        self.patterns.iter().any(|&(p, _)| p.is_flower_win())
     }
 
     fn from_patterns(patterns: Vec<(Pattern, u8)>, rules: &RuleSet) -> Score {
