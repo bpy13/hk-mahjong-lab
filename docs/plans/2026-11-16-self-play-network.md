@@ -384,6 +384,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Files: `crates/search/examples/belief_ready.rs`, a new section "The strict suit collector" in `docs/study-results/belief-ready-read.md`, the inbox question's figures if they change, the board line.
   - Done when: the section holds the three tables with ± ranges and one plain sentence each on: is Brian's claim (at most one from ready) true for these bots and how often, how far the true rate jumps at the first own-suit discard, how far the network's reading moves; `cargo fmt --check`, `cargo clippy`, `cargo test --workspace` pass.
   - Notes: no retraining, no bot change; scratch `CARGO_TARGET_DIR`; the 20,000-deal run took 6 minutes on 16 threads, run it directly.
+  - First, and reported first (Brian, 2026-11-20: "just count all stage 3 hands that ended up hitting its flush and check if it's already ready, pretty straightforward"): every discard where the seat is in the bot's stage 3, its line is a flush (half or full) and the tile thrown is of that suit: count, share already ready, share ready or one away, split half/full, by open sets and wall third, with the network's and the table's mean reading of that seat by the other three; the same for the first own-suit discard of the hand only. The strict-collector tables follow only as far as they still add anything (sent to the worker by message 16:10).
 
 ## Shared files and safety
 - Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
