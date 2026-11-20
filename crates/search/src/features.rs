@@ -3,6 +3,11 @@
 //! [`encode`] describes a decision from the acting seat's point of view as
 //! [`STATE_LEN`] floats. Seats are relative: 0 = me, 1 = next (下家), 2 = across,
 //! 3 = previous (上家). Everything in it is public or the actor's own.
+//! [`encode_for`] is the same vector for any observer seat (plan 2026-11-16
+//! Task 19: the belief network is also read right after a discard and after a
+//! claim, when the observer is not the player to act); for a seat that is not
+//! acting the three phase scalars are 0, the drawn-tile plane is empty (another
+//! seat's draw is hidden) and the per-discard planes read "not in hand".
 //!
 //! | Block | Size | Contents |
 //! |---|---|---|
@@ -24,6 +29,12 @@
 //! plan 2026-11-16 Task 3): every discard of every seat in order (the first 24
 //! per seat), each with its tile, 摸打 or 入章, and whether it was claimed. Networks
 //! read it through a `history` input slice; earlier networks never see it.
+//!
+//! [`encode_order`] is the same block without the 摸打 / 入章 flag ([`ORDER_LEN`]
+//! floats, plan 2026-11-16 Task 19): Brian, 2026-11-20, ruled that no bot input
+//! may tell a drawn tile from a hand tile ("at a real table you can also
+//! deliberately put the drawn tile in your hand ... so it's completely
+//! irrelevant"). Networks read it through an `order` input slice.
 //!
 //! A test checks that two positions that differ only in hidden tiles encode
 //! identically.
@@ -132,9 +143,21 @@ fn acceptance_given(
 /// # Panics
 /// Panics if the hand is over or `out` has the wrong length.
 pub fn encode(state: &State, out: &mut [f32]) {
-    assert_eq!(out.len(), STATE_LEN);
-    out.fill(0.0);
     let me = state.current_player().expect("hand in progress");
+    encode_for(state, me, out);
+}
+
+/// Encodes the position from seat `me`'s point of view into `out` (length
+/// [`STATE_LEN`]); the same as [`encode`] when `me` is the player to act (see
+/// the module docs for the three differences when it is not).
+///
+/// # Panics
+/// Panics if the hand is over, `me` is not 0–3 or `out` has the wrong length.
+pub fn encode_for(state: &State, me: usize, out: &mut [f32]) {
+    assert_eq!(out.len(), STATE_LEN);
+    assert!(me < 4);
+    out.fill(0.0);
+    let acting = state.current_player().expect("hand in progress") == me;
     let rel = |seat: usize| (seat + 4 - me) % 4;
     let view = SeatView::of(state, me);
     let rules = state.rules();
@@ -182,7 +205,7 @@ pub fn encode(state: &State, out: &mut [f32]) {
     if let Some((t, _)) = claim {
         plane(out, 17)[t.index() as usize] = 1.0;
     }
-    if let Some(t) = state.last_drawn() {
+    if let Some(t) = state.last_drawn().filter(|_| acting) {
         plane(out, 18)[t.index() as usize] = 1.0;
     }
     {
@@ -210,7 +233,7 @@ pub fn encode(state: &State, out: &mut [f32]) {
     // output is the same as with `analysis::acceptance`.
     let n_melds = view.melds.len();
     let scale = |s: i8| ((s as f32 + 1.0) / 9.0).clamp(0.0, 1.0);
-    let in_turn = state.phase_name() == "turn";
+    let in_turn = acting && state.phase_name() == "turn";
     let mut faan_after = [i8::MAX; NUM_KINDS];
     // Per discard: plain shanten after it and the tiles that would lower it.
     let mut plain_after = [i8::MAX; NUM_KINDS];
@@ -333,7 +356,7 @@ pub fn encode(state: &State, out: &mut [f32]) {
         k += 1;
     };
     for ph in ["turn", "claim", "rob"] {
-        push((state.phase_name() == ph) as u8 as f32);
+        push((acting && state.phase_name() == ph) as u8 as f32);
     }
     for r in 0..4 {
         push(claim.is_some_and(|(_, from)| rel(from) == r) as u8 as f32);
@@ -443,9 +466,19 @@ pub const PASSED_LEN: usize = PASSED_PLANES * NUM_KINDS + PASSED_SCALARS;
 /// # Panics
 /// Panics if the hand is over or `out` has the wrong length.
 pub fn encode_passed(state: &State, out: &mut [f32]) {
-    assert_eq!(out.len(), PASSED_LEN);
-    out.fill(0.0);
     let me = state.current_player().expect("hand in progress");
+    encode_passed_for(state, me, out);
+}
+
+/// [`encode_passed`] from seat `me`'s point of view (all of it is public or
+/// `me`'s own, whoever is to act).
+///
+/// # Panics
+/// Panics if `me` is not 0–3 or `out` has the wrong length.
+pub fn encode_passed_for(state: &State, me: usize, out: &mut [f32]) {
+    assert_eq!(out.len(), PASSED_LEN);
+    assert!(me < 4);
+    out.fill(0.0);
     let rel = |seat: usize| (seat + 4 - me) % 4;
     let passed = Passed::of(state);
     for r in 1..4 {
@@ -569,12 +602,56 @@ pub fn encode_history(state: &State, out: &mut [f32]) {
     encode_history_of(&discard_records(state), me, out);
 }
 
+/// [`encode_history`] from seat `me`'s point of view.
+pub fn encode_history_for(state: &State, me: usize, out: &mut [f32]) {
+    encode_history_of(&discard_records(state), me, out);
+}
+
 /// [`encode_history`] from a list of discards (in the order thrown) for the
 /// absolute seat `me`.
 ///
 /// # Panics
 /// Panics if `out` has the wrong length or a seat is not 0–3.
 pub fn encode_history_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) {
+    encode_order_impl(records, me, out, true);
+}
+
+/// Length of [`encode_order`]'s output (the same layout as [`encode_history`]).
+pub const ORDER_LEN: usize = HISTORY_LEN;
+
+/// Encodes the full discard and claim order of the hand from the view of the
+/// player to act into `out` (length [`ORDER_LEN`]; plan 2026-11-16 Task 19):
+/// [`encode_history`]'s block with one change, the "how it was thrown" scalar
+/// `(r * 24 + k) * 2` is 1 for every filled slot, so nothing in the block tells
+/// a drawn tile (摸打) from a hand tile (入章). Everything else (the one-hot tile
+/// of each seat's `k`-th discard, the claimed flag, the overflow count) is the
+/// same. A network file reads it through the input slice `order`.
+///
+/// # Panics
+/// Panics if the hand is over or `out` has the wrong length.
+pub fn encode_order(state: &State, out: &mut [f32]) {
+    let me = state.current_player().expect("hand in progress");
+    encode_order_of(&discard_records(state), me, out);
+}
+
+/// [`encode_order`] from seat `me`'s point of view (plan 2026-11-16 Task 19:
+/// read after a discard or a claim, when `me` is not the player to act).
+pub fn encode_order_for(state: &State, me: usize, out: &mut [f32]) {
+    encode_order_of(&discard_records(state), me, out);
+}
+
+/// [`encode_order`] from a list of discards (in the order thrown) for the
+/// absolute seat `me`.
+///
+/// # Panics
+/// Panics if `out` has the wrong length or a seat is not 0–3.
+pub fn encode_order_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) {
+    encode_order_impl(records, me, out, false);
+}
+
+/// The shared body of [`encode_history_of`] (`source` true: 1 = 入章, ½ = 摸打)
+/// and [`encode_order_of`] (`source` false: 1 for every discard).
+fn encode_order_impl(records: &[DiscardRecord], me: usize, out: &mut [f32], source: bool) {
     assert_eq!(out.len(), HISTORY_LEN);
     assert!(me < 4);
     out.fill(0.0);
@@ -589,7 +666,7 @@ pub fn encode_history_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) 
         }
         let slot = r * HISTORY_DEPTH + k;
         planes[slot * NUM_KINDS + d.tile.index() as usize] = 1.0;
-        s[2 * slot] = if d.from_hand { 1.0 } else { 0.5 };
+        s[2 * slot] = if d.from_hand || !source { 1.0 } else { 0.5 };
         s[2 * slot + 1] = d.claimed as u8 as f32;
     }
     for (r, &n) in count.iter().enumerate() {
@@ -889,6 +966,97 @@ mod tests {
             }
         }
         assert!(checked > 1000 && claimed_seen > 0 && drawn_seen > 0 && hand_seen > 0);
+    }
+
+    /// Plan 2026-11-16 Task 19: for the player to act `encode_for` is `encode`;
+    /// for another seat the phase scalars and the drawn-tile plane are empty,
+    /// the per-discard planes read "not in hand", and nothing hidden from that
+    /// seat enters (re-dealing the other hands behind its back changes nothing).
+    #[test]
+    fn spectator_encoding_hides_the_draw_and_the_decision() {
+        let mut rng = SmallRng::seed_from_u64(29);
+        let bot = Bot::by_name("fast").unwrap();
+        let (mut a, mut b, mut c) = (
+            vec![0.0; STATE_LEN],
+            vec![0.0; STATE_LEN],
+            vec![0.0; STATE_LEN],
+        );
+        let (mut checked, mut drawn) = (0, 0);
+        for _ in 0..8 {
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            while let Some(me) = s.current_player() {
+                encode(&s, &mut a);
+                encode_for(&s, me, &mut b);
+                assert_eq!(a, b);
+                for o in (0..4).filter(|&o| o != me) {
+                    encode_for(&s, o, &mut b);
+                    let scalars = &b[PLANES * NUM_KINDS..];
+                    assert_eq!(&scalars[..3], &[0.0, 0.0, 0.0]);
+                    assert!(plane_of(&b, 18).iter().all(|&x| x == 0.0));
+                    assert!(plane_of(&b, 21).iter().all(|&x| x == 1.0));
+                    assert!(plane_of(&b, 22).iter().all(|&x| x == 1.0));
+                    // Hidden tiles (the other hands, the wall, the draw) change nothing.
+                    let other = s.determinize(o, &mut rng);
+                    encode_for(&other, o, &mut c);
+                    assert_eq!(b, c);
+                    drawn += s.last_drawn().is_some() as usize;
+                }
+                checked += 1;
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(checked > 300 && drawn > 0);
+    }
+
+    fn plane_of(v: &[f32], k: usize) -> &[f32] {
+        &v[k * NUM_KINDS..(k + 1) * NUM_KINDS]
+    }
+
+    /// Plan 2026-11-16 Task 19: the `order` block is the `history` block with
+    /// the 摸打 / 入章 scalar set to 1 for every discard, so two hands whose
+    /// discards differ only in how they were thrown encode identically.
+    #[test]
+    fn order_block_hides_how_a_tile_was_thrown() {
+        let mut rng = SmallRng::seed_from_u64(23);
+        let bot = Bot::by_name("fast").unwrap();
+        let mut hist = vec![0.0; HISTORY_LEN];
+        let mut order = vec![0.0; ORDER_LEN];
+        let mut flipped = vec![0.0; ORDER_LEN];
+        let (mut checked, mut differed) = (0, 0);
+        for _ in 0..10 {
+            let mut s = State::new_deal(RuleSet::default(), &mut rng);
+            while let Some(me) = s.current_player() {
+                encode_history(&s, &mut hist);
+                encode_order(&s, &mut order);
+                let (hp, hs) = hist.split_at(HISTORY_PLANES * NUM_KINDS);
+                let (op, os) = order.split_at(HISTORY_PLANES * NUM_KINDS);
+                assert_eq!(hp, op);
+                for slot in 0..HISTORY_PLANES {
+                    let filled = hs[2 * slot] > 0.0;
+                    assert_eq!(os[2 * slot], filled as u8 as f32);
+                    assert_eq!(os[2 * slot + 1], hs[2 * slot + 1]);
+                    differed += (hs[2 * slot] == 0.5) as usize;
+                }
+                assert_eq!(&hs[2 * HISTORY_PLANES..], &os[2 * HISTORY_PLANES..]);
+                // Every discard marked the other way: the order block is unchanged.
+                let recs: Vec<DiscardRecord> = discard_records(&s)
+                    .into_iter()
+                    .map(|d| DiscardRecord {
+                        from_hand: !d.from_hand,
+                        ..d
+                    })
+                    .collect();
+                encode_order_of(&recs, me, &mut flipped);
+                assert_eq!(order, flipped);
+                checked += 1;
+                let legal = s.legal_actions_vec();
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(checked > 300 && differed > 0);
     }
 
     /// Plan 2026-11-16 Task 3 (a), the rule for a 25th discard: the slots keep a

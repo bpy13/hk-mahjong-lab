@@ -62,7 +62,7 @@ class Laplace:
 
 def _torso(net: BeliefNet, b: Batch, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
     b = b.to(device)
-    x = net.inputs(b.features, b.discards, b.passed)
+    x = net.inputs_of(b)
     phi = with_bias(net.torso(x))
     return phi, net.head(phi[:, :-1])
 

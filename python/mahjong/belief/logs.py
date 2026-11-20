@@ -86,3 +86,25 @@ def unseen_counts(rows: np.ndarray[Any, np.dtype[Any]]) -> npt.NDArray[np.int64]
     """
     plane = features(rows)[:, UNSEEN_PLANE * NUM_KINDS : (UNSEEN_PLANE + 1) * NUM_KINDS]
     return np.rint(plane * 4).astype(np.int64)
+
+
+#: Discard slots of the packed ``order`` field (layout 3, plan 2026-11-16 Task 19).
+ORDER_SLOTS = 96
+
+
+def unpack_order(packed: npt.NDArray[np.uint8]) -> npt.NDArray[np.float32]:
+    """``features::encode_order``'s block ``(n, 3460)`` from the log's packed ``order``
+    bytes ``(n, 100)``: slot byte 0 = empty, else ``1 + tile + 34 × claimed``; then one
+    overflow count per seat (``log::unpack_order``)."""
+    n = packed.shape[0]
+    slots = packed[:, :ORDER_SLOTS].astype(np.int64)
+    filled = slots > 0
+    v = np.maximum(slots - 1, 0)
+    out = np.zeros((n, ORDER_SLOTS * NUM_KINDS + 2 * ORDER_SLOTS + 4), dtype=np.float32)
+    rows, cols = np.nonzero(filled)
+    out[rows, cols * NUM_KINDS + v[rows, cols] % NUM_KINDS] = 1.0
+    sc = ORDER_SLOTS * NUM_KINDS
+    out[:, sc : sc + 2 * ORDER_SLOTS : 2] = filled
+    out[:, sc + 1 : sc + 2 * ORDER_SLOTS : 2] = (v // NUM_KINDS) * filled
+    out[:, sc + 2 * ORDER_SLOTS :] = np.minimum(packed[:, ORDER_SLOTS:].astype(np.float32) / 4.0, 1.0)
+    return out

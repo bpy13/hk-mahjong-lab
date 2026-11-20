@@ -9,14 +9,30 @@
 //! them. The belief model is queried at the observer's own decisions, so rows are
 //! taken exactly there (turn, claim and rob decisions alike).
 //!
+//! Layout 3 (plan 2026-11-16 Task 19) appends the discard and claim order
+//! without the 摸打 / 入章 flag ([`pack_order`], the bytes of
+//! [`features::encode_order`]), each opponent's true state (far / one away /
+//! ready), who won the hand and how (or a draw), per opponent and tile kind
+//! whether it would claim that kind into a meld if the observer threw it now
+//! (the three-stage bot's own claim rule on the opponent's true hand), and the
+//! row's `view`: besides the observer's own decisions ([`capture`]), layout 3
+//! logs rows from a seat that is **not** to act ([`capture_for`]): right after
+//! its discard, after the claim window on it closed without a claim, and after
+//! an opponent claimed it, so the network can be read there (Brian, 2026-11-20:
+//! "the solver needs to be able to re-evaluate the win-rate after hitting the
+//! tile, whether it leads to no action or it gets claimed").
+//!
 //! Rows have a fixed size and layout ([`FIELDS`], little-endian, packed). The
 //! log writer ([`LogWriter`]) writes them in chunk files `chunk-NNNNN.bin` plus a
 //! `meta.json` that repeats the layout, so readers (the Python package's
 //! `mahjong.belief.logs`) build their record type from the file, not from code.
 
-use crate::features::{self, PASSED_LEN, STATE_LEN};
+use crate::features::{self, DiscardRecord, HISTORY_DEPTH, HISTORY_PLANES, PASSED_LEN, STATE_LEN};
+use crate::race::true_state;
+use crate::stage::StageBot;
+use crate::view::SeatView;
 use mahjong_games::Game;
-use mahjong_hk::{score_win, Event, HandResult, State, WinContext};
+use mahjong_hk::{score_win, Action, Event, HandResult, State, WinContext};
 use mahjong_tiles::{Tile, NUM_KINDS};
 use std::fmt::Write as _;
 use std::fs;
@@ -28,7 +44,29 @@ pub const DISCARD_HISTORY: usize = 8;
 /// Marks an empty slot in the discard history and "nobody" in seat fields.
 pub const NONE: u8 = 255;
 /// Layout version written to `meta.json`; bump when [`FIELDS`] changes.
-pub const LAYOUT_VERSION: u32 = 2;
+pub const LAYOUT_VERSION: u32 = 3;
+/// Bytes of the packed discard order ([`pack_order`]): one per seat and slot,
+/// then one overflow count per seat.
+pub const ORDER_BYTES: usize = HISTORY_PLANES + 4;
+/// The `winner` field's value for an exhaustive draw (else `2 × relative seat`,
+/// plus 1 when the win was off a discard).
+pub const DRAW: u8 = 8;
+
+/// Whose moment a row describes (the `view` field).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum View {
+    /// The observer is to act (every layout).
+    Mover = 0,
+    /// Right after the observer's discard: a claim window on it, or (nobody
+    /// could claim) the next seat's turn.
+    AfterDiscard = 1,
+    /// The claim window on the observer's discard closed without a claim: the
+    /// next seat's turn.
+    AfterPass = 2,
+    /// An opponent claimed the observer's discard and is to discard.
+    AfterClaim = 3,
+}
 
 /// One field of a row: a name, a NumPy-style little-endian type and a shape.
 #[derive(Clone, Copy, Debug)]
@@ -94,7 +132,127 @@ pub const FIELDS: &[Field] = &[
     f("opp_win_from", "u1", &[3]),
     // Final net points of each relative seat (sum to zero).
     f("deltas", "i4", &[4]),
+    // Layout 3 (plan 2026-11-16 Task 19). The discard and claim order of every
+    // seat, packed (pack_order): the bytes of features::encode_order.
+    f("order", "u1", &[ORDER_BYTES]),
+    // The opponent's true state now: 0 far, 1 one away, 2 ready (race::true_state,
+    // never folded here).
+    f("opp_state", "u1", &[3]),
+    // Who won the hand and how: 2 × relative seat (0-3; the first win when two
+    // seats win on one discard) plus 1 for a win off a discard, 8 for a draw.
+    f("winner", "u1", &[]),
+    // 1 if the opponent would claim a discard of that kind into a meld (pung,
+    // kong or, for the observer's next seat, chow) were the observer to throw it
+    // now, by the three-stage bot's claim rule on the opponent's true hand; 0 when
+    // no such claim is legal or the bot would pass. A win is not a claim here
+    // (`opp_waits` holds it).
+    f("opp_claim", "u1", &[3, NUM_KINDS]),
+    // Whose moment the row is (`View`): 0 the observer's decision, 1 right after
+    // its discard, 2 after the claim window on it closed without a claim, 3 after
+    // an opponent claimed it.
+    f("view", "u1", &[]),
 ];
+
+/// Packs the discard order of the player to act (what [`features::encode_order`]
+/// encodes) into [`ORDER_BYTES`] bytes. Byte `r * 24 + k` (relative seat `r`, its
+/// `k`-th discard) is 0 for an empty slot, else `1 + tile + 34 * claimed` (at most
+/// 68); byte `96 + r` is the number of seat `r`'s discards beyond the 24th (at
+/// most 255). Nothing in it tells a drawn tile from a hand tile.
+///
+/// # Panics
+/// Panics if the hand is over.
+pub fn pack_order(state: &State) -> [u8; ORDER_BYTES] {
+    let me = state.current_player().expect("hand in progress");
+    pack_order_of(&features::discard_records(state), me)
+}
+
+/// [`pack_order`] from a list of discards (in the order thrown) for the absolute
+/// seat `me`.
+pub fn pack_order_of(records: &[DiscardRecord], me: usize) -> [u8; ORDER_BYTES] {
+    let mut out = [0u8; ORDER_BYTES];
+    let mut count = [0usize; 4];
+    for d in records {
+        let r = (d.seat as usize + 4 - me) % 4;
+        let k = count[r];
+        count[r] += 1;
+        if k < HISTORY_DEPTH {
+            out[r * HISTORY_DEPTH + k] = 1 + d.tile.index() + 34 * d.claimed as u8;
+        }
+    }
+    for (r, &n) in count.iter().enumerate() {
+        out[HISTORY_PLANES + r] = n.saturating_sub(HISTORY_DEPTH).min(255) as u8;
+    }
+    out
+}
+
+/// Unpacks [`pack_order`]'s bytes into [`features::encode_order`]'s block (`out`
+/// of length [`features::ORDER_LEN`]).
+///
+/// # Panics
+/// Panics if a length is wrong.
+pub fn unpack_order(packed: &[u8], out: &mut [f32]) {
+    assert_eq!(packed.len(), ORDER_BYTES);
+    assert_eq!(out.len(), features::ORDER_LEN);
+    out.fill(0.0);
+    let (planes, s) = out.split_at_mut(HISTORY_PLANES * NUM_KINDS);
+    for (slot, &b) in packed[..HISTORY_PLANES].iter().enumerate() {
+        if b == 0 {
+            continue;
+        }
+        let v = (b - 1) as usize;
+        planes[slot * NUM_KINDS + v % NUM_KINDS] = 1.0;
+        s[2 * slot] = 1.0;
+        s[2 * slot + 1] = (v / NUM_KINDS) as f32;
+    }
+    for r in 0..4 {
+        s[2 * HISTORY_PLANES + r] = (packed[HISTORY_PLANES + r] as f32 / 4.0).min(1.0);
+    }
+}
+
+/// The meld claims `seat` could legally declare on a discard of `tile` by `from`
+/// now (as `State::window_options` without the win): pung with two copies in
+/// hand, kong with three, chow for `from`'s next seat; none when the wall is
+/// empty (rules §4.1.7). `out` ends with `Pass`.
+fn claim_options(state: &State, seat: usize, from: usize, tile: Tile, out: &mut Vec<Action>) {
+    out.clear();
+    if state.wall_remaining() == 0 {
+        return;
+    }
+    let hand = state.hand(seat);
+    let have = hand[tile];
+    if have >= 2 {
+        out.push(Action::Pung);
+    }
+    if have >= 3 {
+        out.push(Action::ClaimKong);
+    }
+    if seat == (from + 1) % 4 && tile.is_suited() {
+        for start in -2i8..=0 {
+            let tiles: Option<Vec<Tile>> = (0..3).map(|k| tile.offset(start + k)).collect();
+            if let Some(tiles) = tiles {
+                if tiles.iter().all(|&t| t == tile || hand[t] > 0) {
+                    out.push(Action::Chow(tiles[0]));
+                }
+            }
+        }
+    }
+    out.push(Action::Pass);
+}
+
+/// Per kind, whether `seat` (the three-stage bot's claim rule on its true hand)
+/// would claim a discard of it by `from` into a meld now.
+fn would_claim(state: &State, seat: usize, from: usize, bot: &StageBot) -> [bool; NUM_KINDS] {
+    let mut out = [false; NUM_KINDS];
+    let view = SeatView::of(state, seat);
+    let mut legal = Vec::new();
+    for k in Tile::all_kinds() {
+        claim_options(state, seat, from, k, &mut legal);
+        if legal.len() > 1 {
+            out[k.index() as usize] = bot.claim(&view, k, from, &legal) != Action::Pass;
+        }
+    }
+    out
+}
 
 /// Bytes per row.
 pub fn row_bytes() -> usize {
@@ -151,6 +309,10 @@ struct Truth {
     waits: [bool; NUM_KINDS],
     points_now: u16,
     faan_now: u8,
+    /// `race::true_state` without a fold: 0 far, 1 one away, 2 ready.
+    state: u8,
+    /// Per kind: the seat would claim it into a meld if the observer threw it now.
+    claim: [bool; NUM_KINDS],
 }
 
 const NO_TRUTH: Truth = Truth {
@@ -158,11 +320,15 @@ const NO_TRUTH: Truth = Truth {
     waits: [false; NUM_KINDS],
     points_now: 0,
     faan_now: 0,
+    state: 0,
+    claim: [false; NUM_KINDS],
 };
 
-fn truth(state: &State, seat: usize) -> Truth {
+fn truth(state: &State, seat: usize, me: usize, bot: &StageBot) -> Truth {
     let hand = state.hand(seat);
     let mut t = NO_TRUTH;
+    t.state = true_state(state, seat, false) as u8;
+    t.claim = would_claim(state, seat, me, bot);
     for k in Tile::all_kinds() {
         t.counts[k.index() as usize] = hand[k];
     }
@@ -220,6 +386,8 @@ pub struct PendingRow {
     features: Vec<f32>,
     discards: [[u8; DISCARD_HISTORY]; 4],
     opp: [Truth; 3],
+    order: [u8; ORDER_BYTES],
+    view: View,
 }
 
 /// Captures the row for the player to act in `state`.
@@ -230,12 +398,29 @@ pub struct PendingRow {
 /// Panics if the hand is over.
 pub fn capture(state: &State, hand: u32, step: u16, agent_ids: [u8; 4]) -> PendingRow {
     let me = state.current_player().expect("hand in progress");
+    capture_for(state, me, View::Mover, hand, step, agent_ids)
+}
+
+/// Captures the row for seat `me` in `state`, whoever is to act (`view` says
+/// which moment it is; plan 2026-11-16 Task 19).
+///
+/// # Panics
+/// Panics if the hand is over.
+pub fn capture_for(
+    state: &State,
+    me: usize,
+    view: View,
+    hand: u32,
+    step: u16,
+    agent_ids: [u8; 4],
+) -> PendingRow {
+    assert!(state.current_player().is_some(), "hand in progress");
     let rel = |seat: usize| (seat + 4 - me) % 4;
     // `features` then `passed`, adjacent in the row.
     let mut feats = vec![0.0f32; STATE_LEN + PASSED_LEN];
     let (f, p) = feats.split_at_mut(STATE_LEN);
-    features::encode(state, f);
-    features::encode_passed(state, p);
+    features::encode_for(state, me, f);
+    features::encode_passed_for(state, me, p);
     let mut history: [Vec<Tile>; 4] = Default::default();
     for e in state.events() {
         if let Event::Discard { seat, tile, .. } = *e {
@@ -250,10 +435,11 @@ pub fn capture(state: &State, hand: u32, step: u16, agent_ids: [u8; 4]) -> Pendi
     }
     let mut agents = [0u8; 4];
     let mut opp = [NO_TRUTH; 3];
+    let bot = StageBot::default();
     for seat in 0..4 {
         agents[rel(seat)] = agent_ids[seat];
         if seat != me {
-            opp[rel(seat) - 1] = truth(state, seat);
+            opp[rel(seat) - 1] = truth(state, seat, me, &bot);
         }
     }
     let phase = match state.phase_name() {
@@ -271,6 +457,8 @@ pub fn capture(state: &State, hand: u32, step: u16, agent_ids: [u8; 4]) -> Pendi
         features: feats,
         discards,
         opp,
+        order: pack_order_of(&features::discard_records(state), me),
+        view,
     }
 }
 
@@ -336,6 +524,20 @@ pub fn finish(row: &PendingRow, result: &HandResult, out: &mut Vec<u8>) {
         let seat = (me + r) % 4;
         out.extend_from_slice(&result.deltas[seat].to_le_bytes());
     }
+    out.extend_from_slice(&row.order);
+    for o in &row.opp {
+        out.push(o.state);
+    }
+    out.push(
+        result
+            .wins
+            .first()
+            .map_or(DRAW, |w| 2 * rel(w.seat) as u8 + (!w.self_drawn) as u8),
+    );
+    for o in &row.opp {
+        out.extend(o.claim.iter().map(|&c| c as u8));
+    }
+    out.push(row.view as u8);
     debug_assert_eq!(out.len() - start, row_bytes());
 }
 
@@ -543,6 +745,106 @@ mod tests {
             // The last row's opponents' outcomes agree with the result.
             let winners = result.wins.len();
             assert!(winners <= 3);
+            // Layout 3: the winner byte names the winner's relative seat or a draw.
+            let last = &out[out.len() - row_bytes()..];
+            let winner = last[row_bytes() - 3 * NUM_KINDS - 2];
+            let me = pending.last().unwrap().observer as usize;
+            match result.wins.first() {
+                Some(w) => assert_eq!(
+                    winner as usize,
+                    2 * ((w.seat + 4 - me) % 4) + (!w.self_drawn) as usize
+                ),
+                None => assert_eq!(winner, DRAW),
+            }
+            assert_eq!(last[row_bytes() - 1], View::Mover as u8);
         }
+    }
+
+    /// Layout 3: the packed order unpacks to `encode_order`, the state agrees
+    /// with the waits, and a claim is marked only where one is legal.
+    #[test]
+    fn order_and_claims_in_the_row() {
+        let rules = RuleSet::default();
+        let bot = Bot::by_name("stage").unwrap();
+        let mut rng = SmallRng::seed_from_u64(19);
+        let (mut claims, mut checked) = (0usize, 0usize);
+        let mut want = vec![0.0; features::ORDER_LEN];
+        let mut got = vec![0.0; features::ORDER_LEN];
+        for hand in 0..6 {
+            let mut s = State::new_deal(rules, &mut rng);
+            let mut legal = Vec::new();
+            while let Some(me) = s.current_player() {
+                let row = capture(&s, hand, 0, [0; 4]);
+                features::encode_order(&s, &mut want);
+                unpack_order(&row.order, &mut got);
+                assert_eq!(want, got);
+                for (r, o) in row.opp.iter().enumerate() {
+                    let seat = (me + r + 1) % 4;
+                    assert!(o.state <= 2);
+                    assert_eq!(o.state == 2, o.waits.iter().any(|&w| w));
+                    for k in Tile::all_kinds() {
+                        let i = k.index() as usize;
+                        if o.claim[i] {
+                            claims += 1;
+                            let hand = s.hand(seat);
+                            let chow_seat = seat == (me + 1) % 4;
+                            assert!(hand[k] >= 2 || (chow_seat && k.is_suited()), "{k}");
+                            assert!(s.wall_remaining() > 0);
+                        }
+                    }
+                }
+                checked += 1;
+                s.legal_actions(&mut legal);
+                let a = bot.choose(&s, &legal, &mut rng);
+                s.apply(a);
+            }
+        }
+        assert!(
+            checked > 200 && claims > 0,
+            "{checked} rows, {claims} claims"
+        );
+    }
+
+    /// Layout 3: a row from a seat that is not to act carries that seat's view
+    /// (its own hand, relative seats, the order from its side) and the view byte.
+    #[test]
+    fn spectator_rows_take_the_observers_view() {
+        let bot = Bot::by_name("stage").unwrap();
+        let mut rng = SmallRng::seed_from_u64(31);
+        let mut s = State::new_deal(RuleSet::default(), &mut rng);
+        let mut legal = Vec::new();
+        let mut checked = 0;
+        while let Some(p) = s.current_player() {
+            s.legal_actions(&mut legal);
+            let a = bot.choose(&s, &legal, &mut rng);
+            s.apply(a);
+            if s.current_player().is_none() || s.current_player() == Some(p) {
+                continue;
+            }
+            let row = capture_for(&s, p, View::AfterDiscard, 1, 2, [0; 4]);
+            assert_eq!(row.observer as usize, p);
+            assert_eq!(row.view, View::AfterDiscard);
+            let mut want = vec![0.0; STATE_LEN];
+            features::encode_for(&s, p, &mut want);
+            assert_eq!(&row.features[..STATE_LEN], &want[..]);
+            let mut order = vec![0.0; features::ORDER_LEN];
+            unpack_order(&row.order, &mut order);
+            let mut want_order = vec![0.0; features::ORDER_LEN];
+            features::encode_order_for(&s, p, &mut want_order);
+            assert_eq!(order, want_order);
+            let mut out = Vec::new();
+            finish(
+                &row,
+                &HandResult {
+                    wins: Vec::new(),
+                    deltas: [0; 4],
+                },
+                &mut out,
+            );
+            assert_eq!(out.len(), row_bytes());
+            assert_eq!(out[row_bytes() - 1], View::AfterDiscard as u8);
+            checked += 1;
+        }
+        assert!(checked > 20);
     }
 }

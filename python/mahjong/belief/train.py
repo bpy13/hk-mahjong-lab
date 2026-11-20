@@ -5,9 +5,14 @@
     python -m mahjong.belief.train --logs runs/logs/train --out models/belief.pt --epochs 5
         [--holdout runs/logs/holdout] [--discards] [--passed] [--resume] [--ckpt-dir runs/belief]
         [--log runs/belief/train.log] [--race] [--init models/belief.pt]
+        [--order] [--no-counts] [--task19] [--weight tenpai=10 ...] [--hours 1.5]
 
 ``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
 ``race_log`` example); ``--init`` warm-starts from an earlier model (``warm_start``).
+Plan 2026-11-16 Task 19: ``--order`` feeds the discard and claim order (a layout 3
+log), ``--no-counts`` drops the copies head, ``--task19`` adds the ``state``, ``winner``
+and ``claim`` heads, ``--weight head=w`` scales a head's loss, ``--hours`` stops after
+the epoch that passes the limit.
 
 Each epoch visits every chunk once, in a fresh random order, loading ``--group``
 chunks at a time and shuffling the rows inside the group (a chunk is 500 hands,
@@ -63,7 +68,7 @@ def evaluate_loss(net: BeliefNet, batch: Batch, device: torch.device, bs: int) -
     with torch.no_grad():
         for i in range(0, len(batch), bs):
             b = batch.index(torch.arange(i, min(i + bs, len(batch)))).to(device)
-            out = net(net.inputs(b.features, b.discards, b.passed))
+            out = net(net.inputs_of(b))
             parts = losses(net, out, b)
             for k, v in parts.items():
                 sums[k] = sums.get(k, 0.0) + float(v) * len(b)
@@ -87,8 +92,19 @@ def train(args: argparse.Namespace) -> BeliefNet:
     device = torch.device(args.device)
     log = LogDir(args.logs)
     holdout = LogDir(args.holdout) if args.holdout and Path(args.holdout).exists() else None
+    weights: dict[str, float] = {}
+    for w in args.weight:
+        name, _, value = w.partition("=")
+        weights[name] = float(value)
     cfg = BeliefConfig(
-        hidden=tuple(args.hidden), discards=args.discards, passed=args.passed, race=args.race
+        hidden=tuple(args.hidden),
+        discards=args.discards,
+        passed=args.passed,
+        race=args.race,
+        order=args.order,
+        counts=not args.no_counts,
+        task19=args.task19,
+        weights=weights,
     )
     net = BeliefNet(cfg)
     if args.init:
@@ -144,7 +160,7 @@ def train(args: argparse.Namespace) -> BeliefNet:
             perm = torch.randperm(len(group), device=device)
             for i in range(0, len(group) - args.batch + 1, args.batch):
                 b = group.index(perm[i : i + args.batch])
-                out = net(net.inputs(b.features, b.discards, b.passed))
+                out = net(net.inputs_of(b))
                 parts = losses(net, out, b)
                 opt.zero_grad(set_to_none=True)
                 parts["total"].backward()  # type: ignore[no-untyped-call]
@@ -175,6 +191,9 @@ def train(args: argparse.Namespace) -> BeliefNet:
             ckpt_dir / f"ckpt-{epoch}.pt",
         )
         write_log(entry)
+        if args.hours and time.time() - started > args.hours * 3600:
+            write_log({"event": "time_limit", "epoch": epoch, "hours": args.hours})
+            break
     net = net.cpu()
     out = Path(args.out)
     net.save(out)
@@ -212,6 +231,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="add the race heads state and mode (needs a race_log log; docs/race-bot.md §7)",
     )
     p.add_argument("--init", default=None, help="warm-start from this .pt (torso and shared heads)")
+    p.add_argument(
+        "--order",
+        action="store_true",
+        help="also feed the discard and claim order block (needs logs of layout 3; Task 19)",
+    )
+    p.add_argument("--no-counts", action="store_true", help="drop the copies-per-kind head")
+    p.add_argument(
+        "--task19",
+        action="store_true",
+        help="add the state, winner and claim heads (needs logs of layout 3)",
+    )
+    p.add_argument(
+        "--weight",
+        action="append",
+        default=[],
+        metavar="HEAD=W",
+        help="loss weight of a head (repeatable; default 1)",
+    )
+    p.add_argument("--hours", type=float, default=0.0, help="stop after the epoch past this limit")
     p.add_argument("--group", type=int, default=4, help="chunks loaded and shuffled together")
     p.add_argument(
         "--max-chunks", type=int, default=0, help="use only the first N chunks (smoke runs)"

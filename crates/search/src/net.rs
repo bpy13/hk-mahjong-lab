@@ -22,7 +22,8 @@
 //! (zeros at play time), `passed` ([`crate::features::encode_passed`]: the
 //! passed-tile record and 摸打 / 入章), `discards` ([`encode_discards`]: each opponent's last
 //! eight discards, one-hot), `history` ([`crate::features::encode_history`]:
-//! every discard of every seat in order) and `risk` ([`crate::risk_net::encode_risk`]:
+//! every discard of every seat in order), `order` ([`crate::features::encode_order`]:
+//! the same without the 摸打 / 入章 flag; plan 2026-11-16 Task 19) and `risk` ([`crate::risk_net::encode_risk`]:
 //! per opponent each kind's relation to its exposed sets, its discards and the
 //! passed-win lock; plan 2026-11-16 Task 15). Output names are the model's business (the belief
 //! model's are listed in `docs/belief.md`); a `policy` slice, when present, is
@@ -38,8 +39,8 @@
 //! `netpimc:` agents take v3 files unchanged.
 
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
-use crate::features::{encode, encode_passed, ORACLE_LEN, PASSED_LEN, STATE_LEN};
-use crate::features::{encode_history, HISTORY_LEN};
+use crate::features::{encode_for, encode_passed_for, ORACLE_LEN, PASSED_LEN, STATE_LEN};
+use crate::features::{encode_history_for, encode_order_for, HISTORY_LEN, ORDER_LEN};
 use crate::risk_net::{encode_risk, RISK_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
@@ -148,9 +149,17 @@ fn read_slices(r: &mut impl Read) -> Result<Vec<Slice>, String> {
 /// # Panics
 /// Panics if the hand is over or `out` has the wrong length.
 pub fn encode_discards(state: &State, out: &mut [f32]) {
+    let me = state.current_player().expect("hand in progress");
+    encode_discards_for(state, me, out);
+}
+
+/// [`encode_discards`] from seat `me`'s point of view.
+///
+/// # Panics
+/// Panics if `out` has the wrong length.
+pub fn encode_discards_for(state: &State, me: usize, out: &mut [f32]) {
     assert_eq!(out.len(), DISCARD_LEN);
     out.fill(0.0);
-    let me = state.current_player().expect("hand in progress");
     let mut history: [Vec<u8>; 4] = Default::default();
     for e in state.events() {
         if let Event::Discard { seat, tile, .. } = *e {
@@ -269,6 +278,7 @@ impl Mlp {
                 "discards" => DISCARD_LEN,
                 "passed" => PASSED_LEN,
                 "history" => HISTORY_LEN,
+                "order" => ORDER_LEN,
                 "risk" => RISK_LEN,
                 other => return Err(format!("unknown input slice {other:?}")),
             };
@@ -343,24 +353,49 @@ impl Mlp {
     }
 
     /// The input vector for `state`: every named input slice filled from public
-    /// information (`features`, `discards`, `passed`, `history`, `risk`; `oracle`
-    /// stays zero).
+    /// information (`features`, `discards`, `passed`, `history`, `order`, `risk`;
+    /// `oracle` stays zero).
     ///
     /// # Panics
     /// Panics if the hand is over.
     pub fn encode_input(&self, state: &State) -> Vec<f32> {
+        let me = state.current_player().expect("hand in progress");
+        self.encode_input_for(state, me)
+    }
+
+    /// [`Mlp::encode_input`] from seat `me`'s point of view (plan 2026-11-16
+    /// Task 19: a belief network read after a discard or a claim). Every slice
+    /// but `risk` has an observer form; `risk` is the acting seat's.
+    ///
+    /// # Panics
+    /// Panics if the hand is over, or if the network reads `risk` and `me` is not
+    /// the player to act.
+    pub fn encode_input_for(&self, state: &State, me: usize) -> Vec<f32> {
         let mut x = vec![0.0f32; self.input_len()];
         for s in &self.inputs {
             match s.name.as_str() {
-                "features" => encode(state, &mut x[s.range.clone()]),
-                "discards" => encode_discards(state, &mut x[s.range.clone()]),
-                "passed" => encode_passed(state, &mut x[s.range.clone()]),
-                "history" => encode_history(state, &mut x[s.range.clone()]),
-                "risk" => encode_risk(state, &mut x[s.range.clone()]),
+                "features" => encode_for(state, me, &mut x[s.range.clone()]),
+                "discards" => encode_discards_for(state, me, &mut x[s.range.clone()]),
+                "passed" => encode_passed_for(state, me, &mut x[s.range.clone()]),
+                "history" => encode_history_for(state, me, &mut x[s.range.clone()]),
+                "order" => encode_order_for(state, me, &mut x[s.range.clone()]),
+                "risk" => {
+                    assert_eq!(
+                        state.current_player(),
+                        Some(me),
+                        "the risk block is the acting seat's"
+                    );
+                    encode_risk(state, &mut x[s.range.clone()])
+                }
                 _ => {}
             }
         }
         x
+    }
+
+    /// Whether the network names the input slice `name`.
+    pub fn reads(&self, name: &str) -> bool {
+        self.inputs.iter().any(|s| s.name == name)
     }
 
     /// One forward pass on an input vector (zero-padded to the input size).
@@ -388,6 +423,11 @@ impl Mlp {
     /// [`Mlp::encode_input`] followed by [`Mlp::forward`].
     pub fn forward_state(&self, state: &State) -> Vec<f32> {
         self.forward(&self.encode_input(state))
+    }
+
+    /// [`Mlp::encode_input_for`] followed by [`Mlp::forward`].
+    pub fn forward_state_for(&self, state: &State, me: usize) -> Vec<f32> {
+        self.forward(&self.encode_input_for(state, me))
     }
 
     /// Network scores of each legal action in `state` (same order as `legal`),
@@ -445,6 +485,7 @@ pub fn top_actions(net: &Mlp, state: &State, k: usize) -> Vec<Action> {
 mod tests {
     use super::*;
     use crate::bots::Bot;
+    use crate::features::encode_passed;
     use mahjong_hk::RuleSet;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;

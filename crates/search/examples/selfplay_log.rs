@@ -16,7 +16,14 @@
 //!   tenth hand one random seat plays `pimc:samples=16,candidates=4` instead;
 //! * `holdout`: one each of value, closed, the PPO network
 //!   (`net:path=models/ppo.mjnn`) and defensive, in a random seat order. Use a
-//!   different `--seed`: hand seeds derive from `--seed` and the hand index.
+//!   different `--seed`: hand seeds derive from `--seed` and the hand index;
+//! * `stage`: four three-stage bots (plan 2026-11-16 Task 19; the rows carry
+//!   layout 3's order, state, winner and claim fields whatever the field).
+//!
+//! Layout 3 also writes rows from the discarder's point of view when it is not
+//! to act (`log::View`): right after each discard (a claim window on it, or
+//! the next seat's turn), after a claim window on it closed without a claim,
+//! and after an opponent claimed it; `--mover-only` leaves them out.
 //!
 //! `--bestof K` (plan Task 5's best-of-K baseline) also draws `K` structured
 //! determinizations (`world::sample_world`) at every decision and writes, beside
@@ -25,8 +32,9 @@
 //! uses its own generator, so the hands played are the same as without it.
 
 use mahjong_games::{Game, Policy};
+use mahjong_hk::{Action, Event};
 use mahjong_hk::{RuleSet, State};
-use mahjong_search::log::{capture, finish, row_bytes, LogWriter};
+use mahjong_search::log::{capture, capture_for, finish, row_bytes, LogWriter, View};
 use mahjong_search::{sample_world, Agent};
 use mahjong_tiles::{Tile, NUM_KINDS};
 use rand::rngs::SmallRng;
@@ -47,15 +55,42 @@ const TRAIN_AGENTS: &[&str] = &[
 const TRAIN_POOL: &[u8] = &[0, 0, 0, 1, 1, 2, 3];
 const TRAIN_PIMC: u8 = 4;
 const HOLDOUT_AGENTS: &[&str] = &["value", "closed", "net:path=models/ppo.mjnn", "defensive"];
+const STAGE_AGENTS: &[&str] = &["stage"];
+
+/// Which bots play.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Train,
+    Holdout,
+    Stage,
+}
+
+impl Field {
+    fn name(self) -> &'static str {
+        match self {
+            Field::Train => "train",
+            Field::Holdout => "holdout",
+            Field::Stage => "stage",
+        }
+    }
+    fn agents(self) -> &'static [&'static str] {
+        match self {
+            Field::Train => TRAIN_AGENTS,
+            Field::Holdout => HOLDOUT_AGENTS,
+            Field::Stage => STAGE_AGENTS,
+        }
+    }
+}
 
 struct Args {
     hands: usize,
     out: PathBuf,
     seed: u64,
-    holdout: bool,
+    field: Field,
     threads: usize,
     chunk: usize,
     bestof: usize,
+    mover_only: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -63,10 +98,11 @@ fn parse_args() -> Result<Args, String> {
         hands: 25_000,
         out: PathBuf::from("runs/logs/train"),
         seed: 1,
-        holdout: false,
+        field: Field::Train,
         threads: 14,
         chunk: 500,
         bestof: 0,
+        mover_only: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -79,11 +115,13 @@ fn parse_args() -> Result<Args, String> {
             "--threads" => a.threads = num(v()?)?.max(1) as usize,
             "--chunk" => a.chunk = num(v()?)?.max(1) as usize,
             "--bestof" => a.bestof = num(v()?)?.min(255) as usize,
+            "--mover-only" => a.mover_only = true,
             "--field" => {
-                a.holdout = match v()?.as_str() {
-                    "train" => false,
-                    "holdout" => true,
-                    f => return Err(format!("unknown field {f:?} (train or holdout)")),
+                a.field = match v()?.as_str() {
+                    "train" => Field::Train,
+                    "holdout" => Field::Holdout,
+                    "stage" => Field::Stage,
+                    f => return Err(format!("unknown field {f:?} (train, holdout or stage)")),
                 }
             }
             _ => return Err(format!("unknown argument {k:?}")),
@@ -103,11 +141,15 @@ fn hand_seed(seed: u64, hand: u64) -> u64 {
 }
 
 /// Agent index (into the field's agent list) for each seat of `hand`.
-fn seat_agents(holdout: bool, hand: u64, rng: &mut SmallRng) -> [u8; 4] {
-    if holdout {
-        let mut ids = [0u8, 1, 2, 3];
-        ids.shuffle(rng);
-        return ids;
+fn seat_agents(field: Field, hand: u64, rng: &mut SmallRng) -> [u8; 4] {
+    match field {
+        Field::Holdout => {
+            let mut ids = [0u8, 1, 2, 3];
+            ids.shuffle(rng);
+            return ids;
+        }
+        Field::Stage => return [0; 4],
+        Field::Train => {}
     }
     let mut ids = [0u8; 4];
     for id in &mut ids {
@@ -134,9 +176,16 @@ struct HandOut {
 /// pool, PIMC's inner parallel loop lets a waiting thread steal whole hands, so
 /// one search decision waited on chains of stolen hands and a 500-hand chunk
 /// ended with two busy cores for most of its time (5× slower overall).
-fn play_hand(agents: &[Agent], holdout: bool, seed: u64, hand: u64, bestof: usize) -> HandOut {
+fn play_hand(
+    agents: &[Agent],
+    field: Field,
+    seed: u64,
+    hand: u64,
+    bestof: usize,
+    mover_only: bool,
+) -> HandOut {
     let mut rng = SmallRng::seed_from_u64(hand_seed(seed, hand));
-    let ids = seat_agents(holdout, hand, &mut rng);
+    let ids = seat_agents(field, hand, &mut rng);
     if ids
         .iter()
         .any(|&i| matches!(agents[i as usize], Agent::Pimc(_)))
@@ -145,9 +194,9 @@ fn play_hand(agents: &[Agent], holdout: bool, seed: u64, hand: u64, bestof: usiz
             .num_threads(1)
             .build()
             .expect("one-thread pool");
-        return one.install(|| play_seated(agents, ids, hand, &mut rng, bestof));
+        return one.install(|| play_seated(agents, ids, hand, &mut rng, bestof, mover_only));
     }
-    play_seated(agents, ids, hand, &mut rng, bestof)
+    play_seated(agents, ids, hand, &mut rng, bestof, mover_only)
 }
 
 /// Appends the best-of-`k` count histogram of this decision to `out` (its own
@@ -174,12 +223,15 @@ fn play_seated(
     hand: u64,
     rng: &mut SmallRng,
     bestof: usize,
+    mover_only: bool,
 ) -> HandOut {
     let mut s = State::new_deal(RuleSet::default(), rng);
     let mut pending = Vec::new();
     let mut legal = Vec::new();
     let mut step = 0u16;
     let mut sidecar = Vec::new();
+    // The seat whose discard a claim window is open on, for the rows after it.
+    let mut window_of: Option<usize> = None;
     while let Some(p) = s.current_player() {
         pending.push(capture(&s, hand as u32, step, ids));
         if bestof > 0 {
@@ -187,8 +239,35 @@ fn play_seated(
         }
         s.legal_actions(&mut legal);
         let a = agents[ids[p] as usize].choose(&s, &legal, rng);
+        let in_window = s.in_claim();
         s.apply(a);
         step = step.saturating_add(1);
+        if mover_only || s.current_player().is_none() {
+            continue;
+        }
+        if let Action::Discard(_) = a {
+            // Right after the discard: a window on it, or the next seat's turn.
+            pending.push(capture_for(
+                &s,
+                p,
+                View::AfterDiscard,
+                hand as u32,
+                step,
+                ids,
+            ));
+            window_of = s.in_claim().then_some(p);
+        } else if in_window && !s.in_claim() {
+            // The window closed: a claim (the claimer is to discard) or not.
+            if let Some(d) = window_of.take() {
+                let claimed = matches!(s.events().last(), Some(Event::Claim { .. }));
+                let view = if claimed {
+                    View::AfterClaim
+                } else {
+                    View::AfterPass
+                };
+                pending.push(capture_for(&s, d, view, hand as u32, step, ids));
+            }
+        }
     }
     let result = s.result().expect("finished").clone();
     let mut out = Vec::with_capacity(pending.len() * row_bytes());
@@ -220,23 +299,20 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let names = if args.holdout {
-        HOLDOUT_AGENTS
-    } else {
-        TRAIN_AGENTS
-    };
+    let names = args.field.agents();
     let agents: Vec<Agent> = names
         .iter()
         .map(|n| Agent::parse(n).unwrap_or_else(|e| panic!("agent {n}: {e}")))
         .collect();
     let meta_head = format!(
-        "\"field\": \"{}\", \"seed\": {}, \"hands_target\": {}, \"chunk_hands\": {}, \"threads\": {}, \"bestof\": {}, \"agents\": {}",
-        if args.holdout { "holdout" } else { "train" },
+        "\"field\": \"{}\", \"seed\": {}, \"hands_target\": {}, \"chunk_hands\": {}, \"threads\": {}, \"bestof\": {}, \"mover_only\": {}, \"agents\": {}",
+        args.field.name(),
         args.seed,
         args.hands,
         args.chunk,
         args.threads,
         args.bestof,
+        args.mover_only,
         json_list(names)
     );
     // A resumed run must keep the chunk size, or hand indices would shift.
@@ -271,7 +347,16 @@ fn main() {
         let hands: Vec<HandOut> = pool.install(|| {
             (lo..hi)
                 .into_par_iter()
-                .map(|h| play_hand(&agents, args.holdout, args.seed, h as u64, args.bestof))
+                .map(|h| {
+                    play_hand(
+                        &agents,
+                        args.field,
+                        args.seed,
+                        h as u64,
+                        args.bestof,
+                        args.mover_only,
+                    )
+                })
                 .collect()
         });
         let bytes: Vec<u8> = hands.iter().flat_map(|h| h.rows.iter().copied()).collect();
