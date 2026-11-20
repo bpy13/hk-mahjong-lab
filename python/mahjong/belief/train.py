@@ -6,7 +6,7 @@
         [--holdout runs/logs/holdout] [--discards] [--passed] [--resume] [--ckpt-dir runs/belief]
         [--log runs/belief/train.log] [--race] [--init models/belief.pt]
         [--order] [--no-counts] [--task19] [--weight tenpai=10 ...] [--hours 1.5]
-        [--dropout 0.2] [--weight-decay 1e-4]
+        [--dropout 0.2] [--weight-decay 1e-4] [--suits]
 
 ``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
 ``race_log`` example); ``--init`` warm-starts from an earlier model (``warm_start``).
@@ -104,6 +104,7 @@ def train(args: argparse.Namespace) -> BeliefNet:
         passed=args.passed,
         race=args.race,
         order=args.order,
+        suits=args.suits,
         counts=not args.no_counts,
         task19=args.task19,
         weights=weights,
@@ -240,6 +241,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="also feed the discard and claim order block (needs logs of layout 3; Task 19)",
     )
     p.add_argument("--no-counts", action="store_true", help="drop the copies-per-kind head")
+    p.add_argument(
+        "--suits",
+        action="store_true",
+        help="also feed the per-seat suit summary of the discard order (layout 3 logs; Task 19)",
+    )
     p.add_argument(
         "--task19",
         action="store_true",

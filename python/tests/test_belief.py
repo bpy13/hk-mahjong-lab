@@ -279,3 +279,42 @@ def test_real_rows_make_a_batch() -> None:
     # A recovered discard is a tile the observer held (plane 0 of the features).
     held = rows["features"][idx, tile] > 0.5
     assert held.all()
+
+
+def test_suits_block_matches_the_rust_summary() -> None:
+    """Plan 2026-11-16 Task 19: the same hand-made discard list as the Rust test
+    ``features::tests::suits_block_summarises_each_seat`` gives the same 14 values
+    for seat 1 (1p 2p E 3p 5s 9p; 2p claimed) and an empty seat 2."""
+    from mahjong.belief.model import ORDER_BYTES, ORDER_DEPTH, SUITS_PER_SEAT, suits_block
+
+    packed = torch.zeros((1, ORDER_BYTES), dtype=torch.uint8)
+    # Kinds: 1p = 9, 2p = 10, E = 27, 3p = 11, 5s = 22, 9p = 17; byte = 1 + kind + 34 * claimed.
+    packed[0, 0] = 1 + 27  # seat 0: E
+    for k, (kind, claimed) in enumerate([(9, 0), (10, 1), (27, 0), (11, 0), (22, 0), (17, 0)]):
+        packed[0, ORDER_DEPTH + k] = 1 + kind + 34 * claimed
+    out = suits_block(packed)[0]
+    seat1 = out[SUITS_PER_SEAT : 2 * SUITS_PER_SEAT].tolist()
+    want = [
+        6 / 24,
+        0.0,
+        4 / 6,
+        1 / 6,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        4 / 24,
+        1 / 6,
+        0.0,
+        3 / 5,
+        1 / 5,
+    ]
+    assert seat1 == pytest.approx(want, abs=1e-6)
+    seat0 = out[:SUITS_PER_SEAT].tolist()
+    assert seat0[0] == pytest.approx(1 / 24)
+    assert seat0[10] == 1.0
+    assert seat0[7:10] == [1.0, 1.0, 1.0]
+    seat2 = out[2 * SUITS_PER_SEAT : 3 * SUITS_PER_SEAT].tolist()
+    assert seat2[0] == 0.0
+    assert seat2[7:10] == [1.0, 1.0, 1.0]

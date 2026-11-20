@@ -41,6 +41,7 @@
 use crate::cnn::{SuitCnn, OUTPUT_LEN};
 use crate::features::{encode_for, encode_passed_for, ORACLE_LEN, PASSED_LEN, STATE_LEN};
 use crate::features::{encode_history_for, encode_order_for, HISTORY_LEN, ORDER_LEN};
+use crate::features::{encode_suits_for, SUITS_LEN};
 use crate::risk_net::{encode_risk, RISK_LEN};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State, NUM_ACTION_CODES};
@@ -279,6 +280,7 @@ impl Mlp {
                 "passed" => PASSED_LEN,
                 "history" => HISTORY_LEN,
                 "order" => ORDER_LEN,
+                "suits" => SUITS_LEN,
                 "risk" => RISK_LEN,
                 other => return Err(format!("unknown input slice {other:?}")),
             };
@@ -379,6 +381,7 @@ impl Mlp {
                 "passed" => encode_passed_for(state, me, &mut x[s.range.clone()]),
                 "history" => encode_history_for(state, me, &mut x[s.range.clone()]),
                 "order" => encode_order_for(state, me, &mut x[s.range.clone()]),
+                "suits" => encode_suits_for(state, me, &mut x[s.range.clone()]),
                 "risk" => {
                     assert_eq!(
                         state.current_player(),

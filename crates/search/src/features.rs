@@ -649,6 +649,111 @@ pub fn encode_order_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) {
     encode_order_impl(records, me, out, false);
 }
 
+/// Values per seat in [`encode_suits`].
+pub const SUITS_PER_SEAT: usize = 14;
+/// Length of [`encode_suits`]'s output (four seats).
+pub const SUITS_LEN: usize = 4 * SUITS_PER_SEAT;
+
+/// Encodes a per-seat summary of the discard order from the view of the player
+/// to act into `out` (length [`SUITS_LEN`]; plan 2026-11-16 Task 19): the suit
+/// pattern of each seat's discards, which the one-hot `order` block holds only
+/// as a conjunction over many slots. It is computed from the same first 24
+/// discards per seat as [`encode_order`] (plus the overflow count), so a logged
+/// `order` field reproduces it exactly (`log::suits_from_packed`). Per relative
+/// seat `r` (0 = the viewer), 14 values:
+///
+/// * `0`: discards so far / 24 (capped at 1);
+/// * `1–3`: share of the first 24 discards in 萬, 筒, 索;
+/// * `4–6`: whether that suit has been thrown at all;
+/// * `7–9`: index of the seat's first discard of that suit / 24, 1 if none yet
+///   (how long the seat avoided the suit);
+/// * `10`: share of honours;
+/// * `11–13`: count of that suit among the seat's last five discards / 5.
+///
+/// Nothing in it tells a drawn tile from a hand tile.
+///
+/// # Panics
+/// Panics if the hand is over or `out` has the wrong length.
+pub fn encode_suits(state: &State, out: &mut [f32]) {
+    let me = state.current_player().expect("hand in progress");
+    encode_suits_of(&discard_records(state), me, out);
+}
+
+/// [`encode_suits`] from seat `me`'s point of view.
+pub fn encode_suits_for(state: &State, me: usize, out: &mut [f32]) {
+    encode_suits_of(&discard_records(state), me, out);
+}
+
+/// [`encode_suits`] from a list of discards (in the order thrown) for the
+/// absolute seat `me`.
+///
+/// # Panics
+/// Panics if `out` has the wrong length or a seat is not 0–3.
+pub fn encode_suits_of(records: &[DiscardRecord], me: usize, out: &mut [f32]) {
+    assert!(me < 4);
+    let mut kinds: [Vec<u8>; 4] = Default::default();
+    let mut total = [0usize; 4];
+    for d in records {
+        let r = (d.seat as usize + 4 - me) % 4;
+        total[r] += 1;
+        if kinds[r].len() < HISTORY_DEPTH {
+            kinds[r].push(d.tile.index());
+        }
+    }
+    suits_summary(&kinds, total, out);
+}
+
+/// The shared body of [`encode_suits_of`] and `log::suits_from_packed`: per
+/// seat the kinds of its first 24 discards in order and its total count.
+///
+/// # Panics
+/// Panics if `out` has the wrong length.
+pub fn suits_summary(kinds: &[Vec<u8>; 4], total: [usize; 4], out: &mut [f32]) {
+    assert_eq!(out.len(), SUITS_LEN);
+    out.fill(0.0);
+    let suit_of = |k: u8| {
+        if (k as usize) < 27 {
+            Some(k as usize / 9)
+        } else {
+            None
+        }
+    };
+    for r in 0..4 {
+        let o = &mut out[r * SUITS_PER_SEAT..(r + 1) * SUITS_PER_SEAT];
+        let seat = &kinds[r];
+        let n = seat.len();
+        o[0] = (total[r].min(HISTORY_DEPTH) as f32) / HISTORY_DEPTH as f32;
+        if n == 0 {
+            for s in 0..3 {
+                o[7 + s] = 1.0;
+            }
+            continue;
+        }
+        let mut count = [0usize; 4];
+        let mut first = [HISTORY_DEPTH; 3];
+        let mut last5 = [0usize; 3];
+        for (i, &k) in seat.iter().enumerate() {
+            match suit_of(k) {
+                Some(s) => {
+                    count[s] += 1;
+                    first[s] = first[s].min(i);
+                    if i + 5 >= n {
+                        last5[s] += 1;
+                    }
+                }
+                None => count[3] += 1,
+            }
+        }
+        for s in 0..3 {
+            o[1 + s] = count[s] as f32 / n as f32;
+            o[4 + s] = (count[s] > 0) as u8 as f32;
+            o[7 + s] = first[s] as f32 / HISTORY_DEPTH as f32;
+            o[11 + s] = last5[s] as f32 / 5.0;
+        }
+        o[10] = count[3] as f32 / n as f32;
+    }
+}
+
 /// The shared body of [`encode_history_of`] (`source` true: 1 = 入章, ½ = 摸打)
 /// and [`encode_order_of`] (`source` false: 1 for every discard).
 fn encode_order_impl(records: &[DiscardRecord], me: usize, out: &mut [f32], source: bool) {
@@ -1021,6 +1126,70 @@ mod tests {
 
     fn plane_of(v: &[f32], k: usize) -> &[f32] {
         &v[k * NUM_KINDS..(k + 1) * NUM_KINDS]
+    }
+
+    /// Plan 2026-11-16 Task 19: the suit summary of a hand-made discard list,
+    /// value by value, and its indifference to how a tile was thrown.
+    #[test]
+    fn suits_block_summarises_each_seat() {
+        let t = |s: &str| s.parse::<Tile>().unwrap();
+        let rec = |seat: u8, tile: &str, from_hand: bool, claimed: bool| DiscardRecord {
+            seat,
+            tile: t(tile),
+            from_hand,
+            claimed,
+        };
+        // Seat 1 (viewer 0's next seat): 1p 2p E 3p 5s 9p: no 萬 at all, first
+        // 索 at index 4; seat 2 throws nothing; seat 0 one honour.
+        let mut records = vec![
+            rec(0, "E", true, false),
+            rec(1, "1p", false, false),
+            rec(1, "2p", true, true),
+            rec(1, "E", false, false),
+            rec(1, "3p", true, false),
+            rec(1, "5s", false, false),
+            rec(1, "9p", true, false),
+        ];
+        let mut out = vec![0.0; SUITS_LEN];
+        encode_suits_of(&records, 0, &mut out);
+        let seat1 = &out[SUITS_PER_SEAT..2 * SUITS_PER_SEAT];
+        let want = [
+            6.0 / 24.0,
+            0.0,
+            4.0 / 6.0,
+            1.0 / 6.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            4.0 / 24.0,
+            1.0 / 6.0,
+            0.0,
+            3.0 / 5.0,
+            1.0 / 5.0,
+        ];
+        for (g, w) in seat1.iter().zip(want) {
+            assert!((g - w).abs() < 1e-6, "{seat1:?} vs {want:?}");
+        }
+        let seat0 = &out[..SUITS_PER_SEAT];
+        assert_eq!(seat0[0], 1.0 / 24.0);
+        assert_eq!(seat0[10], 1.0);
+        assert_eq!(&seat0[7..10], &[1.0, 1.0, 1.0]);
+        let seat2 = &out[2 * SUITS_PER_SEAT..3 * SUITS_PER_SEAT];
+        assert_eq!(seat2[0], 0.0);
+        assert_eq!(&seat2[7..10], &[1.0, 1.0, 1.0]);
+        // Flipping 摸打 / 入章 changes nothing.
+        for d in &mut records {
+            d.from_hand = !d.from_hand;
+        }
+        let mut flipped = vec![0.0; SUITS_LEN];
+        encode_suits_of(&records, 0, &mut flipped);
+        assert_eq!(out, flipped);
+        // From another viewer the seats rotate.
+        let mut from1 = vec![0.0; SUITS_LEN];
+        encode_suits_of(&records, 1, &mut from1);
+        assert_eq!(&from1[..SUITS_PER_SEAT], seat1);
     }
 
     /// Plan 2026-11-16 Task 19: the `order` block is the `history` block with

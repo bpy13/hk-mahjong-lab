@@ -5,7 +5,9 @@ opponent's last eight discards one-hot, ``3 × 8 × 34``; with ``passed=True``, 
 passed-tile record and 摸打 / 入章 of ``features::encode_passed``, :data:`PASSED_LEN`
 values, from logs of layout 2; with ``order=True``, every seat's discard and claim
 order without the 摸打 / 入章 flag, ``features::encode_order``, :data:`ORDER_LEN`
-values, from logs of layout 3; plan 2026-11-16 Task 19), and writes, for the three
+values, from logs of layout 3; plan 2026-11-16 Task 19; with ``suits=True`` the
+per-seat suit summary of that order, ``features::encode_suits``, :data:`SUITS_LEN`
+values computed from the same packed field), and writes, for the three
 opponents (relative seats 1 = next, 2 = across, 3 = previous), the heads in
 :data:`HEADS`:
 
@@ -71,6 +73,10 @@ ORDER_SLOTS = 4 * ORDER_DEPTH
 ORDER_LEN = ORDER_SLOTS * NUM_KINDS + 2 * ORDER_SLOTS + 4
 #: Bytes of the log's packed ``order`` field (``log::pack_order``).
 ORDER_BYTES = ORDER_SLOTS + 4
+#: Values per seat in ``features::encode_suits`` (see :func:`suits_block`).
+SUITS_PER_SEAT = 14
+#: Length of ``features::encode_suits``.
+SUITS_LEN = 4 * SUITS_PER_SEAT
 MAX_COPIES = 5
 FAAN_MIN, FAAN_MAX = 3, 10
 N_FAAN = FAAN_MAX - FAAN_MIN + 1
@@ -139,6 +145,10 @@ class BeliefConfig:
     #: Also feed the discard and claim order block (``features::encode_order``; plan
     #: 2026-11-16 Task 19). Needs logs of layout 3, which carry an ``order`` field.
     order: bool = False
+    #: Also feed the per-seat suit summary of the discard order
+    #: (``features::encode_suits``; plan 2026-11-16 Task 19), computed from the
+    #: log's packed ``order`` field, so it needs logs of layout 3 as well.
+    suits: bool = False
     #: Keep the copies-per-kind head (Brian, 2026-11-20, doubts it is still needed;
     #: Task 19 fits it both ways).
     counts: bool = True
@@ -158,6 +168,7 @@ class BeliefConfig:
             + (DISCARD_LEN if self.discards else 0)
             + (PASSED_LEN if self.passed else 0)
             + (ORDER_LEN if self.order else 0)
+            + (SUITS_LEN if self.suits else 0)
         )
 
     @property
@@ -222,6 +233,10 @@ class BeliefNet(nn.Module):
             if order is None:
                 raise ValueError("this network reads the order block; the log has none")
             parts.append(order_block(order))
+        if self.cfg.suits:
+            if order is None:
+                raise ValueError("this network reads the suit summary; the log has no order")
+            parts.append(suits_block(order))
         return parts[0] if len(parts) == 1 else torch.cat(parts, dim=1)
 
     def inputs_of(self, b: Batch) -> torch.Tensor:
@@ -292,6 +307,8 @@ class BeliefNet(nn.Module):
             inputs.append(("passed", PASSED_LEN))
         if self.cfg.order:
             inputs.append(("order", ORDER_LEN))
+        if self.cfg.suits:
+            inputs.append(("suits", SUITS_LEN))
         outputs = [(name, head_groups(name) * per) for name, per in self.cfg.heads.items()]
         write_mjnn(path, linears, inputs=inputs, outputs=outputs)
 
@@ -304,6 +321,7 @@ def config_from_dict(c: dict[str, Any]) -> BeliefConfig:
         passed=c.get("passed", False),
         race=c.get("race", False),
         order=c.get("order", False),
+        suits=c.get("suits", False),
         counts=c.get("counts", True),
         task19=c.get("task19", False),
         weights=dict(c.get("weights", {})),
@@ -354,6 +372,44 @@ def order_block(packed: torch.Tensor) -> torch.Tensor:
     scalars = torch.stack([filled.float(), claimed], dim=-1).reshape(n, 2 * ORDER_SLOTS)
     over = (packed[:, ORDER_SLOTS:].float() / 4.0).clamp(max=1.0)
     return torch.cat([planes.reshape(n, ORDER_SLOTS * NUM_KINDS), scalars, over], dim=1)
+
+
+def suits_block(packed: torch.Tensor) -> torch.Tensor:
+    """``features::encode_suits``'s block ``(n, SUITS_LEN)`` from the log's packed
+    ``order`` bytes (the same numbers as ``log::suits_from_packed``). Per relative
+    seat, 14 values: discards / 24; the share of its first 24 discards in 萬, 筒,
+    索; whether each suit was thrown; the index of its first discard of each suit
+    / 24 (1 if none); the share of honours; each suit's count among its last five
+    discards / 5. Nothing in it tells a drawn tile from a hand tile."""
+    n = packed.shape[0]
+    slots = packed[:, :ORDER_SLOTS].long().reshape(n, 4, ORDER_DEPTH)
+    filled = slots > 0
+    tile = (slots - 1).clamp(min=0) % NUM_KINDS
+    suit = torch.where(tile < 27, tile // 9, torch.full_like(tile, 3))
+    count = filled.sum(-1)  # (n, 4) slots filled
+    over = packed[:, ORDER_SLOTS:].reshape(n, 4).float()
+    total = (count.float() + over).clamp(max=ORDER_DEPTH) / ORDER_DEPTH
+    denom = count.clamp(min=1).float()[..., None]
+    per_suit = torch.stack([((suit == s) & filled).sum(-1) for s in range(4)], dim=-1).float()
+    share = per_suit / denom  # (n, 4, 4): 萬 筒 索 honours
+    thrown = (per_suit[..., :3] > 0).float()
+    idx = torch.arange(ORDER_DEPTH, device=packed.device).view(1, 1, ORDER_DEPTH)
+    first = (
+        torch.stack(
+            [
+                torch.where((suit == s) & filled, idx, torch.full_like(idx, ORDER_DEPTH)).amin(-1)
+                for s in range(3)
+            ],
+            dim=-1,
+        ).float()
+        / ORDER_DEPTH
+    )
+    last5 = filled & (idx >= (count - 5)[..., None])
+    recent = torch.stack([((suit == s) & last5).sum(-1) for s in range(3)], dim=-1).float() / 5.0
+    out = torch.cat(
+        [total[..., None], share[..., :3], thrown, first, share[..., 3:4], recent], dim=-1
+    )
+    return out.reshape(n, SUITS_LEN)
 
 
 def mask_counts(logits: torch.Tensor, unseen: torch.Tensor) -> torch.Tensor:

@@ -209,6 +209,28 @@ pub fn unpack_order(packed: &[u8], out: &mut [f32]) {
     }
 }
 
+/// [`features::encode_suits`]'s block (`out` of length [`features::SUITS_LEN`])
+/// from [`pack_order`]'s bytes: the same numbers the live encoder gives, so a
+/// network can be fitted on logs of layout 3 without a new field.
+///
+/// # Panics
+/// Panics if a length is wrong.
+pub fn suits_from_packed(packed: &[u8], out: &mut [f32]) {
+    assert_eq!(packed.len(), ORDER_BYTES);
+    let mut kinds: [Vec<u8>; 4] = Default::default();
+    let mut total = [0usize; 4];
+    for r in 0..4 {
+        for &b in &packed[r * HISTORY_DEPTH..(r + 1) * HISTORY_DEPTH] {
+            if b == 0 {
+                break;
+            }
+            kinds[r].push((b - 1) % NUM_KINDS as u8);
+        }
+        total[r] = kinds[r].len() + packed[HISTORY_PLANES + r] as usize;
+    }
+    features::suits_summary(&kinds, total, out);
+}
+
 /// The meld claims `seat` could legally declare on a discard of `tile` by `from`
 /// now (as `State::window_options` without the win): pung with two copies in
 /// hand, kong with three, chow for `from`'s next seat; none when the wall is
@@ -770,6 +792,8 @@ mod tests {
         let (mut claims, mut checked) = (0usize, 0usize);
         let mut want = vec![0.0; features::ORDER_LEN];
         let mut got = vec![0.0; features::ORDER_LEN];
+        let mut want_suits = vec![0.0; features::SUITS_LEN];
+        let mut got_suits = vec![0.0; features::SUITS_LEN];
         for hand in 0..6 {
             let mut s = State::new_deal(rules, &mut rng);
             let mut legal = Vec::new();
@@ -778,6 +802,9 @@ mod tests {
                 features::encode_order(&s, &mut want);
                 unpack_order(&row.order, &mut got);
                 assert_eq!(want, got);
+                features::encode_suits(&s, &mut want_suits);
+                suits_from_packed(&row.order, &mut got_suits);
+                assert_eq!(want_suits, got_suits);
                 for (r, o) in row.opp.iter().enumerate() {
                     let seat = (me + r + 1) % 4;
                     assert!(o.state <= 2);
