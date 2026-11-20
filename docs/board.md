@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 21 (flush suit by the neighbours, `stage-neighbour`), building (started 2026-11-21 04:48)
 - slot 2: Task 20 (defence trials on the new reading, Brian's EV bot), building and running (started 2026-11-20 21:52)
 
 ## Results
