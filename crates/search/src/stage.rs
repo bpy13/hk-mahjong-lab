@@ -276,6 +276,14 @@ fn suit_tiles(view: &SeatView, s: Suit) -> i32 {
         .sum()
 }
 
+/// [`Note::neighbour`] bit: the neighbour rule changed the leading flush suit.
+pub const NB_CHANGED: u8 = 1;
+/// [`Note::neighbour`] bit: three suits were candidates (three-suit rule).
+pub const NB_THREE: u8 = 2;
+/// [`Note::neighbour`] bit: the three-suit rule chose another suit than the
+/// two-suit rule (tile counts) would have.
+pub const NB_DIFFERS: u8 = 4;
+
 /// The flush suits the bot reads for its two neighbours (plan Task 21): 上家
 /// (`before`, the seat that plays just before it, whose discards it may chow)
 /// and 下家 (`after`, the seat that plays just after it). `None` is unknown.
@@ -464,8 +472,10 @@ pub struct Note {
     /// The give-up rule ([`crate::giveup`]) changed the discard: refused the
     /// chosen tile, or kept folding after an earlier refusal.
     pub gave_up: bool,
-    /// The neighbour rule (plan Task 21) swapped the two best flush suits.
-    pub neighbour: bool,
+    /// The neighbour rule (plan Task 21): bit [`NB_CHANGED`] it changed the
+    /// leading flush suit, [`NB_THREE`] three suits were candidates,
+    /// [`NB_DIFFERS`] the three-suit choice differs from the two-suit rule's.
+    pub neighbour: u8,
 }
 
 /// The three-stage bot. The number is the version of the stage 1 pung rule for a
@@ -516,7 +526,9 @@ pub struct Note {
 /// The one that is the same as your 下家"; "Prefer 1 over 2, and choose both if
 /// possible"): 0 = off (the default); 1 = close means flush distances at most 1
 /// apart (bot `stage-neighbour`); 2 = close means tile counts at most 1 apart
-/// (bot `stage-neighbour-tiles`). Stage 1 of a leading flush only; see
+/// (bot `stage-neighbour-tiles`; Brian's rule, 2026-11-21); 3 = every suit
+/// within 1 tile of the suit with most tiles is a candidate (bot
+/// `stage-neighbour-three`). Stage 1 of a leading flush only; see
 /// [`StageBot::neighbour_order`].
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
@@ -575,42 +587,93 @@ impl StageBot {
         StageBot { neighbour, ..self }
     }
 
-    /// Plan Task 21: reorders the two best flush suits `suits[0..2]` by the
-    /// neighbours' suits when they are close (`self.neighbour` says how close is
-    /// measured) and both still have tiles in the concealed hand. A suit that is
-    /// not 上家's and is 下家's beats one that is neither; when the two rules
-    /// point to different suits, rule 1 (not 上家's) wins; an unknown neighbour
-    /// settles nothing. Returns whether the order changed. The caller calls this
-    /// only in stage 1 of a leading flush.
+    /// Plan Task 21: reorders the flush suits by the neighbours' suits among the
+    /// close candidates, all of which must still have tiles in the concealed
+    /// hand. Modes 1 and 2: the two best suits `suits[0..2]`, close when their
+    /// flush distances (1) or tile counts (2) are at most 1 apart; a suit that
+    /// is not 上家's and is 下家's beats one that is neither; when the two rules
+    /// point to different suits, rule 1 (not 上家's) wins. Mode 3 (Brian,
+    /// 2026-11-21: "The new stage 1 rules could also be split between 3
+    /// flushes"; "Second and third are to be considered when only 1 less tile
+    /// than the flush with most tiles"): every suit whose tile count is at most
+    /// 1 below the most is a candidate; 上家's suit is dropped, then 下家's is
+    /// preferred among the rest; the chosen suit moves to the front, the others
+    /// keep their order. An unknown neighbour settles nothing. Returns the
+    /// flags of [`Note::neighbour`]. The caller calls this only in stage 1 of a
+    /// leading flush.
     fn neighbour_order(
         &self,
         view: &SeatView,
         suits: &mut [Suit],
         flush_dist: [i8; 3],
         nb: Neighbours,
-    ) -> bool {
+    ) -> u8 {
         if self.neighbour == 0 || suits.len() < 2 {
-            return false;
+            return 0;
         }
-        let (a, b) = (suits[0], suits[1]);
         let held = |s: Suit| view.concealed.kinds().any(|t| t.suit() == Some(s));
-        if !held(a) || !held(b) {
-            return false;
-        }
-        let close = match self.neighbour {
-            1 => (flush_dist[a as usize] - flush_dist[b as usize]).abs() <= 1,
-            _ => (suit_tiles(view, a) - suit_tiles(view, b)).abs() <= 1,
+        // The two-suit rule (modes 1 and 2): the suit it puts first, if it acts.
+        let two = |mode: u8| -> Option<Suit> {
+            let (a, b) = (suits[0], suits[1]);
+            if !held(a) || !held(b) {
+                return None;
+            }
+            let close = match mode {
+                1 => (flush_dist[a as usize] - flush_dist[b as usize]).abs() <= 1,
+                _ => (suit_tiles(view, a) - suit_tiles(view, b)).abs() <= 1,
+            };
+            if !close {
+                return None;
+            }
+            // (is 上家's, is not 下家's): lower is better, rule 1 first.
+            let key = |s: Suit| (nb.before == Some(s), nb.after.is_some_and(|d| d != s));
+            Some(if key(b) < key(a) { b } else { a })
         };
-        if !close {
-            return false;
+        let (pick, three, differs) = if self.neighbour == 3 {
+            let most = suits
+                .iter()
+                .map(|&s| suit_tiles(view, s))
+                .max()
+                .unwrap_or(0);
+            let cands: Vec<Suit> = suits
+                .iter()
+                .copied()
+                .filter(|&s| held(s) && suit_tiles(view, s) + 1 >= most)
+                .collect();
+            if cands.len() < 2 {
+                return 0;
+            }
+            let rest: Vec<Suit> = cands
+                .iter()
+                .copied()
+                .filter(|&s| nb.before != Some(s))
+                .collect();
+            let pick = rest
+                .iter()
+                .copied()
+                .find(|&s| nb.after == Some(s))
+                .unwrap_or(rest[0]);
+            let differs = two(2).unwrap_or(suits[0]) != pick;
+            (pick, cands.len() == 3, differs)
+        } else {
+            match two(self.neighbour) {
+                Some(pick) => (pick, false, false),
+                None => return 0,
+            }
+        };
+        let mut flags = 0;
+        if three {
+            flags |= NB_THREE;
         }
-        // (is 上家's, is not 下家's): lower is better, rule 1 first.
-        let key = |s: Suit| (nb.before == Some(s), nb.after.is_some_and(|d| d != s));
-        if key(b) < key(a) {
-            suits.swap(0, 1);
-            return true;
+        if differs {
+            flags |= NB_DIFFERS;
         }
-        false
+        if pick != suits[0] {
+            let i = suits.iter().position(|&s| s == pick).expect("a candidate");
+            suits[..=i].rotate_right(1);
+            flags |= NB_CHANGED;
+        }
+        flags
     }
 
     /// Whether the gate lets a hand with an outside tile into stage 3 anyway:
@@ -698,22 +761,24 @@ impl StageBot {
                 stage: 0,
                 line: None,
                 gave_up: false,
-                neighbour: false,
+                neighbour: 0,
             };
             return (ranked[0].0, note);
         }
         // Stage 1 of a leading flush: the neighbour rule may swap the two best
         // suits (both stay held, so the hand stays in stage 1).
-        let swapped = lead == Line::Flush
-            && !off.is_empty()
-            && self.neighbour_order(view, &mut suits, flush_dist, nb);
-        if swapped {
+        let flags = if lead == Line::Flush && !off.is_empty() {
+            self.neighbour_order(view, &mut suits, flush_dist, nb)
+        } else {
+            0
+        };
+        if flags & NB_CHANGED != 0 {
             (kept, off) = kept_off(&suits);
         }
         let (tile, note) =
             self.line_discard(view, &after, &suits, &lines, &kept, &off, candidates, rng);
         let note = Note {
-            neighbour: swapped,
+            neighbour: flags,
             ..note
         };
         (tile, note)
@@ -740,7 +805,7 @@ impl StageBot {
             stage: 3,
             line: None,
             gave_up: false,
-            neighbour: false,
+            neighbour: 0,
         };
         (best.2, note)
     }
@@ -807,7 +872,7 @@ impl StageBot {
             stage: if stage1 { 1 } else { 2 },
             line: Some(lead),
             gave_up: false,
-            neighbour: false,
+            neighbour: 0,
         };
         (keyed[0].0, note)
     }
@@ -819,8 +884,8 @@ impl StageBot {
             .0
     }
 
-    /// [`StageBot::claim`] with the neighbours' suits read; also whether the
-    /// neighbour rule swapped the two best flush suits for this answer.
+    /// [`StageBot::claim`] with the neighbours' suits read; also the neighbour
+    /// rule's flags for this answer ([`Note::neighbour`]).
     pub fn claim_with(
         &self,
         view: &SeatView,
@@ -828,7 +893,7 @@ impl StageBot {
         from: usize,
         legal: &[Action],
         nb: Neighbours,
-    ) -> (Action, bool) {
+    ) -> (Action, u8) {
         let melds = |a: &&Action| matches!(a, Action::Pung | Action::ClaimKong | Action::Chow(_));
         // The best of `f` over the discards of a 14-tile view.
         let best_discard = |v: &SeatView, f: &dyn Fn(&SeatView) -> f64| {
@@ -873,17 +938,19 @@ impl StageBot {
                     best = (worth, a);
                 }
             }
-            return (best.1, false);
+            return (best.1, 0);
         }
         if !feasible {
-            return (Action::Pass, false);
+            return (Action::Pass, 0);
         }
         // Stage 1 of a leading flush: the neighbour rule may swap the two best
         // suits (both stay held, so the hand stays in stage 1).
-        let swapped = lead == Line::Flush
-            && outside
-            && self.neighbour_order(view, &mut suits, flush_dist, nb);
-        if swapped {
+        let flags = if lead == Line::Flush && outside {
+            self.neighbour_order(view, &mut suits, flush_dist, nb)
+        } else {
+            0
+        };
+        if flags & NB_CHANGED != 0 {
             kept = kept_suits(view, &suits);
         }
         let pung = legal.contains(&Action::Pung);
@@ -955,20 +1022,20 @@ impl StageBot {
                 best.1
             }
         };
-        (action, swapped)
+        (action, flags)
     }
 
-    /// The answer in a claim window (a legal win first), and whether the
-    /// neighbour rule swapped the two best flush suits for it.
-    pub fn claim_traced(&self, state: &State, legal: &[Action]) -> (Action, bool) {
+    /// The answer in a claim window (a legal win first), and the neighbour
+    /// rule's flags for it ([`Note::neighbour`]).
+    pub fn claim_traced(&self, state: &State, legal: &[Action]) -> (Action, u8) {
         if let Some(&w) = legal
             .iter()
             .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
         {
-            return (w, false);
+            return (w, 0);
         }
         let Some((tile, from)) = state.claim_tile() else {
-            return (Action::Pass, false);
+            return (Action::Pass, 0);
         };
         let view = SeatView::of_current(state);
         self.claim_with(&view, tile, from, legal, self.neighbours(state, view.seat))
@@ -1449,6 +1516,7 @@ mod tests {
         assert_eq!(nb("stage"), (1, None, false, 0));
         assert_eq!(nb("stage-neighbour"), (1, None, false, 1));
         assert_eq!(nb("stage-neighbour-tiles"), (1, None, false, 2));
+        assert_eq!(nb("stage-neighbour-three"), (1, None, false, 3));
     }
 
     /// Plan Task 21: the pick of `bot` with the neighbours read as `nb`
@@ -1473,7 +1541,7 @@ mod tests {
     /// The suit of the tile thrown (honours: `None`).
     fn thrown(hand: &str, bot: StageBot, nb: &str) -> (Option<Suit>, bool) {
         let (t, note) = pick_nb(bot, hand, nb);
-        (t.suit(), note.neighbour)
+        (t.suit(), note.neighbour & NB_CHANGED != 0)
     }
 
     // Seven 萬 and six 筒, no 索 left: the flush keeps one suit (萬, more tiles)
@@ -1482,6 +1550,7 @@ mod tests {
     const ON: StageBot = StageBot::new(3, 1).with_neighbour(1);
     const M: Option<Suit> = Some(Suit::Characters);
     const P: Option<Suit> = Some(Suit::Dots);
+    const S: Option<Suit> = Some(Suit::Bamboo);
 
     #[test]
     fn neighbour_rule_leaves_unknown_neighbours_alone() {
@@ -1535,6 +1604,35 @@ mod tests {
             thrown(CLOSE, StageBot::new(3, 1).with_neighbour(2), "m-"),
             (M, true)
         );
+    }
+
+    #[test]
+    fn neighbour_rule_three_suits() {
+        // Four 萬, four 筒, three 索 (one below the most): three candidates. The
+        // flush keeps the first two suits and throws the third.
+        let hand = "1357m1357p157sEEWh";
+        let three = StageBot::new(3, 1).with_neighbour(3);
+        let go = |nb: &str| {
+            let (t, note) = pick_nb(three, hand, nb);
+            (t.suit(), note.neighbour, note.stage)
+        };
+        // Unknown neighbours: the present order stands (索 thrown), three seen.
+        assert_eq!(go("--"), (S, NB_THREE, 1));
+        // 下家 on 索, the third suit: 索 leads, a 萬 or 筒 goes; the two-suit
+        // rule could not have chosen it.
+        let (thrown, flags, stage) = go("-s");
+        assert_ne!(thrown, S);
+        assert_eq!((flags, stage), (NB_CHANGED | NB_THREE | NB_DIFFERS, 1));
+        // Both rules: 上家 on 萬, 下家 on 索: 索 leads.
+        assert_ne!(go("ms").0, S);
+        // 下家 on 筒, the second suit: 筒 leads, as the two-suit rule would.
+        assert_eq!(go("-p"), (S, NB_CHANGED | NB_THREE, 1));
+        // 上家 and 下家 on 索: rule 1 drops it, the present order stands.
+        assert_eq!(go("ss"), (S, NB_THREE, 1));
+        // 索 with two tiles against five: not a candidate, the third suit stays out.
+        let (_, note) = pick_nb(three, "13579m1357p15sEEW", "-s");
+        assert_eq!(note.line, Some(Line::Flush));
+        assert_eq!(note.neighbour & (NB_THREE | NB_CHANGED), 0);
     }
 
     #[test]

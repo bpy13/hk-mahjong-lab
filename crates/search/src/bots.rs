@@ -631,6 +631,8 @@ impl Bot {
             // flush distance, or (variant) by tile count. Test bots.
             "stage-neighbour" => Bot::Stage(StageBot::default().with_neighbour(1)),
             "stage-neighbour-tiles" => Bot::Stage(StageBot::default().with_neighbour(2)),
+            // Three close suits (Brian, 2026-11-21): every suit within 1 tile of the most.
+            "stage-neighbour-three" => Bot::Stage(StageBot::default().with_neighbour(3)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),

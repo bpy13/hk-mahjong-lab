@@ -1,8 +1,9 @@
 //! The flush suit chosen by the neighbours' suits (plan Task 21,
 //! [`mahjong_search::stage::StageBot::with_neighbour`]).
 //!
-//! `flush_neighbours pair <deals> [seed]`: for `stage-neighbour` and
-//! `stage-neighbour-tiles` in turn, two of the test bot and two plain `stage`,
+//! `flush_neighbours pair <deals> [seed] [bot...]`: for each test bot in turn
+//! (default `stage-neighbour` and `stage-neighbour-tiles`; plan Task 21 added
+//! `stage-neighbour-three`), two of the test bot and two plain `stage`,
 //! seated new, new, old, old in playing order, the table rotated through the
 //! four winds on each deal (Brian, 2026-11-21: "if 2v2 and adjacent config, the
 //! original version that has the new version as previous seat would have a lower
@@ -23,10 +24,14 @@
 //! for the changed hands, beside the same seat in the twin: points, win rate,
 //! chows claimed from 上家, melds 下家 made with the seat's discards, and the
 //! share that ended in a flush (every suited tile of the final hand, concealed
-//! and melded, in one suit).
+//! and melded, in one suit). For the three-suit rule also the share of hands
+//! where three suits were candidates at least once, and where its choice
+//! differed from the two-suit rule's at least once.
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{MeldKind, RuleSet, State};
-use mahjong_search::stage::{flush_suit, Line, Neighbours, StageBot};
+use mahjong_search::stage::{
+    flush_suit, Line, Neighbours, StageBot, NB_CHANGED, NB_DIFFERS, NB_THREE,
+};
 use mahjong_search::{Bot, SeatView};
 use mahjong_tiles::TileCounts;
 use rand::SeedableRng;
@@ -52,6 +57,10 @@ struct Seat {
     deal_in: bool,
     /// The neighbour rule changed the suit at least once.
     changed: bool,
+    /// Three suits were candidates at least once; the three-suit choice
+    /// differed from the two-suit rule's at least once.
+    three: bool,
+    differs: bool,
     chows_from_before: u32,
     after_claims: u32,
     flush: bool,
@@ -60,6 +69,14 @@ struct Seat {
     reads: u32,
     right: u32,
     not_flush: u32,
+}
+
+impl Seat {
+    fn note(&mut self, flags: u8) {
+        self.changed |= flags & NB_CHANGED != 0;
+        self.three |= flags & NB_THREE != 0;
+        self.differs |= flags & NB_DIFFERS != 0;
+    }
 }
 
 /// Plays one deal with `bots[s]` in seat `s`.
@@ -78,13 +95,13 @@ fn play(rules: &RuleSet, bots: &[StageBot; 4], deal: u64, rot: u64) -> [Seat; 4]
         }
         let g = &mut out[s];
         let action = if state.in_claim() || state.in_rob() {
-            let (a, swapped) = bot.claim_traced(&state, &legal);
-            g.changed |= swapped;
+            let (a, flags) = bot.claim_traced(&state, &legal);
+            g.note(flags);
             a
         } else {
             let (a, note) = bot.decide(&state, &legal, &mut rng);
             if let Some(n) = note {
-                g.changed |= n.neighbour;
+                g.note(n.neighbour);
                 if n.stage == 1 && n.line == Some(Line::Flush) {
                     let nb = Neighbours::of(&state, s);
                     for (read, other) in [(nb.before, (s + 3) % 4), (nb.after, (s + 1) % 4)] {
@@ -170,6 +187,8 @@ struct Sum {
     /// New-bot hands, changed hands, readings.
     hands: f64,
     changed: f64,
+    three: f64,
+    differs: f64,
     reads: f64,
     right: f64,
     not_flush: f64,
@@ -194,6 +213,8 @@ impl Sum {
         self.d_new = self.d_new.add(o.d_new);
         self.hands += o.hands;
         self.changed += o.changed;
+        self.three += o.three;
+        self.differs += o.differs;
         self.reads += o.reads;
         self.right += o.right;
         self.not_flush += o.not_flush;
@@ -244,6 +265,8 @@ fn deal_sum(
             s.deal_ins[r] += x.deal_in as u8 as f64;
             if r < 2 {
                 s.hands += 1.0;
+                s.three += x.three as u8 as f64;
+                s.differs += x.differs as u8 as f64;
                 s.reads += x.reads as f64;
                 s.right += x.right as f64;
                 s.not_flush += x.not_flush as f64;
@@ -300,6 +323,15 @@ fn report(name: &str, s: &Sum) {
         s.hands,
         100.0 * s.changed / s.hands
     );
+    if s.three > 0.0 {
+        println!(
+            "    new-bot hands with three candidate suits at least once: {:.0} ({:.2}%); where the choice differed from the two-suit rule's at least once: {:.0} ({:.2}%)",
+            s.three,
+            100.0 * s.three / s.hands,
+            s.differs,
+            100.0 * s.differs / s.hands
+        );
+    }
     println!(
         "    neighbour readings at stage 1 flush discards: {:.0}, right {:.1}%, neighbour not on a flush line {:.1}%, other suit {:.1}%",
         s.reads,
@@ -328,11 +360,10 @@ fn report(name: &str, s: &Sum) {
     );
 }
 
-fn run_pair(deals: u64, seed: u64) {
+fn run_pair(deals: u64, seed: u64, names: &[String]) {
     let rules = RuleSet::default();
-    let names = ["stage-neighbour", "stage-neighbour-tiles"];
     let old = stage_of("stage");
-    let news = names.map(stage_of);
+    let news: Vec<StageBot> = names.iter().map(|n| stage_of(n)).collect();
     let start = std::time::Instant::now();
     let sums = (0..deals)
         .into_par_iter()
@@ -340,11 +371,13 @@ fn run_pair(deals: u64, seed: u64) {
             let deal = deal_seed(seed, i);
             let twins: [[Seat; 4]; 4] =
                 std::array::from_fn(|k| play(&rules, &[old; 4], deal, k as u64));
-            news.map(|new| deal_sum(&rules, new, old, deal, &twins))
+            news.iter()
+                .map(|&new| deal_sum(&rules, new, old, deal, &twins))
+                .collect::<Vec<Sum>>()
         })
         .reduce(
-            || [Sum::default(); 2],
-            |a, b| [a[0].add(b[0]), a[1].add(b[1])],
+            || vec![Sum::default(); names.len()],
+            |a, b| a.iter().zip(&b).map(|(x, y)| x.add(*y)).collect(),
         );
     println!(
         "pair: two new bots and two plain stage seated new, new, old, old in playing order, rotated through the winds; {deals} deals x 4 rotations, seed {seed} ({:?})",
@@ -359,7 +392,13 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let num = |i: usize, d: u64| args.get(i).and_then(|x| x.parse().ok()).unwrap_or(d);
     match args.first().map(String::as_str) {
-        Some("pair") => run_pair(num(1, 100), num(2, 21)),
-        _ => eprintln!("flush_neighbours pair <deals> [seed]"),
+        Some("pair") => {
+            let mut names: Vec<String> = args.iter().skip(3).cloned().collect();
+            if names.is_empty() {
+                names = vec!["stage-neighbour".into(), "stage-neighbour-tiles".into()];
+            }
+            run_pair(num(1, 100), num(2, 21), &names)
+        }
+        _ => eprintln!("flush_neighbours pair <deals> [seed] [bot...]"),
     }
 }
