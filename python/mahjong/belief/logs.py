@@ -106,5 +106,7 @@ def unpack_order(packed: npt.NDArray[np.uint8]) -> npt.NDArray[np.float32]:
     sc = ORDER_SLOTS * NUM_KINDS
     out[:, sc : sc + 2 * ORDER_SLOTS : 2] = filled
     out[:, sc + 1 : sc + 2 * ORDER_SLOTS : 2] = (v // NUM_KINDS) * filled
-    out[:, sc + 2 * ORDER_SLOTS :] = np.minimum(packed[:, ORDER_SLOTS:].astype(np.float32) / 4.0, 1.0)
+    out[:, sc + 2 * ORDER_SLOTS :] = np.minimum(
+        packed[:, ORDER_SLOTS:].astype(np.float32) / 4.0, 1.0
+    )
     return out

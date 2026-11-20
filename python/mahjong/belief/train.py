@@ -6,13 +6,15 @@
         [--holdout runs/logs/holdout] [--discards] [--passed] [--resume] [--ckpt-dir runs/belief]
         [--log runs/belief/train.log] [--race] [--init models/belief.pt]
         [--order] [--no-counts] [--task19] [--weight tenpai=10 ...] [--hours 1.5]
+        [--dropout 0.2] [--weight-decay 1e-4]
 
 ``--race`` adds the race bot's ``state`` and ``mode`` heads (the log must come from the
 ``race_log`` example); ``--init`` warm-starts from an earlier model (``warm_start``).
 Plan 2026-11-16 Task 19: ``--order`` feeds the discard and claim order (a layout 3
 log), ``--no-counts`` drops the copies head, ``--task19`` adds the ``state``, ``winner``,
 ``claim``, ``dealin`` and ``points`` heads, ``--weight head=w`` scales a head's loss,
-``--hours`` stops after the epoch that passes the limit.
+``--hours`` stops after the epoch that passes the limit; ``--dropout`` and
+``--weight-decay`` (AdamW) regularise the fit.
 
 Each epoch visits every chunk once, in a fresh random order, loading ``--group``
 chunks at a time and shuffling the rows inside the group (a chunk is 500 hands,
@@ -105,12 +107,13 @@ def train(args: argparse.Namespace) -> BeliefNet:
         counts=not args.no_counts,
         task19=args.task19,
         weights=weights,
+        dropout=args.dropout,
     )
     net = BeliefNet(cfg)
     if args.init:
         warm_start(net, BeliefNet.load(Path(args.init)))
     net = net.to(device)
-    opt = torch.optim.Adam(net.parameters(), lr=args.lr)
+    opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     steps_per_epoch = max(1, log.rows // args.batch)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs * steps_per_epoch)
     ckpt_dir = Path(args.ckpt_dir)
@@ -250,6 +253,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="loss weight of a head (repeatable; default 1)",
     )
     p.add_argument("--hours", type=float, default=0.0, help="stop after the epoch past this limit")
+    p.add_argument("--dropout", type=float, default=0.0, help="dropout after each hidden layer")
+    p.add_argument("--weight-decay", type=float, default=0.0, help="AdamW weight decay")
     p.add_argument("--group", type=int, default=4, help="chunks loaded and shuffled together")
     p.add_argument(
         "--max-chunks", type=int, default=0, help="use only the first N chunks (smoke runs)"

@@ -146,6 +146,10 @@ class BeliefConfig:
     task19: bool = False
     #: Loss weight per head (1 where absent); the total loss is their weighted sum.
     weights: dict[str, float] = field(default_factory=dict)
+    #: Dropout after each hidden layer while training (plan 2026-11-16 Task 19: the
+    #: order model overfits its 40,000 hands without it); 0 = none. The exported
+    #: file holds the linear layers only, so inference is unchanged.
+    dropout: float = 0.0
 
     @property
     def input_len(self) -> int:
@@ -181,6 +185,8 @@ class BeliefNet(nn.Module):
         width = self.cfg.input_len
         for h in self.cfg.hidden:
             layers += [nn.Linear(width, h), nn.ReLU()]
+            if self.cfg.dropout > 0.0:
+                layers.append(nn.Dropout(self.cfg.dropout))
             width = h
         self.torso = nn.Sequential(*layers)
         self.head = nn.Linear(width, self.cfg.output_len)
@@ -301,6 +307,7 @@ def config_from_dict(c: dict[str, Any]) -> BeliefConfig:
         counts=c.get("counts", True),
         task19=c.get("task19", False),
         weights=dict(c.get("weights", {})),
+        dropout=float(c.get("dropout", 0.0)),
     )
 
 
