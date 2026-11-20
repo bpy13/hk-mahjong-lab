@@ -483,7 +483,16 @@ impl Belief for BeliefModel {
             for t in Tile::all_kinds() {
                 let i = t.index() as usize;
                 let c = &b.counts[i];
-                s.wait[i] = if unseen[t] == 0 { 0.0 } else { b.waits[i] };
+                // A file with the `dealin` head (plan Task 19) gives the chance
+                // of a deal-in itself: `wait = dealin / tenpai`, so that
+                // `tenpai × wait` is that head (plan Task 20).
+                s.wait[i] = if unseen[t] == 0 {
+                    0.0
+                } else if self.dealin.is_some() && b.tenpai > 1e-9 {
+                    (b.dealin[i] / b.tenpai).min(1.0)
+                } else {
+                    b.waits[i]
+                };
                 s.has_one[i] = 1.0 - c[0];
                 s.has_two[i] = c[2..].iter().sum();
                 s.mean_count[i] = c.iter().enumerate().map(|(k, p)| k as f64 * p).sum();

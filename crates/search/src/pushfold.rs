@@ -52,11 +52,13 @@
 //! these figures (weights in `pushfold_exact_tables.rs`).
 
 use crate::danger::{self, Danger};
-use crate::ev::HeuristicBelief;
-use crate::giveup::{self, Outs, MEASURED};
+use crate::giveup::{self, Outs};
 use crate::stage::StageBot;
 use crate::view::SeatView;
-use crate::{pushfold_exact_tables as exact_tables, pushfold_tables as tables};
+use crate::{
+    pushfold_exact_tables as exact_tables, pushfold_read_tables as read_tables,
+    pushfold_tables as tables,
+};
 use mahjong_analysis::faan_shanten;
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, Event, State};
@@ -143,10 +145,8 @@ impl Risk {
     /// The figures for `me` on turn in `state`; `exact` switches the exact layer on.
     pub fn of(state: &State, me: usize, exact: bool) -> Risk {
         Risk {
-            table: danger::with_exact(false, || Danger::from_belief(state, me, &HeuristicBelief)),
-            exact: exact.then(|| {
-                danger::with_exact(true, || Danger::from_belief(state, me, &HeuristicBelief))
-            }),
+            table: danger::with_exact(false, || Danger::of_reading(state, me)),
+            exact: exact.then(|| danger::with_exact(true, || Danger::of_reading(state, me))),
         }
     }
 
@@ -280,7 +280,7 @@ pub fn decision(
             8.0
         }
     };
-    let v = giveup::push_value(&MEASURED, rounds, &outs, unseen, pay, 1.0);
+    let v = giveup::push_value(&giveup::measured(), rounds, &outs, unseen, pay, 1.0);
     let mut discards = [0.0f64; 4];
     for e in state.events() {
         if let Event::Discard { seat, .. } = *e {
@@ -540,9 +540,28 @@ pub const EXACT_MODEL: Weights = Weights {
     check: exact_tables::CHECK,
 };
 
-/// The model for the chosen figures ([`TABLE_MODEL`] or [`EXACT_MODEL`]).
-pub const fn model(exact: bool) -> &'static Weights {
-    if exact {
+/// Plan Task 20's model, fitted on labels made with the danger read from Task
+/// 19's model (`pushfold_read_tables.rs`; bot `stage-fold-learned:belief=...`).
+pub const READ_MODEL: Weights = Weights {
+    mean: &read_tables::MEAN,
+    sd: &read_tables::SD,
+    w1: &read_tables::W1,
+    b1: &read_tables::B1,
+    w2: &read_tables::W2,
+    b2: &read_tables::B2,
+    w3: &read_tables::W3,
+    lin: &read_tables::LIN,
+    b3: read_tables::B3,
+    check: read_tables::CHECK,
+};
+
+/// The model for the chosen figures: [`READ_MODEL`] when a belief model is this
+/// thread's reading ([`crate::danger::with_reading`]), else [`EXACT_MODEL`] or
+/// [`TABLE_MODEL`].
+pub fn model(exact: bool) -> &'static Weights {
+    if danger::reading().is_some() {
+        &READ_MODEL
+    } else if exact {
         &EXACT_MODEL
     } else {
         &TABLE_MODEL
@@ -918,6 +937,7 @@ mod tests {
         for (name, m) in [
             ("pushfold_tables.rs", &TABLE_MODEL),
             ("pushfold_exact_tables.rs", &EXACT_MODEL),
+            ("pushfold_read_tables.rs", &READ_MODEL),
         ] {
             if m.check.is_empty() {
                 eprintln!("{name} is the placeholder: no check rows");

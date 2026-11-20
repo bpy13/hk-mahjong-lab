@@ -626,6 +626,10 @@ impl Bot {
             "stage-fold-learned-exact" => {
                 Bot::Stage(StageBot::default().with_pushfold(true).with_exact(true))
             }
+            // Plan Task 20: Brian's defence bot, the best expected points in
+            // stage 3 and stage 0 from a Task 19 reading. Without `belief=...`
+            // (see `crate::Agent`) it has no reading and plays as `stage`.
+            "stage-ev" => Bot::Stage(StageBot::default().with_defence(true)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
