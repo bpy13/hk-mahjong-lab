@@ -663,6 +663,175 @@ Checked on the hold-out log (fit E, epoch 6) against the trivial reading from th
 * For Task 20: `race:belief=models/belief-order.mjnn` and the fold bots' readings can take this
   file; nothing changed by default.
 
+## 8. Defence on the new reading (plan Task 20)
+
+Brian, 2026-11-20: "if it show gains it already passes Milestone 1". Every defence trial so far
+read the old figure and showed no gain over plain `stage` (Tasks 11, 12, 14). This section reruns
+them with Task 19's model (`models/belief-order.mjnn`, fit E) as the reading, and adds the bot
+Brian described: "the sole purpose of the defensive strategy is to figure out the correct move
+that gives maximum EV ... realistically your loss EV is your deal in rate + their self-draw rate".
+Nothing became a default; every bot is a spec option.
+
+### 8.1 What was built
+
+* **A reading switch.** `danger::with_reading` sets a belief model for the thread and
+  `Danger::of_reading` reads it instead of the fitted tables; the give-up rule (Task 11), the
+  learned push-or-fold choice (Task 12) and the new bot read their danger through it. A stage
+  bot gets a reading with the spec option `belief=` (`stage-fold:belief=...`,
+  `stage-fold-learned:belief=...`, `stage-ev:belief=...`; `crate::Agent`). Without it every
+  figure is as before (a test checks the tables in force with and without a reading).
+* **The model's deal-in head as the danger.** For a file with Task 19's `dealin` head the
+  belief's per-tile wait is `dealin ÷ tenpai`, so `tenpai × wait` is that head
+  (`BeliefModel::estimate`); older files are read as before.
+* **Task 11's rule refitted** (`giveup::READ_CALIBRATION`, `READ_LOSS_FACTOR`, `READ_MEASURED`,
+  picked when a reading is set). On the stage 3 discards of 40,000 deals of four `stage` (seed 1,
+  `BELIEF=models/belief-order.mjnn giveup_log log 40000 1`, 7.8 min) the new deal-in figure ranks
+  far better than the table but is too sure at both ends:
+
+| Raw new reading | Discards | Predicted | Observed | Observed ÷ predicted | Table's estimate |
+|---|---|---|---|---|---|
+| 0–0.5 % | 249,990 | 0.08 % | 0.54 % | 6.65 | 0.69 % |
+| 0.5–1 % | 30,189 | 0.72 % | 2.37 % | 3.29 | 2.93 % |
+| 1–2 % | 28,630 | 1.43 % | 3.88 % | 2.71 | 4.07 % |
+| 2–3 % | 15,021 | 2.46 % | 5.93 % | 2.41 | 5.26 % |
+| 3–5 % | 16,705 | 3.89 % | 7.42 % | 1.91 | 6.31 % |
+| 5–7 % | 9,465 | 5.92 % | 9.17 % | 1.55 | 7.82 % |
+| 7–10 % | 8,828 | 8.37 % | 11.71 % | 1.40 | 8.80 % |
+| 10–15 % | 8,212 | 12.23 % | 14.32 % | 1.17 | 10.17 % |
+| 15–25 % | 7,844 | 19.31 % | 17.52 % | 0.91 | 12.17 % |
+| 25 % and up | 10,752 | 45.96 % | 27.81 % | 0.61 | 17.07 % |
+
+  The table puts only 17 discards above 25 % (its own bins, 8,000 deals, seed 3) where the new
+  reading puts 10,752 at a true 28 %: the reading separates dangerous tiles much better, but its
+  level must be mapped. The calibration (these points) and the loss factor (points paid ÷
+  predicted loss per bin, 6.5 in the safest bin to 0.54 in the top one) were fitted on seed 1; on
+  seed 2 (40,000 deals) the calibrated figure is within 0.81–1.06 of the truth in 9 of 10 bins,
+  the safest bin still 4.2 times low (0.09 % against 0.37 %; below the first point the map is
+  proportional, as in Task 11). The push side's figures (`READ_MEASURED`) were measured on seed 2
+  with this calibration in force. The regularised fit F (`belief-order-reg.mjnn`) gives the same
+  picture (safest bin 5.5 times low, top bin 0.77; 8,000 deals, seed 3), so fit E stays the
+  reading throughout.
+* **Task 12's push-or-fold refitted.** Labels as in Task 12 (play-outs on the true hands with the
+  wall reshuffled, 24 pairs a position), with the danger, the choice of the safer tile and the
+  folded hand's discards read from the new reading: `BELIEF=... pushfold label 4500 24 1` and
+  `16000 24 2` (9 + 32 min on 14 threads), 18,571 positions. Mean label +19.03 ± 0.50 (Task 12:
+  +18.78); fold better in 16.5 %, clearly in 6.0 %. Fit (`fit_pushfold.py --tables
+  crates/search/src/pushfold_read_tables.rs`, 14,856 training and 3,715 held-out rows):
+
+| Model | Held-out MSE | Says fold | Mean label where it folds | Gain per decision |
+|---|---|---|---|---|
+| ridge linear (chosen) | 574.3 | 1.9 % | +4.33 ± 5.77 | −0.083 |
+| network 32×32 + linear skip | 562.9 | 2.3 % | +4.62 ± 5.53 | −0.105 |
+| network + true deal-in (oracle, not for the bot) | 484.0 | 5.5 % | −14.72 ± 2.70 | +0.809 |
+| Task 11's rule on the new reading (approximate) | 1121.9 | 13.2 % | +9.12 ± 2.46 | −1.202 |
+
+  As in Tasks 12 and 14 the check is not met: where the model folds, pushing was better on
+  average. The fit script now writes a linear model with zero hidden units of the size the Rust
+  side is built with (it wrote one unit before, which did not compile).
+* **Brian's bot, `stage-ev:belief=models/belief-order.mjnn`** (`crates/search/src/defence.rs`).
+  In stage 3, and in stage 0 (no line), for each legal discard `t`:
+  `EV(t) = P(I self-draw) × 3 × my self-drawn points + P(I win off a discard) × my discard points
+  − deal-in(t) − Σ_o P(o self-draws) × o's self-drawn points × my share − liability(t)`.
+  The deal-in term is the model's `dealin` head read before the discard (who wins on `t` now,
+  their `faan` head's points, the 12-tile shares), times the loss factor refitted above (my
+  addition: the raw head is 6.6 times too low on safe tiles). The "after" chances are the
+  `winner` head read from my seat on the position right after the discard. Two calls of mine,
+  agreed by the orchestrator on 2026-11-20: (a) the reading right after the discard stands for
+  the weighting over no action and each claim, because Task 19 logged exactly that row with the
+  hand's real outcome as its label (the position after a claim cannot be built without the
+  claimer's hidden hand); the claim chances are printed beside each candidate; (b) the race
+  bot's "old reading" is its shipped `models/race-belief.mjnn`. My points: the live winning
+  tiles' mean points when ready after `t`, else the minimum hand's. The liability term pays the
+  two other shares when `t` could be an opponent's fourth exposed meld. Later deal-ins of mine
+  are left out, as in Brian's sum. The stage bot's own pick is kept within 0.05 points.
+
+### 8.2 Brian's scenario
+
+Next seat (1) on a 萬子 full flush, three 萬子 melds shown (2萬 and 7萬 pungs, 345萬) and truly
+ready on 7萬; across (2) and previous (3) on 筒子 (5筒 and 白 pungs; 9筒 pung and 123筒), no 萬子
+in seat 1's nine discards and no 筒子 in seats 2 and 3's; me on turn with
+`147筒 123579索 東西北發中`, 47 tiles in the wall (`defence_match scenario`,
+`runs/t20/scenario.txt`). Terms in points, best EV first; "after" chances read right after the
+discard:
+
+| Tile | EV | My win term | Deal-in | Their self-draw | Liability | Next / across / previous win after | Claim next / across / previous |
+|---|---|---|---|---|---|---|---|
+| 9索 | −15.51 | 0.11 | 0.12 | 15.21 | 0.30 | 40.4 / 26.6 / 28.8 % | 0.3 / 0.6 / 0.0 % |
+| 3索 | −15.72 | 0.10 | 0.16 | 15.44 | 0.22 | 39.5 / 22.2 / 34.1 % | 0.4 / 1.4 / 0.1 % |
+| 北 | −15.80 | 0.10 | 0.00 | 15.90 | 0.00 | 39.3 / 25.3 / 32.0 % | 0.0 / 0.1 / 0.1 % |
+| 東 | −15.90 | 0.11 | 0.09 | 15.91 | 0.00 | 36.7 / 26.0 / 33.3 % | 0.2 / 1.0 / 0.4 % |
+| 1筒 | −16.16 | 0.08 | 0.13 | 15.96 | 0.16 | 39.4 / 28.3 / 29.4 % | 0.4 / 3.3 / 3.1 % |
+| 2索 | −16.23 | 0.08 | 0.12 | 16.03 | 0.16 | 39.3 / 24.9 / 32.3 % | 0.5 / 5.5 / 0.1 % |
+| 4筒 | −17.33 | 0.10 | 0.21 | 15.94 | 1.27 | 41.6 / 27.3 / 27.5 % | 0.8 / 2.7 / 5.8 % |
+| 7筒 | −17.81 | 0.08 | 0.14 | 16.74 | 1.01 | 39.2 / 25.6 / 32.1 % | 0.7 / 2.7 / 4.9 % |
+
+(Six more candidates in the file.) The bot throws 9索: here it prefers 索 to 筒, and not by
+Brian's second effect. A 筒 discard is claimed more often (3–6 %) and the liability term
+charges it, while the opponents' self-draw chances after a 筒 discard do not fall. The reading
+is weak in this position: it reads the truly ready flush seat at 3.6 % ready (fit F: 11.3 %)
+yet gives it a 39 % chance to win the hand, and the self-draw term moves by up to 1.5 points
+between tiles that change nothing visible about that seat (16.74 for 7筒 against 15.21 for
+9索). That term is the largest in every candidate, so its noise, not the deal-in, decides most
+choices.
+
+### 8.3 The matches
+
+Each bot against three plain `stage` over 40,000 deals (seed 20): every deal played with the
+bot in each of the four seats, then the same with the bot on the old reading, and once with
+four plain `stage` (`defence_match match <bot> <old bot> 40000 20`, run directly on 14 threads
+on the orchestrator's word). The ± is the 95 % range over deals (the four seatings of a deal
+are one sample); paired differences are on the same deals and seats; "plain" is the seat's
+score in the all-`stage` game of the same deal.
+
+| Bot (new reading: `belief=models/belief-order.mjnn`) | Points per hand | Win | Deal-in | Changed a discard | Paired − plain `stage` | Same bot on the old reading | Old − plain | Paired new − old |
+|---|---|---|---|---|---|---|---|---|
+| `stage-ev` (Brian's EV bot) | −2.16 ± 0.18 | 19.5 % | 16.1 % | 54.0 % of hands | **−2.220 ± 0.176** | – (needs Task 19's heads) | – | – |
+| `stage-fold` (Task 11's rule, refitted) | −0.61 ± 0.17 | 22.0 % | 17.4 % | 8.2 % | **−0.667 ± 0.072** | `stage-fold`: −0.54 ± 0.17, win 22.1 %, deal-in 17.3 % | −0.606 ± 0.069 | −0.061 ± 0.072 |
+| `stage-fold-learned` (Task 12's choice, refitted) | +0.05 ± 0.17 | 23.8 % | 18.0 % | 1.6 % | **−0.008 ± 0.027** | `stage-fold-learned`: +0.10 ± 0.17, win 24.0 %, deal-in 18.0 % | +0.039 ± 0.020 | −0.048 ± 0.028 |
+| `race:belief=...` | −3.52 ± 0.19 | 15.0 % | 15.6 % | – | **−3.586 ± 0.253** | `race:belief=models/race-belief.mjnn`: −3.63 ± 0.19, win 16.2 %, deal-in 17.2 % | −3.687 ± 0.256 | +0.101 ± 0.170 |
+| plain `stage` (same deals and seats) | +0.06 ± 0.17 | 24.1 % | 18.3 % | – | – | – | – | – |
+
+Times on 14 threads: `stage-ev` 51 min, `stage-fold` 64 min, `stage-fold-learned` 61 min, race 93 min
+(the matches with a network ran on about 4 cores: the model's shared per-state cache is behind
+one lock). Outputs `runs/t20/match-*.txt`. Task 11 measured `stage-fold` at −0.63 ± 0.17 and
+Task 12 `stage-fold-learned` at +0.03 ± 0.17 against three `stage` on other deals; both agree.
+
+One comparison came out above zero: Task 12's `stage-fold-learned` on its **old** reading (the
+fitted tables), +0.039 ± 0.020 against plain `stage` in the same seats. That is one of six
+paired differences, so it was played again on fresh deals (seed 21, 40,000 deals, 68 min,
+`runs/t20/match-stage-fold-learned-old-seed21.txt`): +0.024 ± 0.022 (bot +0.07 ± 0.17, win
+24.0 %, deal-in 17.9 %, changed a discard in 0.9 % of hands; plain `stage` +0.05 ± 0.17, win
+24.1 %, deal-in 18.2 %). Both seeds together (80,000 deals): **+0.032 ± 0.015 points a hand**.
+That is about 1 % of plain `stage`'s edge over three `value` bots (+2.62).
+
+### 8.4 Verdict
+
+* **On the new reading, no bot gains over plain `stage` beyond its range.** Brian's EV bot loses
+  2.22 ± 0.18 points a hand. Task 11's rule loses 0.67 ± 0.07. The learned push-or-fold choice
+  is level (−0.008 ± 0.027). The race bot loses 3.59 ± 0.25. Against the same bots on the old
+  reading, the new reading changes nothing beyond the range for the rule (−0.06 ± 0.07) or the
+  race bot (+0.10 ± 0.17), and makes the learned choice slightly worse (−0.048 ± 0.028).
+* **The one measured gain is the old reading's learned choice**: Task 12's
+  `stage-fold-learned`, +0.032 ± 0.015 points a hand over 80,000 deals on two seeds, with the
+  whole range above zero. By Brian's words ("if it show gains it already passes Milestone 1")
+  this is a gain over plain `stage`, but a very small one (it changes a discard in 1 % of hands).
+  It comes from Task 12's bot, not from the new reading.
+* **Why the EV bot loses.** It overrides the stage bot in 54 % of hands, and its win rate falls
+  from 24.1 % to 19.5 % while its deal-ins fall only from 18.3 % to 16.1 %. Its largest term,
+  the opponents' self-draw chances read after each candidate discard, moves by 1 to 2 points
+  between tiles that change nothing visible (§8.2). So the network's noise between near-equal
+  positions decides, not the danger. The reading is also wrong where Brian's scenario needs it
+  most: the truly ready full-flush seat reads 3.6 % ready. Making the EV bot work needs "after"
+  readings that are steady between near-equal positions (for example, read the after-discard
+  difference only through the deal-in and claim heads, or average several fits), not a
+  different weighting.
+* **Why the reruns change nothing.** The new deal-in figure ranks tiles much better than the
+  table (§8.1), but the decisions these bots change are rare (1–8 % of hands). The labels say
+  pushing is right in about 84 % of the candidate fold decisions whatever the reading (mean
+  push − fold +19 points). The learned choice's held-out check fails on every reading (Tasks
+  12, 14, 20): the visible inputs cannot pick out the 16 % of positions where folding is better.
+  Only the true deal-in (the oracle, +0.81 a decision) does.
+
 ## Files
 
 * `crates/search/examples/belief_ready.rs`: the tool (`--hand`, `--deals`, `--field`; Task 18a's
@@ -681,3 +850,12 @@ Checked on the hold-out log (fit E, epoch 6) against the trivial reading from th
 * `runs/belief-order/` (not in git): `train/` and `holdout/` (the logs), `fit-*.log` and
   `ckpt-*/` (the five fits), `order-*.pt` / `.mjnn`, `checks/` (`old-`, `A-`, `C-`, `E-`
   `deals20k.md`, `hand2860.md`, `timing-1thread.md`). `models/belief-order.mjnn` is fit E.
+* Task 20: `crates/search/src/defence.rs` (the bot), `danger.rs` (`with_reading`,
+  `Danger::of_reading`), `giveup.rs` (`READ_*`, `calibration`, `loss_factor`, `measured`),
+  `pushfold.rs` (`READ_MODEL`) and `pushfold_read_tables.rs`, `stage.rs` (`reading`, `defence`),
+  `agent.rs` (`stage*:belief=`), `bots.rs` (`stage-ev`), `belief.rs` (the `dealin` head as the
+  wait); `examples/defence_match.rs` (`match`, `scenario`), `BELIEF=` in `giveup_log` and
+  `pushfold`; `experiments/stage/fit_pushfold.py` (`--tables ...read...`, zero-padded linear).
+* `runs/t20/` (not in git): `giveup-read-seed1|2.txt`, `giveup-reg-seed3.txt`,
+  `giveup-table-seed3.txt`, `labels-read-seed1|2.csv`, `fold-learned-step2.md`, `scenario.txt`,
+  `scenario-reg.txt`, `match-*.txt` (with `match-stage-fold-learned-old-seed21.txt`).
