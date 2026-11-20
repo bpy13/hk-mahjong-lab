@@ -13,6 +13,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Default: (a).
   - Asked by the Task 18 worker (slot 1), 2026-11-20; figures from `runs/belief-ready/stage-20000.md` and `value-20000.md` in the workers clone.
   - Card sent 2026-11-20 (orchestrator; figures checked against `docs/study-results/belief-ready-read.md` sections 2 and 3).
+  - Brian (2026-11-20), question still open: "but you're not supposed to be able to tell if a discard was just drawn or came out of the hand. It shouldn't be relevant." and "at a real table you can also deliberate put the drawn tile in your hand, mix it up and hit out the same tile and no one would be able to tell if it's just drawn, so it's completely irrelevant, especially in this mobile app setting". So no bot input may use drawn-and-thrown against thrown-from-hand; options (a) and (b) lose that key. Also Brian: "If the player is going for 萬子 and the player plays 萬子, that means it's definitely has no irrelevant tiles and is at most 1 from ready if not already ready" (the fix must be measured on that pattern, counting ready and one from ready).
 
 - FYI (no answer needed): the shared `mahjong` env's editable install still points at `hk-mahjong-lab-3\python`, not the workers clone (a permission check refused the repoint, 2026-11-16). Harmless while jobs set `PYTHONPATH`. Tell the orchestrator if you want it repointed after job 154 ends.
 
