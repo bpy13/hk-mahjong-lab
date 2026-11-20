@@ -17,6 +17,10 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
 
 ## Answered
 
+- **Flower wins: the engine scores 七搶一 and 八仙過海 as limit hands, with a robbing win. Follow Hong Kong play instead?** (asked in chat by the orchestrator, 2026-11-20)
+  - Options given: (a) 花糊 at 3 faan and 大花糊 at 8 faan, no robbing (recommended); (b) no flower wins at all; (c) leave it as it is.
+  - Brian (2026-11-20): "wait, seven rob one is hong kong rule?", "I am pretty sure that's not the case", then on the options: "a". Plan Task 17 (self-play-network plan, Phase 8) builds it.
+
 - **The self-play network did not beat the three-stage bot (-0.09 ± 0.22 per hand over 40,000 deals). Keep training, put it into the game, or stop?**
   - What it is: Task 7's final measurement. Best network (hour 6 of a 10 h run that stopped itself on its stall rule, 1.29 M hands) against three `stage` bots: -0.09 ± 0.22 per hand, win 23.7 % (stage 23.9-24.1 %), deal-in 18.3 % (stage 18.4-18.8 %). At one table of 4,000 deals: network +0.65, teacher -0.17, `stage` +1.33, `value` -1.81 (each ± 0.7). Pass mark (above zero against `stage`) is not met.
   - Example: the 2-hourly results were -0.26, +0.31, +0.48, -0.54, -0.88 (each ± 2.0): no trend. Report: `docs/study-results/self-play-network.md`.
