@@ -626,6 +626,10 @@ impl Bot {
             "stage-fold-learned-exact" => {
                 Bot::Stage(StageBot::default().with_pushfold(true).with_exact(true))
             }
+            // Plan Task 20: Brian's defence bot, the best expected points in
+            // stage 3 and stage 0 from a Task 19 reading. Without `belief=...`
+            // (see `crate::Agent`) it has no reading and plays as `stage`.
+            "stage-ev" => Bot::Stage(StageBot::default().with_defence(true)),
             // Plan Task 21 (Brian, 2026-11-21): in stage 1 a close choice between
             // the two best flush suits goes by the neighbours' suits; close by
             // flush distance, or (variant) by tile count. Test bots.

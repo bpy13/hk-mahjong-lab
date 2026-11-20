@@ -40,9 +40,16 @@
 //! belief, outside the calibration curve; where exact counting gives exactly 0
 //! or 1 for a kind, that figure wins over the network. With no network set
 //! every figure is as before.
+//!
+//! **Reading** (plan Task 20): [`with_reading`] sets a belief model for this
+//! thread (none by default); [`Danger::of_reading`] then reads it instead of the
+//! fitted tables ([`crate::HeuristicBelief`]). The give-up rule, the learned
+//! push-or-fold choice and the defence bot of [`crate::defence`] read their danger
+//! through it, so `stage-fold:belief=...` runs Task 11's rule on another reading.
 
+use crate::belief::BeliefModel;
 use crate::danger_tables::{CALIBRATION, THREAT, WAIT};
-use crate::ev::{Belief, Beliefs, FIRST_FAAN_BUCKET};
+use crate::ev::{Belief, Beliefs, HeuristicBelief, FIRST_FAAN_BUCKET};
 use crate::exact_wait::exact_wait;
 use crate::passed::Passed;
 use crate::risk_net::RiskNet;
@@ -54,6 +61,46 @@ use std::sync::Arc;
 thread_local! {
     static EXACT: Cell<bool> = const { Cell::new(false) };
     static RISK: RefCell<Option<Arc<RiskNet>>> = const { RefCell::new(None) };
+    static READING: RefCell<Option<Arc<BeliefModel>>> = const { RefCell::new(None) };
+}
+
+/// Belief models given to bots as their reading ([`register_reading`]).
+static REGISTERED: std::sync::RwLock<Vec<Arc<BeliefModel>>> = std::sync::RwLock::new(Vec::new());
+
+/// Keeps `model` for the life of the process and returns its id (1 and up), so
+/// a `Copy` bot can name it ([`crate::stage::StageBot::reading`]). The same
+/// `Arc` registered twice gets the same id.
+pub fn register_reading(model: Arc<BeliefModel>) -> u16 {
+    let mut list = REGISTERED.write().expect("reading registry");
+    if let Some(i) = list.iter().position(|m| Arc::ptr_eq(m, &model)) {
+        return (i + 1) as u16;
+    }
+    list.push(model);
+    u16::try_from(list.len()).expect("fewer than 65,536 readings")
+}
+
+/// The model registered under `id` ([`register_reading`]); `None` for 0.
+pub fn registered_reading(id: u16) -> Option<Arc<BeliefModel>> {
+    let i = usize::from(id).checked_sub(1)?;
+    REGISTERED.read().expect("reading registry").get(i).cloned()
+}
+
+/// The belief model set for this thread by [`with_reading`], if any.
+pub fn reading() -> Option<Arc<BeliefModel>> {
+    READING.with(|r| r.borrow().clone())
+}
+
+/// Runs `f` with `model` as this thread's reading (plan Task 20; `None` is the
+/// fitted tables), restoring the previous setting afterwards (also on a panic).
+pub fn with_reading<T>(model: Option<Arc<BeliefModel>>, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<BeliefModel>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            READING.with(|r| *r.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(READING.with(|r| r.replace(model)));
+    f()
 }
 
 /// The risk network set for this thread by [`with_risk`], if any.
@@ -545,6 +592,15 @@ impl Danger {
         Self::from_beliefs(state, me, &belief.estimate(state, me))
     }
 
+    /// [`Danger::from_belief`] with this thread's reading ([`with_reading`]), or
+    /// the fitted tables ([`HeuristicBelief`]) when none is set.
+    pub fn of_reading(state: &State, me: usize) -> Danger {
+        match reading() {
+            Some(m) => Self::from_belief(state, me, &*m),
+            None => Self::from_belief(state, me, &HeuristicBelief),
+        }
+    }
+
     /// [`Danger::from_belief`] from beliefs already estimated.
     pub fn from_beliefs(state: &State, me: usize, beliefs: &Beliefs) -> Danger {
         let rules = state.rules();
@@ -692,7 +748,7 @@ mod tests {
     use super::*;
     use crate::belief::BeliefModel;
     use crate::bots::Bot;
-    use crate::ev::HeuristicBelief;
+
     use mahjong_games::{Game, Policy};
     use mahjong_hk::{Meld, MeldKind, PositionPhase, PositionSpec, RuleSet};
     use mahjong_tiles::parse_tiles;

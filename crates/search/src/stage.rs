@@ -19,7 +19,10 @@
 //! the flush suit, with 8 or more flush tiles and paired honours, and only when
 //! the flush is closer afterwards.
 
+use crate::belief::BeliefModel;
 use crate::bots::{after_claim, live_winning_tiles, rank_discards, Key as RankKey, Metric};
+use crate::danger;
+use crate::defence;
 use crate::ev::after_own_kong;
 use crate::giveup;
 use crate::pushfold;
@@ -33,6 +36,7 @@ use rand::Rng;
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A line of play, in tie order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -520,6 +524,18 @@ pub struct Note {
 /// or 1 ([`crate::pushfold::Risk`], plan Task 14; bot `stage-fold-learned-exact`,
 /// its own fitted model): off by default; nothing without `pushfold`.
 ///
+/// `reading` names the belief model the give-up rule, the learned choice and the
+/// defence read their danger from (plan Task 20, spec option `belief=`; set as
+/// the thread's reading by [`crate::danger::with_reading`] during a decision):
+/// 0 (the default) is the fitted tables, as before; else the id the model got
+/// from [`crate::danger::register_reading`], so the bot stays `Copy`
+/// ([`StageBot::reading_model`]).
+///
+/// `defence` switches on the defence bot ([`crate::defence`], plan Task 20, bot
+/// `stage-ev:belief=...`): in stage 3 and in stage 0 the discard with the best
+/// expected points read from `reading` (a Task 19 file). Off by default; nothing
+/// without `reading`.
+///
 /// `neighbour` switches on the flush suit chosen by the neighbours' suits
 /// (plan Task 21; Brian, 2026-11-21: "if top two choices were close (within 1
 /// tiles), then always choose: 1. The one that is different from your 上家 2.
@@ -538,6 +554,8 @@ pub struct StageBot {
     pub giveup: Option<f64>,
     pub pushfold: bool,
     pub exact: bool,
+    pub reading: u16,
+    pub defence: bool,
     pub neighbour: u8,
 }
 
@@ -557,6 +575,8 @@ impl StageBot {
             giveup: None,
             pushfold: false,
             exact: false,
+            reading: 0,
+            defence: false,
             neighbour: 0,
         }
     }
@@ -579,6 +599,22 @@ impl StageBot {
     /// The same bot with the exact danger layer of the learned choice on or off.
     pub const fn with_exact(self, exact: bool) -> StageBot {
         StageBot { exact, ..self }
+    }
+
+    /// The same bot reading its danger from `model` (`None`: the fitted tables).
+    pub fn with_reading(self, model: Option<Arc<BeliefModel>>) -> StageBot {
+        let reading = model.map_or(0, danger::register_reading);
+        StageBot { reading, ..self }
+    }
+
+    /// The belief model this bot reads its danger from (`None`: the tables).
+    pub fn reading_model(&self) -> Option<Arc<BeliefModel>> {
+        danger::registered_reading(self.reading)
+    }
+
+    /// The same bot with the defence ([`crate::defence`]) on or off.
+    pub const fn with_defence(self, defence: bool) -> StageBot {
+        StageBot { defence, ..self }
     }
 
     /// The same bot with the neighbour rule for the flush suit (0 off, 1 close by
@@ -1068,7 +1104,7 @@ impl StageBot {
             // (the tile to throw, whether the rule refused `tile`), when it applies.
             let verdict = match scale {
                 Some(scale) => {
-                    let fig = giveup::MEASURED;
+                    let fig = giveup::measured();
                     giveup::judge(state, view, candidates, tile, &fig, scale)
                         .map(|v| (v.tile, v.gave_up))
                 }
@@ -1104,6 +1140,19 @@ impl StageBot {
         legal: &[Action],
         rng: &mut R,
     ) -> (Action, Option<Note>) {
+        match self.reading_model() {
+            Some(m) => danger::with_reading(Some(m), || self.decide_on_reading(state, legal, rng)),
+            None => self.decide_on_reading(state, legal, rng),
+        }
+    }
+
+    /// [`StageBot::decide`] once the reading is in force.
+    fn decide_on_reading<R: Rng + ?Sized>(
+        &self,
+        state: &State,
+        legal: &[Action],
+        rng: &mut R,
+    ) -> (Action, Option<Note>) {
         if let Some(&w) = legal
             .iter()
             .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
@@ -1123,6 +1172,19 @@ impl StageBot {
             .collect();
         let nb = self.neighbours(state, view.seat);
         let (tile, note) = self.pick_discard_with(&view, &candidates, rng, nb);
+        if self.defence && (note.stage == 3 || note.stage == 0) {
+            if let Some(m) = danger::reading() {
+                if let Some(t) = defence::choose(state, &view, &candidates, tile, &m) {
+                    if t != tile {
+                        let note = Note {
+                            gave_up: true,
+                            ..note
+                        };
+                        return (Action::Discard(t), Some(note));
+                    }
+                }
+            }
+        }
         if self.giveup.is_some() || self.pushfold {
             if let Some(t) = self.give_up(state, &view, &candidates, tile, note, self.giveup) {
                 let note = Note {

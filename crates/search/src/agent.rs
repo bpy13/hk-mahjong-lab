@@ -383,6 +383,28 @@ impl Agent {
                     .collect();
                 Ok(Agent::Bot(Bot::Race(crate::race::parse_spec(&pairs)?)))
             }
+            // Plan Task 20: a three-stage bot reading its danger from a belief
+            // model (`stage-fold:belief=...`, `stage-fold-learned:belief=...`,
+            // `stage-ev:belief=...`).
+            _ if name.starts_with("stage") && !opts.is_empty() => {
+                let Some(Bot::Stage(bot)) = Bot::by_name(name) else {
+                    return Err(format!("unknown agent {name:?}"));
+                };
+                let mut belief = None;
+                options(opts, |k, v| match k {
+                    "belief" => {
+                        belief = Some(v.to_string());
+                        Ok(())
+                    }
+                    _ => Err(format!("unknown {name} option {k:?}")),
+                })?;
+                let path = belief.ok_or(format!("{name} takes only belief=..."))?;
+                if !std::path::Path::new(&path).exists() {
+                    return Err(format!("belief model {path:?} not found"));
+                }
+                let model = Arc::new(BeliefModel::load(&path)?);
+                Ok(Agent::Bot(Bot::Stage(bot.with_reading(Some(model)))))
+            }
             "defensive" if !opts.is_empty() => {
                 let mut belief = None;
                 options(opts, |k, v| match k {

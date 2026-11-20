@@ -22,6 +22,10 @@
 //! and loss of `t` and `s`, the choice of `s` and the folded hand's discards use
 //! Task 13's exact figure where it is exactly 0 or 1, else the table.
 //!
+//! With the environment variable `BELIEF=<model file>` (plan Task 20) `label`
+//! reads the danger from that model ([`mahjong_search::Danger::of_reading`]): the
+//! choice of `s`, the features and the folded hand's discards.
+//!
 //! `pushfold match <bot> <opponent> <deals> [seed]`: step 5's detail columns, as
 //! Task 11's `giveup_log match`: each deal is played four times with `<bot>` in
 //! each seat and `<opponent>` in the others; points per hand with a 95 % range
@@ -150,6 +154,15 @@ fn label_deal(rules: &RuleSet, deal_seed: u64, samples: usize, exact: bool) -> O
     Some(row)
 }
 
+/// Plan Task 20: the reading named by the environment variable `BELIEF` (a belief
+/// model file), set for each deal by [`danger::with_reading`]; none: the tables.
+fn env_reading() -> Option<std::sync::Arc<mahjong_search::BeliefModel>> {
+    let path = std::env::var("BELIEF").ok()?;
+    let m = mahjong_search::BeliefModel::load(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    eprintln!("reading: {path}");
+    Some(std::sync::Arc::new(m))
+}
+
 fn run_label(deals: u64, samples: usize, seed: u64, out: &str, exact: bool) {
     let rules = RuleSet::default();
     let start = std::time::Instant::now();
@@ -174,17 +187,20 @@ fn run_label(deals: u64, samples: usize, seed: u64, out: &str, exact: bool) {
     let block = 500u64;
     let mut rows = 0usize;
     let mut done = 0u64;
+    let reading = env_reading();
     while done < deals {
         let end = (done + block).min(deals);
         let out_rows: Vec<String> = (done..end)
             .into_par_iter()
             .filter_map(|i| {
-                label_deal(
-                    &rules,
-                    seed.wrapping_mul(1_000_003).wrapping_add(i),
-                    samples,
-                    exact,
-                )
+                mahjong_search::danger::with_reading(reading.clone(), || {
+                    label_deal(
+                        &rules,
+                        seed.wrapping_mul(1_000_003).wrapping_add(i),
+                        samples,
+                        exact,
+                    )
+                })
             })
             .collect();
         for r in &out_rows {

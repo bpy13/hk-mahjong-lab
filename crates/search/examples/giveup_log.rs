@@ -10,6 +10,10 @@
 //! discard in ten bins, and the break-even table with the rough and the measured
 //! figures.
 //!
+//! With the environment variable `BELIEF=<model file>` (plan Task 20) the danger
+//! of `log` is read from that model ([`Danger::of_reading`]) and the calibration in
+//! force is `giveup::READ_CALIBRATION`.
+//!
 //! `giveup_log match <bot> <opponent> <deals> [seed]`: step 3. Each deal is played
 //! four times with `<bot>` in each seat and `<opponent>` in the others. Prints the
 //! bot's points per hand with a 95 % range over deals (the four seatings of a
@@ -19,7 +23,7 @@
 use mahjong_analysis::faan_shanten;
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, RuleSet, State};
-use mahjong_search::ev::HeuristicBelief;
+use mahjong_search::danger;
 use mahjong_search::giveup::{self, Figures, Outs, BUCKETS, MEASURED, ROUGH};
 use mahjong_search::stage::StageBot;
 use mahjong_search::{Bot, Danger, SeatView};
@@ -154,6 +158,15 @@ fn close(r: &mut Round, o: &Open) {
     r.safe_d += o.safe_d;
 }
 
+/// Plan Task 20: the reading named by the environment variable `BELIEF` (a belief
+/// model file), set for each deal by [`danger::with_reading`]; none: the tables.
+fn env_reading() -> Option<std::sync::Arc<mahjong_search::BeliefModel>> {
+    let path = std::env::var("BELIEF").ok()?;
+    let m = mahjong_search::BeliefModel::load(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    eprintln!("reading: {path}");
+    Some(std::sync::Arc::new(m))
+}
+
 fn play_log(rules: &RuleSet, deal_seed: u64) -> Log {
     let bot = StageBot::default();
     let mut state = State::new_deal(*rules, &mut ChaCha8Rng::seed_from_u64(deal_seed));
@@ -174,7 +187,7 @@ fn play_log(rules: &RuleSet, deal_seed: u64) -> Log {
             }
             last3[seat] = None;
             if note.is_some_and(|n| n.stage == 3) {
-                let danger = Danger::from_belief(&state, seat, &HeuristicBelief);
+                let danger = Danger::of_reading(&state, seat);
                 let (d, loss) = (danger.tile(t), danger.expected_loss(t));
                 let est = Danger::estimate(&state, seat).tile(t);
                 let (dc, lc) = giveup::danger_of(&danger, t);
@@ -364,9 +377,14 @@ fn print_bins(title: &str, bins: &[Bin; BINS]) {
 fn run_log(deals: u64, seed: u64) {
     let rules = RuleSet::default();
     let start = std::time::Instant::now();
+    let reading = env_reading();
     let log = (0..deals)
         .into_par_iter()
-        .map(|i| play_log(&rules, seed.wrapping_mul(1_000_003).wrapping_add(i)))
+        .map(|i| {
+            danger::with_reading(reading.clone(), || {
+                play_log(&rules, seed.wrapping_mul(1_000_003).wrapping_add(i))
+            })
+        })
         .reduce(Log::default, Log::add);
     println!(
         "step 1: {deals} deals of four `stage` bots, seed {seed} ({:?})",
@@ -396,7 +414,10 @@ fn run_log(deals: u64, seed: u64) {
             100.0 * r.safe_d / n,
         );
     }
-    print_bins("Danger::tile (from_belief, heuristic), raw", &log.bins);
+    print_bins(
+        "Danger::tile (of_reading: BELIEF model, else heuristic), raw",
+        &log.bins,
+    );
     print_bins("the same, calibrated (giveup::danger_of)", &log.cal);
     let fig = log.figures();
     println!();

@@ -38,10 +38,16 @@
 //! leaves it ready again; then the rule above decides again. The bot itself has
 //! no memory, so the give-up is remembered per thread, keyed by the seat and the
 //! public event history up to that decision ([`remember`]).
+//!
+//! **On another reading** (plan Task 20, `stage-fold:belief=...`): with a belief
+//! model set by [`crate::danger::with_reading`], the danger comes from that model
+//! and the calibration, loss factor and figures are those refitted on it
+//! ([`READ_CALIBRATION`], [`READ_LOSS_FACTOR`], [`READ_MEASURED`]; [`calibration`],
+//! [`loss_factor`] and [`measured`] pick the set in force).
 
 use crate::bots::live_winning_tiles;
+use crate::danger;
 use crate::danger::Danger;
-use crate::ev::HeuristicBelief;
 use crate::view::SeatView;
 use mahjong_analysis::faan_shanten;
 use mahjong_hk::{Event, State};
@@ -151,9 +157,85 @@ fn through(
     above(x)
 }
 
-/// [`Danger::tile`] mapped through [`CALIBRATION`].
+/// Step 1's figures measured with the danger read from Task 19's model and
+/// [`READ_CALIBRATION`] in force (plan Task 20): 40,000 deals of four `stage`
+/// bots, seed 2 (`BELIEF=models/belief-order.mjnn giveup_log log 40000 2`,
+/// `runs/t20/giveup-read-seed2.txt`). Only `later_deal_in` depends on the reading.
+pub const READ_MEASURED: Figures = Figures {
+    own: [0.2477, 0.4999, 0.6098, 0.7279, 0.8159],
+    theirs: [1.1688, 1.851, 2.2004, 2.5333, 2.9108],
+    other_ends: [0.1264, 0.1244, 0.0964, 0.0636, 0.0316],
+    later_deal_in: [0.0769, 0.0623, 0.0421, 0.0232, 0.0092],
+};
+
+/// [`CALIBRATION`] refitted on the danger read from Task 19's model (plan Task 20):
+/// (mean predicted, observed deal-in rate) per danger bin of the stage 3 discards
+/// of 40,000 deals of four `stage` bots, seed 1
+/// (`BELIEF=models/belief-order.mjnn giveup_log log 40000 1`). The model is too sure
+/// at both ends: 6.6 times too low in the safest bin, 0.6 times in the top one.
+pub const READ_CALIBRATION: [(f64, f64); 10] = [
+    (0.0008, 0.0054),
+    (0.0072, 0.0237),
+    (0.0143, 0.0388),
+    (0.0246, 0.0593),
+    (0.0389, 0.0742),
+    (0.0592, 0.0917),
+    (0.0837, 0.1171),
+    (0.1223, 0.1432),
+    (0.1931, 0.1752),
+    (0.4596, 0.2781),
+];
+
+/// [`LOSS_FACTOR`] refitted on the danger read from Task 19's model (plan Task 20):
+/// (mean raw danger of the bin, points paid ÷ predicted loss), same log.
+pub const READ_LOSS_FACTOR: [(f64, f64); 10] = [
+    (0.0008, 6.542),
+    (0.0072, 3.187),
+    (0.0143, 2.55),
+    (0.0246, 2.326),
+    (0.0389, 1.747),
+    (0.0592, 1.489),
+    (0.0837, 1.348),
+    (0.1223, 1.078),
+    (0.1931, 0.861),
+    (0.4596, 0.54),
+];
+
+/// Whether a belief model is this thread's reading ([`crate::danger::with_reading`]).
+fn on_reading() -> bool {
+    danger::reading().is_some()
+}
+
+/// The figures in force: [`READ_MEASURED`] on a model's reading, else [`MEASURED`].
+pub fn measured() -> Figures {
+    if on_reading() {
+        READ_MEASURED
+    } else {
+        MEASURED
+    }
+}
+
+/// The calibration in force ([`READ_CALIBRATION`] or [`CALIBRATION`]).
+pub fn calibration() -> &'static [(f64, f64); 10] {
+    if on_reading() {
+        &READ_CALIBRATION
+    } else {
+        &CALIBRATION
+    }
+}
+
+/// The loss factor in force ([`READ_LOSS_FACTOR`] or [`LOSS_FACTOR`]).
+pub fn loss_factor() -> &'static [(f64, f64); 10] {
+    if on_reading() {
+        &READ_LOSS_FACTOR
+    } else {
+        &LOSS_FACTOR
+    }
+}
+
+/// [`Danger::tile`] mapped through the calibration in force ([`calibration`]).
 pub fn calibrate(raw: f64) -> f64 {
-    let c = &CALIBRATION;
+    let c = calibration();
     let (first, last) = (c[0], c[c.len() - 1]);
     through(
         c,
@@ -166,7 +248,7 @@ pub fn calibrate(raw: f64) -> f64 {
 /// Calibrated danger and expected loss of `t` ([`CALIBRATION`], [`LOSS_FACTOR`]).
 pub fn danger_of(danger: &Danger, t: Tile) -> (f64, f64) {
     let raw = danger.tile(t);
-    let f = &LOSS_FACTOR;
+    let f = loss_factor();
     let factor = through(f, raw, |_| f[0].1, |_| f[f.len() - 1].1);
     (calibrate(raw), danger.expected_loss(t) * factor)
 }
@@ -294,7 +376,7 @@ pub fn judge(
     if !is_ready(&a) {
         return None;
     }
-    let danger = Danger::from_belief(state, view.seat, &HeuristicBelief);
+    let danger = Danger::of_reading(state, view.seat);
     // Points a later deal-in costs: those of the chosen tile's deal-in (the
     // calibrated loss over the calibrated chance), else the threats' average.
     let pay = match danger_of(&danger, chosen) {
@@ -347,10 +429,7 @@ pub fn smallest_loss(danger: &Danger, candidates: &[Tile]) -> Tile {
 
 /// The smallest-loss tile for a folded hand on turn in `state`.
 pub fn fold_tile(state: &State, seat: usize, candidates: &[Tile]) -> Tile {
-    smallest_loss(
-        &Danger::from_belief(state, seat, &HeuristicBelief),
-        candidates,
-    )
+    smallest_loss(&Danger::of_reading(state, seat), candidates)
 }
 
 fn mix(h: &mut DefaultHasher, e: &Event) {
