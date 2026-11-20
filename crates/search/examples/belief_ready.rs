@@ -169,6 +169,16 @@ struct Cell {
     net: f64,
     table: f64,
     race: f64,
+    /// Summed log loss of the true ready state against the network's and the
+    /// table's P(ready) (each clipped to [1e-4, 1 − 1e-4]; plan Task 19's check).
+    ll_net: f64,
+    ll_table: f64,
+}
+
+/// `−ln P(observed)` with `p` clipped away from 0 and 1.
+fn log_loss(p: f64, ready: bool) -> f64 {
+    let p = p.clamp(1e-4, 1.0 - 1e-4);
+    -if ready { p.ln() } else { (1.0 - p).ln() }
 }
 
 impl Cell {
@@ -178,6 +188,8 @@ impl Cell {
         self.net += r.net;
         self.table += r.table;
         self.race += r.race;
+        self.ll_net += log_loss(r.net, r.ready);
+        self.ll_table += log_loss(r.table, r.ready);
     }
     fn merge(&mut self, o: &Cell) {
         self.n += o.n;
@@ -185,6 +197,8 @@ impl Cell {
         self.net += o.net;
         self.table += o.table;
         self.race += o.race;
+        self.ll_net += o.ll_net;
+        self.ll_table += o.ll_table;
     }
     fn line(&self, name: &str) -> String {
         if self.n == 0 {
@@ -283,7 +297,12 @@ struct Stats {
     decisions: u64,
     flush: Vec<FlushCell>,
     strict: Strict,
+    /// Wall time of one `BeliefModel::run` call in microseconds (at most
+    /// `TIME_SAMPLES` kept; exact per call only with `RAYON_NUM_THREADS=1`).
+    times: Vec<u32>,
 }
+
+const TIME_SAMPLES: usize = 200_000;
 
 impl Stats {
     fn new() -> Stats {
@@ -295,6 +314,7 @@ impl Stats {
             decisions: 0,
             flush: vec![FlushCell::default(); 2 + 2 * FLUSH_BLOCK],
             strict: Strict::new(),
+            times: Vec::new(),
         }
     }
     fn add(&mut self, r: &Row) {
@@ -325,6 +345,8 @@ impl Stats {
             a.merge(b);
         }
         self.strict.merge(&o.strict);
+        let room = TIME_SAMPLES.saturating_sub(self.times.len());
+        self.times.extend(o.times.iter().take(room));
     }
 }
 
@@ -333,13 +355,15 @@ fn bin(p: f64) -> usize {
 }
 
 /// The three readings of opponent `o` for the player to act `me`.
-fn readings(state: &State, me: usize, o: usize, model: &BeliefModel) -> (f64, f64, f64) {
+fn readings(state: &State, me: usize, o: usize, model: &BeliefModel) -> (f64, f64, f64, u32) {
+    let t0 = std::time::Instant::now();
     let out = model.run(state);
+    let micros = t0.elapsed().as_micros().min(u32::MAX as u128) as u32;
     let net = out.seat(o).map_or(f64::NAN, |b| b.tenpai);
     let table = Danger::estimate(state, me).threat(o);
     let risk = risk_scores(state);
     let race = (net * RISK_MODEL.tenpai[RISK_MODEL.bin(risk[o])]).min(1.0);
-    (net, table, race)
+    (net, table, race, micros)
 }
 
 /// Logs every opponent at this discard decision; returns the network's and the
@@ -355,7 +379,10 @@ fn log_decision(
     stats.decisions += 1;
     let mut reads = [(f64::NAN, f64::NAN); 4];
     for o in (0..4).filter(|&o| o != me) {
-        let (net, table, race) = readings(state, me, o, model);
+        let (net, table, race, micros) = readings(state, me, o, model);
+        if stats.times.len() < TIME_SAMPLES {
+            stats.times.push(micros);
+        }
         reads[o] = (net, table);
         let ready = truly_ready(state, o);
         if let Some(st) = story(state, o, &thrown[o]).filter(|s| s.fit && s.pre >= NS[0]) {
@@ -876,6 +903,26 @@ fn run_deals(deals: u32, seed: u64, field: &str, belief: &Path) {
         total.slices[0].n,
         start.elapsed().as_secs_f64()
     );
+    let all = &total.slices[0];
+    println!(
+        "Log loss on ready over all {} opponent rows: network {:.5}, table {:.5}.\n",
+        all.n,
+        all.ll_net / all.n.max(1) as f64,
+        all.ll_table / all.n.max(1) as f64
+    );
+    let mut times = total.times.clone();
+    times.sort_unstable();
+    if !times.is_empty() {
+        let q = |f: f64| times[((times.len() - 1) as f64 * f) as usize];
+        println!(
+            "One `BeliefModel::run` call ({} samples, {} rayon threads): p50 {:.2} ms, p90 {:.2} ms, p99 {:.2} ms.\n",
+            times.len(),
+            rayon::current_num_threads(),
+            q(0.5) as f64 / 1000.0,
+            q(0.9) as f64 / 1000.0,
+            q(0.99) as f64 / 1000.0
+        );
+    }
     println!("## Ten bins by the network's P(ready)\n\n{}", header());
     for (i, c) in total.by_net.iter().enumerate() {
         println!(
@@ -1011,7 +1058,7 @@ fn replay(path: &Path, from: usize, belief: &Path) {
                 hand_text(&state, me)
             );
             for o in (0..4).filter(|&o| o != me) {
-                let (net, table, race) = readings(&state, me, o, &model);
+                let (net, table, race, _) = readings(&state, me, o, &model);
                 let last = thrown[o].last().map_or("-".to_string(), |d| {
                     format!("{}{}", d.tile, if d.from_hand { " 入章" } else { " 摸打" })
                 });
