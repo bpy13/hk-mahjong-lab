@@ -981,7 +981,7 @@ mod tests {
             vec![0.0; STATE_LEN],
             vec![0.0; STATE_LEN],
         );
-        let (mut checked, mut drawn) = (0, 0);
+        let (mut checked, mut compared, mut in_claim, mut drawn) = (0, 0, 0, 0);
         for _ in 0..8 {
             let mut s = State::new_deal(RuleSet::default(), &mut rng);
             while let Some(me) = s.current_player() {
@@ -996,9 +996,18 @@ mod tests {
                     assert!(plane_of(&b, 21).iter().all(|&x| x == 1.0));
                     assert!(plane_of(&b, 22).iter().all(|&x| x == 1.0));
                     // Hidden tiles (the other hands, the wall, the draw) change nothing.
+                    // `State::redeal` asks the other seats' claim declarations again:
+                    // when none of the re-dealt hands has a claim the window resolves
+                    // and the game moves on, and when `o` gains one it becomes the
+                    // player to act. Those are other public positions, so the
+                    // comparison holds only where the position survived the re-deal.
                     let other = s.determinize(o, &mut rng);
-                    encode_for(&other, o, &mut c);
-                    assert_eq!(b, c);
+                    if other.in_claim() == s.in_claim() && other.current_player() == Some(me) {
+                        encode_for(&other, o, &mut c);
+                        assert_eq!(b, c);
+                        compared += 1;
+                        in_claim += s.in_claim() as usize;
+                    }
                     drawn += s.last_drawn().is_some() as usize;
                 }
                 checked += 1;
@@ -1007,7 +1016,7 @@ mod tests {
                 s.apply(a);
             }
         }
-        assert!(checked > 300 && drawn > 0);
+        assert!(checked > 300 && compared > 300 && in_claim > 0 && drawn > 0);
     }
 
     fn plane_of(v: &[f32], k: usize) -> &[f32] {
