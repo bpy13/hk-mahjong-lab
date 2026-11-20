@@ -374,8 +374,10 @@ the question is whether ten times the data moves it toward or past the belief mo
 cpu job 265: `risk_log --deals 300000 --chunk 1000 --seed 16 --belief models/belief.mjnn`
 (8 threads), 300 chunks of 1,000 whole deals under `runs/risk/data-300k` of the workers
 clone (not in git); chunks 290 to 299 (10,000 deals) are held out and never seen in fitting.
-C: had 1,150 GB free at the start. Rate at the start: about 9 s a chunk (about 62,000
-decisions). Wall time, rows and size: see below (written when the jobs end).
+C: had 1,150 GB free at the start. Wall time 38.0 min (7.6 s a chunk; Task 15's 30,000 deals
+took 19 min, so the queue slot's 8 threads paid for ten times the deals in twice the time).
+18,609,334 rows of 3,613 bytes: 67,235,535,142 bytes (62.6 GiB, 300 chunk files of about
+220 MB each and `meta.json`). The folder stays; deleting it is Brian's call.
 
 ### Fits
 
@@ -384,12 +386,110 @@ Task 15's network and input unchanged (4,927 → 768 → 384 → 204; `features`
 12 epochs, batch 1,024, chunks in a fresh random order each epoch, the best epoch kept by the
 held-out `win` loss (200,000 held-out rows, about 3,200 deals, for the per-epoch figure), stop
 after 3 epochs without a gain. Gpu jobs 266 (chunks 0–29, 30,000 deals), 267 (0–99, 100,000),
-268 (0–289, 290,000); job 269 fits a larger network (4,927 → 1,536 → 768 → 204, about 8.9 M
-parameters) on all 290,000 only if the three took under 180 gpu minutes together. Cpu jobs
-270 to 273 run Task 15's checks (a) to (d) per fit on the 10,000 held-out deals (`check.md` in
-each fit folder), cpu job 274 the table below (`runs/risk/300k/summary.md`).
+268 (0–289, 290,000); job 269 fits a larger network (4,927 → 1,536 → 768 → 204, 8.9 M
+parameters) on all 290,000 only if the three took under 180 gpu minutes together (they took
+143.4, so it ran). Cpu jobs 270 to 273 run Task 15's checks (a) to (d) per fit on the 10,000
+held-out deals (`check.md` in each fit folder), cpu job 274 the table below
+(`runs/risk/300k/summary.md`).
+
+Wall time per step (from each job's log; the PC did not restart, no job resumed):
+
+| step | job | lane | wall time |
+|---|---|---|---|
+| data, 300,000 deals | 265 | cpu | 38.0 min |
+| fit, 30,000 deals | 266 | gpu | 12.1 min |
+| fit, 100,000 deals | 267 | gpu | 31.1 min |
+| fit, 290,000 deals | 268 | gpu | 100.2 min |
+| fit, larger network, 290,000 deals | 269 | gpu | 128.3 min |
+| checks (a)–(d), four fits | 270–273 | cpu | 1.0, 0.9, 0.9, 1.2 min |
+| summary table | 274 | cpu | 1.3 min |
+
+Total: 38 cpu minutes for the data, 271.7 gpu minutes for the four fits, 5.3 cpu minutes for
+the checks; about 5.3 hours end to end (23:45 to 05:00 on 2026-11-20). Disk: 62.6 GiB of data;
+each fit folder (`best.pt`, `ckpt.pt`, `risk.mjnn`, `train.log`, `check.md`) about 80 MB for
+the small network and 170 MB for the large.
+
+No fit stopped on the held-out loss: all four ran the 12 epochs, patience 3 never fired. The
+fit's own per-epoch held-out `win` loss (a mean over all 204 kinds, so a smaller scale than
+the log loss over alive kinds below) fell every epoch for the 30,000- and 100,000-deal fits
+(best epoch 11 of 0–11; the last gain 0.00002); the 290,000-deal fit was flat from epoch 9
+(0.018932, then 0.018938, 0.018936) and the larger network from epoch 10 (0.018784, 0.018778,
+0.018777). The cosine schedule reaches zero at epoch 12, so a flat end says the schedule ran
+out as much as the data did. Final per-epoch figures: 0.019406 (30,000), 0.019354 (100,000),
+0.018932 (290,000), 0.018777 (larger network).
 
 ### Results
 
-(Pending: jobs 265–274. The next run pastes `runs/risk/300k/summary.md` here, with the wall
-time and disk space of each step, and the verdict line.)
+Table from `runs/risk/300k/summary.md` (job 274). Same 10,000 held-out deals for every row;
+the table, the exact figure and the belief model are scored on these deals, so their figures
+differ a little from the Task 15 section (3,000 other deals). "Ten-bin verdict": the number
+of the ten prediction bins whose observed-to-predicted ratio lies within 0.8–1.25, "yes" when
+all ten do (Task 15's check (a)). "Above 50 %" and "below 1 %": how many pairs the source puts
+there, their share, and the observed deal-in rate among them (check (c)).
+
+Held-out chunks 290–299 of `runs/risk/data-300k`: 10,000 deals, 621,097 discard decisions, 19,524,872 (decision, alive kind) pairs, 5,528,409 in hand.
+
+#### Population `all` (19,524,872 pairs, observed 1.210 %)
+
+| source | log loss | Brier | ten-bin verdict (bins within 0.8–1.25) | above 50 %: n / share / observed | below 1 %: n / share / observed |
+|---|---|---|---|---|---|
+| table | 0.04607 | 0.010872 | no (6 of 10) | 20,750 / 0.11 % / 42.7 % | 14,883,121 / 76.23 % / 0.11 % |
+| exact | 0.04631 | 0.010869 | no (8 of 10) | 908 / 0.00 % / 60.5 % | 14,875,064 / 76.19 % / 0.11 % |
+| belief | 0.04427 | 0.010627 | no (3 of 10) | 7,057 / 0.04 % / 61.0 % | 16,357,600 / 83.78 % / 0.17 % |
+| network, 30,000 deals | 0.04820 | 0.011238 | no (9 of 10) | 1,710 / 0.01 % / 41.3 % | 15,015,492 / 76.90 % / 0.14 % |
+| network, 100,000 deals | 0.04822 | 0.011248 | no (9 of 10) | 1,279 / 0.01 % / 35.7 % | 14,882,782 / 76.22 % / 0.13 % |
+| network, 290,000 deals | 0.04773 | 0.011191 | yes (10 of 10) | 1,267 / 0.01 % / 39.3 % | 14,854,306 / 76.08 % / 0.12 % |
+| larger network, 290,000 deals | 0.04750 | 0.011167 | yes (10 of 10) | 1,037 / 0.01 % / 41.9 % | 15,066,171 / 77.16 % / 0.13 % |
+
+#### Population `hand` (5,528,409 pairs, observed 1.244 %)
+
+| source | log loss | Brier | ten-bin verdict (bins within 0.8–1.25) | above 50 %: n / share / observed | below 1 %: n / share / observed |
+|---|---|---|---|---|---|
+| table | 0.04498 | 0.010925 | no (8 of 10) | 1,114 / 0.02 % / 50.5 % | 4,498,873 / 81.38 % / 0.13 % |
+| exact | 0.04601 | 0.011118 | no (2 of 10) | 79 / 0.00 % / 68.4 % | 4,514,388 / 81.66 % / 0.13 % |
+| belief | 0.04386 | 0.010803 | no (2 of 10) | 2,330 / 0.04 % / 60.9 % | 4,658,452 / 84.26 % / 0.15 % |
+| network, 30,000 deals | 0.04608 | 0.011236 | no (7 of 10) | 737 / 0.01 % / 49.8 % | 4,424,156 / 80.03 % / 0.11 % |
+| network, 100,000 deals | 0.04610 | 0.011238 | yes (10 of 10) | 498 / 0.01 % / 45.2 % | 4,382,286 / 79.27 % / 0.11 % |
+| network, 290,000 deals | 0.04561 | 0.011174 | no (8 of 10) | 492 / 0.01 % / 51.4 % | 4,382,684 / 79.28 % / 0.10 % |
+| larger network, 290,000 deals | 0.04536 | 0.011134 | yes (10 of 10) | 435 / 0.01 % / 52.0 % | 4,422,732 / 80.00 % / 0.11 % |
+
+#### The fits
+
+| fit | hidden | parameters | deals | rows | epochs run | best epoch | minutes | stopped by |
+|---|---|---|---|---|---|---|---|---|
+| network, 30,000 deals | [768, 384] | 4,158,540 | 30,000 | 1,861,300 | 12 | 11 | 11.9 | the epoch count |
+| network, 100,000 deals | [768, 384] | 4,158,540 | 100,000 | 6,202,195 | 12 | 11 | 30.9 | the epoch count |
+| network, 290,000 deals | [768, 384] | 4,158,540 | 290,000 | 17,988,237 | 12 | 9 | 100.0 | the epoch count |
+| larger network, 290,000 deals | [1536, 768] | 8,906,700 | 290,000 | 17,988,237 | 12 | 11 | 128.1 | the epoch count |
+
+**Verdict on Brian's question: no.** Ten times the data does not move the network clearly
+toward the belief model, and it does not pass it. On population `all` the log loss goes
+0.04820 (30,000 deals) → 0.04822 (100,000) → 0.04773 (290,000): the move over one tenfold
+step is 0.00047, with no move at all over the first threefold step, while the gap to the
+belief model (0.04427) is 0.00346 and to the table (0.04607) 0.00166. At that rate the
+network at 3 million deals would score about 0.0473, still behind the table and about
+0.0030 behind the belief model; closing the gap to the belief model by tenfold steps would
+need about seven more of them. The larger network (8.9 M parameters) on the same 290,000
+deals gains another 0.00023 (0.04750), less than half a tenfold step of data, and is still
+behind the table. On population `hand` (tiles the player holds, the ones the bot's choice
+is about) the picture is the same: 0.04608 → 0.04610 → 0.04561, the larger network 0.04536,
+against the table's 0.04498 and the belief model's 0.04386.
+
+Where the data did help: calibration. The 290,000-deal fits pass the ten-bin check on `all`
+(10 of 10, where the table has 6 and the belief model 3), and the larger network passes it on
+`hand` too; the exact-0 and above-50 % calls are as sharp as Task 15's. The network is now the
+best-calibrated source and still the worst-ranked one on log loss: the ordering, not the
+level, is where it loses to the belief model, which sees the same `history` and reads the
+opponents' waits far better. The 30,000-deal fit here (0.04820, 12 epochs) also beats Task
+15's longer fit on the same amount of data (0.04839, 30 epochs), so the recipe (cosine over 12
+epochs, best epoch by `win` alone) accounts for about half a tenfold step by itself.
+
+Nothing becomes the default; `danger::with_risk` stays off. The 3-million-deal run would cost
+about 6.3 cpu hours of data (630 GB at 3,613 bytes a row, more than C: should give it, so the
+rows would first have to shrink again or the fit read them in parts) and about 17 gpu hours
+for one fit of the small network at this rate, for a predicted 0.0005 gain; the numbers say it
+is not worth it, and Brian decides.
+
+Files: `runs/risk/300k/{fit-30k,fit-100k,fit-290k,fit-290k-big}/` (each with `risk.mjnn`,
+`best.pt`, `ckpt.pt`, `train.log`, `check.md`) and `runs/risk/300k/summary.md`, in the
+workers clone, not in git.
