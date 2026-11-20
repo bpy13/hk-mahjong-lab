@@ -396,6 +396,273 @@ West is the case the network misses: a strict collector with one open set, read 
 where such seats are ready 38 % of the time (and West's own record, 10 clean discards then two
 萬, puts it in the 62 % row).
 
+## 7. Retrained on the discard order (plan Task 19)
+
+Brian, 2026-11-20: "you don't care if South plays 3s or if West plays 2w and 8w, those are
+obvious clues that should swing the estimation massively. Less obvious clues includes honour
+discards"; 摸打 against 入章 is "completely irrelevant, especially in this mobile app setting".
+This section builds the model that §5 asked for, fits it on fresh games of four `stage` bots and
+checks it on the same 20,000 held-out deals as §3 and §6. Nothing becomes a default: the old
+`models/belief.mjnn` stays the reading of every bot; the new file is `models/belief-order.mjnn`
+(not in git; it is in the workers clone, 11 MB).
+
+### 7.1 What was built
+
+* **Logs.** `selfplay_log --field stage` writes rows of layout 3: besides layout 2's fields, the
+  packed discard and claim order (`order`: every seat's first 24 discards in the order thrown,
+  the tile and whether it was claimed, plus an overflow count; nothing says whether a tile was
+  drawn and thrown or thrown from the hand), each opponent's state (far / one away / ready, the
+  faan-aware distance), the kinds it could claim into a meld now, the hand's winner and how it
+  won, and the observer's net points for the hand. New since Task 18: rows are also written from
+  the discarder's view when it is not to act (right after its discard, after the claim window
+  closed without a claim, after an opponent claimed), so the model can be read on the position
+  after a discard, which Task 20's bot needs. Training log: 40,000 hands, seed 190, 6,236,796
+  rows (156 a hand), 20 GB, 1 h 51 min on 14 threads (1.45 s a hand on one thread, most of it
+  the labels). Hold-out log: 4,000 hands, seed 191, 623,958 rows. Both in `runs/belief-order/`
+  of the workers clone.
+* **Inputs.** The 933 public `features` as before, the `order` block of Task 3 with the 摸打 /
+  入章 scalar set to 1 for every discard (`features::encode_order`, 3,460 values), and, in the
+  chosen model, a per-seat suit summary of the same order (`features::encode_suits`, 56 values:
+  per seat its discard count, the share of each suit and of honours among its discards, whether
+  each suit has been thrown, the index of its first discard of each suit, and each suit's count
+  among its last five discards). The summary is computed from the logged `order` field
+  (`log::suits_from_packed`, `model.suits_block`), so no new logging was needed; a test checks
+  the Rust and Python values on a hand-made discard list, and `log::tests::order_and_claims_in_the_row`
+  checks the live encoder against the packed field on played hands. No input tells a drawn tile
+  from a hand tile (`features::tests::spectator_encoding_hides_the_draw_and_the_decision`,
+  `order_block_hides_how_a_tile_was_thrown`, `suits_block_summarises_each_seat`).
+* **Outputs** (Brian's list, 2026-11-20): per opponent P(ready) (`tenpai`, 3), the state
+  (`state`, 3 × 3), the faan spread of its win (`faan`, 3 × 8), the win chances (`winner`, 9
+  classes: each seat self-drawn or off a discard, and the draw; Brian's five numbers are the
+  pairs summed, `BeliefOutput::win_chances`), per tile and opponent the deal-in chance
+  (`dealin`, 3 × 34) and the claim chance (`claim`, 3 × 34; merged to his 34 numbers by
+  `BeliefOutput::dealin_or_claim`), the expected points for the hand (`points`, 1), plus the old
+  `waits` and `outcome` heads and, as a training aid only, the copies-per-kind head `counts`
+  (3 × 34 × 5). The exported file names every slice; `crates/search/src/belief.rs` reads them
+  (`BeliefModel::has_task19_heads`, `run_for` for the spectator view).
+* **Fit.** One MLP, hidden 512 and 384 (ReLU), Adam at 1e-3 with a cosine schedule, batch
+  2,048, each epoch a fresh pass over the 80 chunks in random order; hold-out by whole deals.
+  An epoch takes 60 s on the GPU with the log in the page cache and about 500 s when it is read
+  from disk again. Five fits (`python -m mahjong.belief.train --order --task19 ...`):
+
+| Fit | Inputs, heads, settings | Epochs | Held-out ready (nats) | state | winner | dealin | claim |
+|---|---|---|---|---|---|---|---|
+| constant / frequencies | the hold-out log's own rates | – | 0.2502 | 0.676 | 2.041 | 0.728 | 6.611 |
+| A `order-nocounts` | features + order, no `counts` head | 8 | 0.1405 | 0.366 | 2.032 | 0.617 | 5.096 |
+| B `order-weighted` | as A, loss weights ready × 10, state × 5, winner × 3 | 5 | 0.1658 | 0.397 | 2.603 | 0.514 | 5.122 |
+| C `order-counts` | as A with the `counts` head | 6 | 0.1359 | 0.358 | 1.960 | 0.539 | 4.961 |
+| **E `order-suits`** | as C plus the `suits` summary | 6 | **0.1346** | 0.355 | 1.967 | 0.540 | 4.963 |
+| F `order-suits-dropout` | as E with dropout 0.2 and weight decay 1e-4 | 6 | 0.1395 | 0.367 | 1.905 | 0.491 | 5.081 |
+
+  Held-out losses on the first hold-out chunk (77,905 rows); `winner` is cross-entropy over 9
+  classes (the frequencies alone give 2.041, a uniform guess 2.197), `dealin` and `claim` are
+  binary cross-entropy summed over the 34 kinds. Weighting the ready head (B) makes it overfit
+  within two epochs (train 0.089, held-out 0.166); the `counts` head helps every other head as a
+  regulariser (C against A), so it stays in the file as a training aid, as the plan allowed;
+  the suit summary adds a little more (E). The chosen model is E: 2,811,882 parameters, trained
+  2026-11-20 21:03–21:18 (`runs/belief-order/fit-suits.log`, checkpoints `ckpt-suits/`).
+  All fits overfit the 40,000 hands to some degree: E's training ready loss is 0.118 against
+  0.135 held out, and its `dealin` held-out loss rises after epoch 1 while `tenpai` still falls.
+  Fit F (dropout 0.2 after each hidden layer, AdamW weight decay 1e-4, both added to the trainer
+  for this task) trades the ready head for the rest: ready 0.1395 against E's 0.1346, but `winner`
+  1.905, `dealin` 0.491, `faan` 1.57 and `waits` 4.93 against E's 1.967, 0.540, 2.14 and 5.85,
+  with train and held-out ready losses close (0.131 / 0.140). It is kept beside E as
+  `models/belief-order-reg.mjnn` for Task 20, whose bot reads the deal-in and win heads as much
+  as the ready head; this task's bar is the ready log loss, so E is the file named above.
+
+### 7.2 The 20,000 held-out deals of four `stage` bots (seed 18)
+
+The same deals, decisions and 3,718,542 opponent rows as §3 (every seat's discard decisions,
+each opponent's true ready state against the reading of the seat to act).
+
+| Reading | Log loss on ready (nats) |
+|---|---|
+| danger table | 0.17868 |
+| old network `belief.mjnn` | 0.17155 |
+| fit A (order, no counts) | 0.15787 |
+| fit C (order, counts) | 0.15348 |
+| **fit E (order, suits, counts)** | **0.14986** |
+| fit F (as E, dropout and weight decay) | 0.15295 |
+
+Ten bins by fit E's P(ready) (compare §3's table for the old network):
+
+| Slice | Opponent-decisions | True ready | Network mean | Table mean |
+|---|---|---|---|---|
+| network 0–10 % | 3025387 | 1.28 ± 0.01 % | 1.04 % | 2.00 % |
+| network 10–20 % | 209548 | 17.51 ± 0.16 % | 14.42 % | 10.86 % |
+| network 20–30 % | 121819 | 27.32 ± 0.25 % | 24.66 % | 14.51 % |
+| network 30–40 % | 85517 | 36.14 ± 0.32 % | 34.76 % | 17.85 % |
+| network 40–50 % | 67272 | 43.78 ± 0.37 % | 44.81 % | 21.17 % |
+| network 50–60 % | 56199 | 50.73 ± 0.41 % | 54.87 % | 24.76 % |
+| network 60–70 % | 48965 | 58.49 ± 0.44 % | 64.90 % | 28.73 % |
+| network 70–80 % | 42696 | 66.21 ± 0.45 % | 74.89 % | 33.61 % |
+| network 80–90 % | 36546 | 75.46 ± 0.44 % | 84.84 % | 40.93 % |
+| network 90–100 % | 24593 | 88.46 ± 0.40 % | 94.16 % | 58.29 % |
+
+The new reading is within 3 points of the truth up to 50 % and over-confident by 6 to 10 points
+in the 60–90 % bins (the old network was 7 to 10 points under-confident there, §3): the fit's
+overfitting shows as too-sharp high readings. It puts 2.3 times as many rows above 50 % as the
+old network (209,000 against 81,000) and those rows are ready 68 % of the time.
+
+Slices (true rate, then the mean reading of fit E, the old network and the table):
+
+| Slice | Rows | True ready | Fit E | Old network | Table |
+|---|---|---|---|---|---|
+| all | 3718542 | 8.17 ± 0.03 % | 8.08 % | 6.52 % | 5.44 % |
+| last third of the wall | 452055 | 30.84 ± 0.13 % | 30.79 % | 24.74 % | 20.58 % |
+| suit-suspect (first 6 discards outside one suit, that suit thrown since) | 477418 | 35.05 ± 0.14 % | 31.38 % | 19.52 % | 16.75 % |
+| suit-suspect, latest discard in that suit | 200763 | 34.45 ± 0.21 % | 28.97 % | 17.20 % | 15.31 % |
+| last 5 discards all drawn and thrown (no input carries this) | 96318 | 31.07 ± 0.29 % | 27.94 % | 19.53 % | 16.70 % |
+| West's case: 1 open set, suit-suspect, feeds a shown flush, last 5 drawn and thrown | 379 | 43.54 ± 4.99 % | 29.52 % | 13.48 % | 10.80 % |
+
+### 7.3 Task 18a's rows (§6) under the new reading
+
+True rate, then the mean reading of fit E and of the old network (both from the other seats'
+next decisions; the table's figures are in §6). Rows within 5 points of the truth are marked.
+
+| Row (§6) | Count | True ready | Fit E | Old | Within 5 |
+|---|---|---|---|---|---|
+| 6.1 stage 3 flush hand, own-suit discard: all | 45371 | 59.8 % | 45.3 % | 25.9 % | no (−14.5) |
+| 6.1 own-suit discard, full flush | 2524 | 90.2 % | 66.1 % | 34.9 % | no (−24) |
+| 6.1 own-suit discard, 0 open sets | 2675 | 46.4 % | 13.2 % | 6.0 % | no (−33) |
+| 6.1 own-suit discard, 1 open set | 10968 | 49.1 % | 24.2 % | 11.4 % | no (−25) |
+| 6.1 own-suit discard, 2 open sets | 18694 | 56.2 % | 43.5 % | 21.7 % | no (−13) |
+| 6.1 own-suit discard, 3–4 open sets | 13034 | 76.6 % | 72.0 % | 48.1 % | yes |
+| 6.1 own-suit discard, last third | 18342 | 65.3 % | 54.2 % | 34.1 % | no (−11) |
+| 6.1 first own-suit discard of the hand: all | 22008 | 49.7 % | 39.4 % | 21.7 % | no (−10) |
+| 6.1 first own-suit discard, 1 open set | 6136 | 40.7 % | 21.8 % | 10.6 % | no (−19) |
+| 6.1 first own-suit discard, 3–4 open sets | 4967 | 68.4 % | 68.0 % | 43.8 % | yes |
+| 6.2 strict collector N = 6, all | 437724 | 38.0 % | 34.0 % | 20.8 % | yes |
+| 6.2 N = 6, 1 open set | 113320 | 28.6 % | 19.9 % | 10.8 % | no (−9) |
+| 6.2 N = 6, 2 open sets | 142865 | 45.1 % | 42.0 % | 22.6 % | yes |
+| 6.2 N = 6, 3–4 open sets | 85040 | 72.3 % | 72.1 % | 49.9 % | yes |
+| 6.2 N = 8, all | 328240 | 44.4 % | 39.7 % | 24.3 % | yes |
+| 6.2 N = 10, all | 231872 | 49.6 % | 44.3 % | 27.7 % | no (−5.3) |
+| 6.2 N = 10, 0 open sets | 25317 | 21.2 % | 10.5 % | 6.5 % | no (−11) |
+| 6.2 N = 10, 1 open set | 60927 | 38.2 % | 25.2 % | 13.6 % | no (−13) |
+| 6.2 N = 10, 2 open sets | 87889 | 50.9 % | 47.3 % | 26.6 % | yes |
+| 6.2 N = 10, 3–4 open sets | 57739 | 72.3 % | 74.7 % | 53.5 % | yes |
+| 6.2 N = 10, last third | 136023 | 54.2 % | 49.0 % | 31.9 % | no (−5.2) |
+| 6.3 swing, N = 10: last decision before the first x | 21157 | 16.2 % | 14.6 % | 16.9 % | yes |
+| 6.3 N = 10: first decision after the first x | 21157 | 42.5 % | 38.3 % | 22.2 % | yes |
+| 6.3 N = 10: after the second x | 9624 | 62.0 % | 50.3 % | 29.6 % | no (−12) |
+| 6.3 N = 6: before / after first x / after second x | 31612 / 31612 / 16485 | 12.4 / 33.4 / 49.2 % | 10.8 / 29.3 / 39.3 % | 12.1 / 16.2 / 22.2 % | yes / yes / no (−10) |
+| 6.4 honour from a seat with no x, all: before / after | 86121 | 4.2 / 14.2 % | 6.9 / 14.4 % | 9.8 / 15.4 % | yes / yes |
+| 6.4 in the last third: before / after | 21210 | 6.3 / 17.1 % | 10.5 / 18.4 % | 16.9 / 23.8 % | yes / yes |
+
+The swing Brian asked for is now read: a strict N = 10 collector goes from 14.6 % to 38.3 % at
+its first own-suit discard and to 50.3 % at the second (truth 16.2 → 42.5 → 62.0 %; the old
+network moved 16.9 → 22.2 → 29.6 %), and a late honour from a seat that has shown no x is read
+at 18.4 % against 17.1 % true (old 23.8 %). Where the reading is still short of 5 points, and why:
+
+* **The rows of §6.1** condition on the discarder's own stage and hand (a stage 3 flush hand
+  throwing its suit), which no public reading can see; the public counterpart of each row is
+  §6.2's strict collector, where the reading is within 5 points at every N for two or more open
+  sets. With 0 or 1 open sets the public pattern is weak evidence (such seats are ready 8–38 %
+  of the time, and the same discards come from many hands that are not collecting), and there
+  the model stays 9 to 13 points low on the strict rows and 19 to 33 points low on the own-stage
+  rows. Full-flush hands (2,524 rows in 1.2 M) are too rare in the log for the fit to learn
+  their 90 % rate (read 66 %).
+* **The second own-suit discard** (6.3, truth 49–62 %) is read 10–12 points low at every N: the
+  suit summary carries the first discard of each suit and the share since, but not the count of
+  own-suit discards since the first, and the one-hot order block learns that conjunction only
+  partly from 40,000 hands.
+* These are fit limits, not input limits: every row above is a function of public facts the
+  model is given. The remedy is more hands (the fit overfits at 40,000: train 0.118 against
+  0.135 held out on ready), a feature for "own-suit discards since the first", or both; neither
+  was in this task's budget.
+
+### 7.4 Hand 2860 step by step
+
+P(ready) read by the seat to act (§2 for the hand; the old network's figures as in §2).
+
+| Step | Viewer | South (ready from 57) old → fit E | West (ready from 54) old → fit E |
+|---|---|---|---|
+| 57 | West | 32.2 → 72.0 % | – |
+| 58 | North | 23.6 → 77.0 % | 4.9 → 12.4 % |
+| 59 | East | 42.7 → 70.8 % | 9.2 → 21.4 % |
+| 60 | South | – | 5.9 → 11.5 % |
+| 61 | West | 46.3 → 66.8 % | – |
+| 62 | North | 29.7 → 80.8 % | 4.5 → 19.2 % |
+| 63 | East | 52.6 → 76.0 % | 12.3 → 33.7 % |
+| 64 | South | – | 7.1 → 11.8 % |
+| 65 | West | 49.1 → 63.7 % | – |
+| 66 | North | 30.6 → 78.2 % | 6.3 → 32.6 % |
+| 67 | East | 54.2 → 77.6 % | 17.3 → 49.5 % |
+| 68 | South | – | 9.7 → 14.0 % |
+| 69 | West | 49.7 → 67.4 % | – |
+| 72 | South | – | 10.1 → 15.7 % |
+| 73 | West | 93.8 → 97.5 % | – |
+| 74 | North | 81.6 → 98.4 % | 6.7 → 33.7 % |
+| 75 | East | 95.7 → 98.4 % | 20.6 → 52.2 % |
+| 76 | South | – | 10.1 → 9.3 % |
+| 78 | West | 92.1 → 97.5 % | – |
+
+South is read above 50 % at every decision from step 57 on (63.7 to 98.4 %; the old network
+crossed 50 % only at step 63 and fell back). West is not: 9 to 52 %, above 50 % only at step 75
+(East's view, after the fourth own-suit discard). Why not: West's public record is the strict
+one-set collector of §6.2 (10 clean discards, then 2萬 and 8萬); such seats are ready 38 % of the
+time at N = 10 with one open set and 62 % after the second own-suit discard, and the model reads
+that class 10 to 13 points under the truth (§7.3). Within the class West is read lowest by South
+(9–16 %) and highest by East (21–52 %): the three viewers hold different hands, so the unseen
+counts and the `features` block differ, and South, who holds four 索 sets and sees West's 1索
+and 8索 go by, reads West as a 索 feeder rather than a 萬 collector. East's reading at step 67
+(49.5 %) and 75 (52.2 %) is the behaviour Brian asked for; South's is the remaining gap. Fit F
+reads this hand lower (South 38–96 % from step 57, under 50 % at four of its first seven
+decisions; West 12–40 %) and its Task 18a rows sit 2 to 9 points under fit E's.
+
+### 7.5 Time per call
+
+One thread (`RAYON_NUM_THREADS=1`, 100 deals, the first `BeliefModel::run` call at each of
+6,310 decisions; the two later calls per decision hit the model's cache):
+
+| Model | Inputs | p50 | p90 | p99 |
+|---|---|---|---|---|
+| old `belief.mjnn` | features | 0.13 ms | 0.21 ms | 0.26 ms |
+| fit C `order-counts` | features + order | 1.25 ms | 3.22 ms | 26 ms |
+| fit E `belief-order.mjnn` | features + order + suits | 0.48 ms | 0.92 ms | 2.4 ms |
+| fit F `belief-order-reg.mjnn` | the same | 0.75 ms | 11 ms | 56 ms (beside a 20-thread run) |
+
+Fit C's figures were taken while a GPU fit's loader shared the CPU; fit E's on a quieter
+machine; the forward pass of the 2.8 M-parameter network is about 0.4 ms, under the 10 ms bar
+by a wide margin. With 20 rayon threads on the 20,000-deal run the p50 was 4.8 ms.
+
+### 7.6 The other required outputs
+
+Checked on the hold-out log (fit E, epoch 6) against the trivial reading from the log's own rates:
+
+* Win chances (`winner`): a softmax over 9 classes, so the five numbers (four seats and the
+  draw) sum to 1 by construction (Rust test `belief::tests::task19_heads_load_without_counts`);
+  held-out cross-entropy 1.967 nats against 2.041 for the class frequencies (self-drawn 5.8 %,
+  off a discard 18 % per seat, draw 4.7 %). The gain is modest because most rows are early in
+  the hand, when the result is open; no per-stage breakdown was made.
+* State (far / one away / ready): 0.355 nats against 0.676 for the frequencies (77 / 16 / 7 %).
+* Deal-in per tile and opponent (`dealin`, 3 × 34 sigmoids): 0.540 nats summed over the 34 kinds
+  against 0.728 for the per-kind rates (0.11 positive kinds a row); this head overfits first
+  (held-out loss rises from epoch 1) and is the one fit F's regularisation improves most.
+* Claim per tile and opponent (`claim`): 4.963 against 6.611 (1.67 claimable kinds a row).
+* Faan spread (`faan`, 8 buckets over ready opponents): 2.14 nats in fit E, slightly worse than
+  a uniform 2.08: this head is over-fitted in E (fit A 2.66, fit F 1.57 at its third epoch).
+  Fit F's 1.57 nats is the figure to use when the faan spread matters.
+* Expected points (`points`, Huber on the value / 32): 0.433 against a label spread of 1.32.
+* Copies per kind (`counts`): 18.98 nats summed over 3 × 34 kinds, kept as a training aid only
+  (it lifted every other head, §7.1); Brian's doubt that the solver still needs it stands.
+
+### 7.7 Verdict
+
+* The retrained reading beats the old network and the table on ready log loss over the 20,000
+  held-out deals (0.14986 against 0.17155 and 0.17868), is calibrated within 3 points up to
+  50 % and over-confident above, and reads the obvious clues Brian named: a strict collector's
+  first own-suit discard swings it from 15 % to 38 %, South in hand 2860 is read at 64–98 %
+  from the moment it is ready, and a late honour from a one-suit seat is read at its true rate.
+* It still under-reads collectors with 0 or 1 open sets and the second own-suit discard by 10 to
+  25 points, and West in hand 2860 stays under 50 % for every viewer but East. Both are fit
+  limits on 40,000 hands, stated in §7.3.
+* One call costs 0.5 ms on one thread. The file carries every output Brian listed and can be
+  read on the position after a discard or a claim (`BeliefModel::run_for`).
+* For Task 20: `race:belief=models/belief-order.mjnn` and the fold bots' readings can take this
+  file; nothing changed by default.
+
 ## Files
 
 * `crates/search/examples/belief_ready.rs`: the tool (`--hand`, `--deals`, `--field`; Task 18a's
@@ -403,5 +670,14 @@ where such seats are ready 38 % of the time (and West's own record, 10 clean dis
 * `runs/belief-ready/` (not in git): `hand-2860.txt`, `stage-20000.md`, `value-20000.md`,
   `stage-20000-t18a.md` (all tables of §3 and §6), `hand-2860-t18a.txt`.
 * No model, bot, table or default changed.
-
-
+* Task 19: `crates/search/examples/selfplay_log.rs` (`--field stage`, layout 3 with the
+  spectator rows), `crates/search/src/log.rs` (layout 3, `pack_order`, `suits_from_packed`),
+  `crates/search/src/features.rs` (`encode_order`, `encode_suits`, the `_for` forms),
+  `crates/search/src/net.rs` (input slices `order`, `suits`), `crates/search/src/belief.rs`
+  (Task 19 heads, `run_for`, `win_chances`, `dealin_or_claim`), `python/mahjong/belief/`
+  (`model.py`: `order_block`, `suits_block`, the heads; `train.py`: `--order --suits --task19
+  --no-counts --weight --dropout --weight-decay --hours`), `belief_ready` prints the ready log
+  loss and the one-call timing.
+* `runs/belief-order/` (not in git): `train/` and `holdout/` (the logs), `fit-*.log` and
+  `ckpt-*/` (the five fits), `order-*.pt` / `.mjnn`, `checks/` (`old-`, `A-`, `C-`, `E-`
+  `deals20k.md`, `hand2860.md`, `timing-1thread.md`). `models/belief-order.mjnn` is fit E.
