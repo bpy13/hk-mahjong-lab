@@ -637,6 +637,8 @@ impl Bot {
             "stage-neighbour-tiles" => Bot::Stage(StageBot::default().with_neighbour(2)),
             // Three close suits (Brian, 2026-11-21): every suit within 1 tile of the most.
             "stage-neighbour-three" => Bot::Stage(StageBot::default().with_neighbour(3)),
+            // Plan Task 22: rule 2 alone (prefer 下家's suit; 上家's plays no part).
+            "stage-neighbour-next" => Bot::Stage(StageBot::default().with_neighbour(4)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),

@@ -544,8 +544,9 @@ pub struct Note {
 /// apart (bot `stage-neighbour`); 2 = close means tile counts at most 1 apart
 /// (bot `stage-neighbour-tiles`; Brian's rule, 2026-11-21); 3 = every suit
 /// within 1 tile of the suit with most tiles is a candidate (bot
-/// `stage-neighbour-three`). Stage 1 of a leading flush only; see
-/// [`StageBot::neighbour_order`].
+/// `stage-neighbour-three`); 4 = rule 2 alone, close by tile count as in 2,
+/// 上家's suit plays no part (bot `stage-neighbour-next`, plan Task 22). Stage 1
+/// of a leading flush only; see [`StageBot::neighbour_order`].
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
@@ -618,7 +619,7 @@ impl StageBot {
     }
 
     /// The same bot with the neighbour rule for the flush suit (0 off, 1 close by
-    /// flush distance, 2 close by tile count).
+    /// flush distance, 2 close by tile count, 3 three suits, 4 rule 2 alone).
     pub const fn with_neighbour(self, neighbour: u8) -> StageBot {
         StageBot { neighbour, ..self }
     }
@@ -628,7 +629,9 @@ impl StageBot {
     /// hand. Modes 1 and 2: the two best suits `suits[0..2]`, close when their
     /// flush distances (1) or tile counts (2) are at most 1 apart; a suit that
     /// is not 上家's and is 下家's beats one that is neither; when the two rules
-    /// point to different suits, rule 1 (not 上家's) wins. Mode 3 (Brian,
+    /// point to different suits, rule 1 (not 上家's) wins. Mode 4 (plan Task
+    /// 22): close as in mode 2, and only rule 2 counts: 下家's suit beats the
+    /// other, 上家's suit plays no part. Mode 3 (Brian,
     /// 2026-11-21: "The new stage 1 rules could also be split between 3
     /// flushes"; "Second and third are to be considered when only 1 less tile
     /// than the flush with most tiles"): every suit whose tile count is at most
@@ -661,8 +664,14 @@ impl StageBot {
             if !close {
                 return None;
             }
-            // (is 上家's, is not 下家's): lower is better, rule 1 first.
-            let key = |s: Suit| (nb.before == Some(s), nb.after.is_some_and(|d| d != s));
+            // (is 上家's, is not 下家's): lower is better, rule 1 first; mode 4
+            // reads rule 2 alone.
+            let key = |s: Suit| {
+                (
+                    mode != 4 && nb.before == Some(s),
+                    nb.after.is_some_and(|d| d != s),
+                )
+            };
             Some(if key(b) < key(a) { b } else { a })
         };
         let (pick, three, differs) = if self.neighbour == 3 {
@@ -1579,6 +1588,8 @@ mod tests {
         assert_eq!(nb("stage-neighbour"), (1, None, false, 1));
         assert_eq!(nb("stage-neighbour-tiles"), (1, None, false, 2));
         assert_eq!(nb("stage-neighbour-three"), (1, None, false, 3));
+        // Plan Task 22: rule 2 alone.
+        assert_eq!(nb("stage-neighbour-next"), (1, None, false, 4));
     }
 
     /// Plan Task 21: the pick of `bot` with the neighbours read as `nb`
@@ -1667,6 +1678,59 @@ mod tests {
             (M, true)
         );
     }
+
+    #[test]
+    fn neighbour_rule_two_alone() {
+        // Plan Task 22: `stage-neighbour-next` follows 下家 and ignores 上家.
+        let next = StageBot::new(3, 1).with_neighbour(4);
+        let tiles = StageBot::new(3, 1).with_neighbour(2);
+        // 上家 shows the second suit 筒, 下家 unknown: the present order stands
+        // for rule 2 alone (萬 kept, a 筒 thrown); the full rule as before.
+        assert_eq!(thrown(CLOSE, next, "p-"), (P, false));
+        assert_eq!(thrown(CLOSE, tiles, "p-"), (P, false));
+        // 上家 shows the better suit 萬: the full rule drops it, rule 2 alone not.
+        assert_eq!(thrown(CLOSE, next, "m-"), (P, false));
+        assert_eq!(thrown(CLOSE, tiles, "m-"), (M, true));
+        // 下家 shows the second suit 筒: rule 2 alone picks it, 上家 or not.
+        assert_eq!(thrown(CLOSE, next, "-p"), (M, true));
+        assert_eq!(thrown(CLOSE, next, "pp"), (M, true));
+        assert_eq!(thrown(CLOSE, tiles, "pp"), (P, false));
+        // 下家 on the third suit, or the suits far apart: nothing changes.
+        assert_eq!(thrown(CLOSE, next, "-s"), (P, false));
+        assert_eq!(thrown("123456789m2346pW", next, "-p"), (P, false));
+    }
+
+    /// A hash of every action of 200 seeded deals played by four `bot`s.
+    fn fingerprint(bot: StageBot) -> u64 {
+        use mahjong_games::Game;
+        use rand_chacha::ChaCha8Rng;
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for deal in 0..200u64 {
+            let mut state =
+                State::new_deal(RuleSet::default(), &mut ChaCha8Rng::seed_from_u64(deal));
+            let mut rng = ChaCha8Rng::seed_from_u64(deal + 1_000);
+            while !state.is_terminal() {
+                let legal = state.legal_actions_vec();
+                let a = bot.choose(&state, &legal, &mut rng);
+                h = (h ^ u64::from(a.code())).wrapping_mul(0x0100_0000_01b3);
+                state.apply(a);
+            }
+        }
+        h
+    }
+
+    #[test]
+    fn neighbour_switch_off_leaves_stage_as_before() {
+        // Plan Task 22: plain `stage` plays 200 seeded deals exactly as it did
+        // before the rule-2-alone variant (hash taken on the Task 21 code).
+        assert_eq!(fingerprint(StageBot::default()), FINGERPRINT_BEFORE);
+        assert_eq!(
+            fingerprint(StageBot::default().with_neighbour(0)),
+            FINGERPRINT_BEFORE
+        );
+    }
+
+    const FINGERPRINT_BEFORE: u64 = 16_049_877_700_524_193_257;
 
     #[test]
     fn neighbour_rule_three_suits() {

@@ -27,6 +27,18 @@
 //! and melded, in one suit). For the three-suit rule also the share of hands
 //! where three suits were candidates at least once, and where its choice
 //! differed from the two-suit rule's at least once.
+//!
+//! `flush_neighbours one <deals> [seed] [bot...]` (plan Task 22; Brian,
+//! 2026-11-21: "1v3 is good, go ahead"): for each test bot (default
+//! `stage-neighbour-tiles` and `stage-neighbour-next`) on the same deals, one
+//! test bot and three plain `stage`, the test bot rotated through the four
+//! winds, each rotation beside its all-plain twin on the same wall and random
+//! stream. Per test bot: its points a hand against the same seat in the twin
+//! (the gain), win and deal-in rates beside the twin's; the three plain bots
+//! by position (下家, opposite, 上家 of the test bot) against their twins; the
+//! share of hands where the rule changed the suit, and in those hands melds
+//! 下家 made from the bot's discards and the share that ended in a flush, beside
+//! the twin. Then each later bot's gain minus the first bot's, paired over deals.
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{MeldKind, RuleSet, State};
 use mahjong_search::stage::{
@@ -388,6 +400,193 @@ fn run_pair(deals: u64, seed: u64, names: &[String]) {
     }
 }
 
+/// Sums for one test bot over deals, one against three (plan Task 22).
+#[derive(Clone, Copy, Default)]
+struct OneSum {
+    deals: f64,
+    /// Per position (the test bot, its 下家, opposite, its 上家): points (per-deal
+    /// mean over rotations), against the twin; win and deal-in counts in the
+    /// game and in the twin.
+    role: [Acc; 4],
+    vs: [Acc; 4],
+    wins: [f64; 4],
+    deal_ins: [f64; 4],
+    twin_wins: [f64; 4],
+    twin_deal_ins: [f64; 4],
+    hands: f64,
+    changed: f64,
+    ch_new: [f64; 5],
+    ch_old: [f64; 5],
+    ch_diff_sq: f64,
+}
+
+impl OneSum {
+    fn add(mut self, o: OneSum) -> OneSum {
+        self.deals += o.deals;
+        for r in 0..4 {
+            self.role[r] = self.role[r].add(o.role[r]);
+            self.vs[r] = self.vs[r].add(o.vs[r]);
+            self.wins[r] += o.wins[r];
+            self.deal_ins[r] += o.deal_ins[r];
+            self.twin_wins[r] += o.twin_wins[r];
+            self.twin_deal_ins[r] += o.twin_deal_ins[r];
+        }
+        self.hands += o.hands;
+        self.changed += o.changed;
+        for k in 0..5 {
+            self.ch_new[k] += o.ch_new[k];
+            self.ch_old[k] += o.ch_old[k];
+        }
+        self.ch_diff_sq += o.ch_diff_sq;
+        self
+    }
+}
+
+/// One deal for one test bot seated alone, given the twins of its rotations;
+/// also the deal's gain (the test bot against the twin, mean over rotations).
+fn one_deal(
+    rules: &RuleSet,
+    new: StageBot,
+    old: StageBot,
+    deal: u64,
+    twins: &[[Seat; 4]; 4],
+) -> (OneSum, f64) {
+    let mut s = OneSum {
+        deals: 1.0,
+        ..OneSum::default()
+    };
+    let (mut role, mut vs) = ([0.0f64; 4], [0.0f64; 4]);
+    for k in 0..4usize {
+        let mut bots = [old; 4];
+        bots[k] = new;
+        let g = play(rules, &bots, deal, k as u64);
+        for r in 0..4 {
+            // r = 0 the test bot, 1 its 下家 (plays after it), 2 opposite, 3 its 上家.
+            let seat = (k + r) % 4;
+            let (x, y) = (&g[seat], &twins[k][seat]);
+            role[r] += x.points / 4.0;
+            vs[r] += (x.points - y.points) / 4.0;
+            s.wins[r] += x.win as u8 as f64;
+            s.deal_ins[r] += x.deal_in as u8 as f64;
+            s.twin_wins[r] += y.win as u8 as f64;
+            s.twin_deal_ins[r] += y.deal_in as u8 as f64;
+        }
+        let (x, y) = (&g[k], &twins[k][k]);
+        s.hands += 1.0;
+        if x.changed {
+            s.changed += 1.0;
+            let (a, b) = (stats(x), stats(y));
+            for i in 0..5 {
+                s.ch_new[i] += a[i];
+                s.ch_old[i] += b[i];
+            }
+            s.ch_diff_sq += (a[0] - b[0]).powi(2);
+        }
+    }
+    for r in 0..4 {
+        s.role[r] = Acc::of(role[r]);
+        s.vs[r] = Acc::of(vs[r]);
+    }
+    (s, vs[0])
+}
+
+fn report_one(name: &str, s: &OneSum) {
+    let n = s.deals;
+    let h = 4.0 * n;
+    println!("  {name}:");
+    let labels = [
+        "test bot",
+        "下家 (plain)",
+        "opposite (plain)",
+        "上家 (plain)",
+    ];
+    for (r, label) in labels.iter().enumerate() {
+        let (m, ci) = s.role[r].mean_ci(n);
+        let (d, dci) = s.vs[r].mean_ci(n);
+        println!(
+            "    {:<18} points/hand {m:+.3} ± {ci:.3}  vs the same seat in the all-plain twin {d:+.3} ± {dci:.3}  win {:.2}% (twin {:.2}%)  deal-in {:.2}% (twin {:.2}%)",
+            label,
+            100.0 * s.wins[r] / h,
+            100.0 * s.twin_wins[r] / h,
+            100.0 * s.deal_ins[r] / h,
+            100.0 * s.twin_deal_ins[r] / h,
+        );
+    }
+    let (g, gci) = s.vs[0].mean_ci(n);
+    println!("    gain: test bot − the same seat in the twin {g:+.3} ± {gci:.3} points a hand (over deals)");
+    println!(
+        "    test-bot hands where the rule changed the suit: {:.0} of {:.0} ({:.2}%)",
+        s.changed,
+        s.hands,
+        100.0 * s.changed / s.hands
+    );
+    let c = s.changed.max(1.0);
+    let dmean = (s.ch_new[0] - s.ch_old[0]) / c;
+    let dvar = (s.ch_diff_sq / c - dmean * dmean).max(0.0);
+    println!(
+        "    changed hands ({:.0}), this seat / the same seat in the twin: points {:+.2} / {:+.2} (diff {:+.2} ± {:.2}), win {:.1}% / {:.1}%, chows from 上家 {:.3} / {:.3}, melds 下家 made with its discards {:.3} / {:.3}, ended in a flush {:.1}% / {:.1}%",
+        s.changed,
+        s.ch_new[0] / c,
+        s.ch_old[0] / c,
+        dmean,
+        1.96 * (dvar / c).sqrt(),
+        100.0 * s.ch_new[1] / c,
+        100.0 * s.ch_old[1] / c,
+        s.ch_new[2] / c,
+        s.ch_old[2] / c,
+        s.ch_new[3] / c,
+        s.ch_old[3] / c,
+        100.0 * s.ch_new[4] / c,
+        100.0 * s.ch_old[4] / c,
+    );
+}
+
+fn run_one(deals: u64, seed: u64, names: &[String]) {
+    let rules = RuleSet::default();
+    let old = stage_of("stage");
+    let news: Vec<StageBot> = names.iter().map(|n| stage_of(n)).collect();
+    let start = std::time::Instant::now();
+    let zero = || {
+        (
+            vec![OneSum::default(); names.len()],
+            vec![Acc::default(); names.len()],
+        )
+    };
+    let (sums, diffs) = (0..deals)
+        .into_par_iter()
+        .map(|i| {
+            let deal = deal_seed(seed, i);
+            let twins: [[Seat; 4]; 4] =
+                std::array::from_fn(|k| play(&rules, &[old; 4], deal, k as u64));
+            let per: Vec<(OneSum, f64)> = news
+                .iter()
+                .map(|&new| one_deal(&rules, new, old, deal, &twins))
+                .collect();
+            let diffs: Vec<Acc> = per.iter().map(|p| Acc::of(p.1 - per[0].1)).collect();
+            (per.into_iter().map(|p| p.0).collect::<Vec<_>>(), diffs)
+        })
+        .reduce(zero, |a, b| {
+            (
+                a.0.iter().zip(&b.0).map(|(x, y)| x.add(*y)).collect(),
+                a.1.iter().zip(&b.1).map(|(x, y)| x.add(*y)).collect(),
+            )
+        });
+    println!(
+        "one: one new bot and three plain stage, the new bot rotated through the winds, each rotation beside its all-plain twin; {deals} deals x 4 rotations, seed {seed} ({:?})",
+        start.elapsed()
+    );
+    for (name, s) in names.iter().zip(&sums) {
+        report_one(name, s);
+    }
+    for (name, d) in names.iter().zip(&diffs).skip(1) {
+        let (m, ci) = d.mean_ci(deals as f64);
+        println!(
+            "  paired difference of the gains, {name} − {}: {m:+.3} ± {ci:.3} points a hand (same deals and seats)",
+            names[0]
+        );
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let num = |i: usize, d: u64| args.get(i).and_then(|x| x.parse().ok()).unwrap_or(d);
@@ -399,6 +598,16 @@ fn main() {
             }
             run_pair(num(1, 100), num(2, 21), &names)
         }
-        _ => eprintln!("flush_neighbours pair <deals> [seed] [bot...]"),
+        Some("one") => {
+            let mut names: Vec<String> = args.iter().skip(3).cloned().collect();
+            if names.is_empty() {
+                names = vec![
+                    "stage-neighbour-tiles".into(),
+                    "stage-neighbour-next".into(),
+                ];
+            }
+            run_one(num(1, 100), num(2, 21), &names)
+        }
+        _ => eprintln!("flush_neighbours pair|one <deals> [seed] [bot...]"),
     }
 }

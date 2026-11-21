@@ -158,3 +158,55 @@ hand less than the plain bot whose 上家 is plain (three suits 0.47 ± 0.13); a
 new bot loses the same (0.48 ± 0.13). The seat before a new bot gains about as much (+0.22 to
 +0.26 against the twin). In a table of one new bot and three plain ones that starving effect
 would hurt only the plain 下家, which this set-up does not measure. Nothing becomes a default.
+
+## One against three (plan Task 22, 2026-11-21)
+
+Brian, 2026-11-21, on the +0.040 ± 0.093 above: "I think this is good evidence that the
+advantage is here although quite small"; offered one new bot against three plain ones (the full
+rule, and rule 2 alone, on the same deals): "1v3 is good, go ahead." With one new bot only a plain
+bot sits after it, so the points 下家 loses no longer cancel out of the gain.
+
+* New bot `stage-neighbour-next` (switch value 4): rule 2 alone. Close as in
+  `stage-neighbour-tiles` (tile counts at most 1 apart); of the two close suits 下家's is kept;
+  上家's suit plays no part. Tests `neighbour_rule_two_alone` and
+  `neighbour_switch_off_leaves_stage_as_before` (plain `stage` plays 200 seeded deals with the
+  same action hash as on the Task 21 code).
+* Match: `flush_neighbours one 200000 21` (both bots in one pass on the same deals): one new bot
+  and three plain `stage`, the new bot rotated through the four winds, each rotation beside its
+  all-plain twin on the same wall and random stream. 12 games a deal, 4,081 s, run directly from
+  the checkout with power throttling lifted. Log `runs/flush-neighbours/one-200000-seed21.txt` in
+  the workers clone. Ranges are 95 % over deals (the four rotations of a deal are one sample).
+
+| against the same seat in the all-plain twin | full rule `stage-neighbour-tiles` | rule 2 alone `stage-neighbour-next` |
+|---|---|---|
+| **new bot (the gain)** | **−0.019 ± 0.037** | **−0.051 ± 0.029** |
+| new bot: win / twin | 23.95 % / 24.11 % | 23.80 % / 24.11 % |
+| new bot: deal-in / twin | 18.25 % / 18.15 % | 18.07 % / 18.15 % |
+| 下家 (plain, plays after the new bot) | −0.227 ± 0.044 (win 23.62 % / 24.05 %) | −0.272 ± 0.035 (23.54 % / 24.05 %) |
+| opposite (plain) | +0.012 ± 0.043 (24.07 % / 24.07 %) | +0.156 ± 0.034 (24.35 % / 24.07 %) |
+| 上家 (plain, plays before the new bot) | +0.235 ± 0.042 (24.49 % / 23.97 %) | +0.168 ± 0.033 (24.27 % / 23.97 %) |
+| new-bot hands where the rule changed the suit | 18.01 % | 10.70 % |
+| changed hands: points, new bot / twin | −6.56 / −6.45 (diff −0.11 ± 0.21) | −7.26 / −6.78 (diff −0.48 ± 0.27) |
+| changed hands: win | 13.5 % / 14.4 % | 11.9 % / 14.7 % |
+| changed hands: melds 下家 made with the bot's discards | 0.775 / 0.964 a hand | 0.602 / 1.080 |
+| changed hands: ended in a flush | 62.4 % / 70.5 % | 60.4 % / 70.3 % |
+
+Raw points a hand (deal-in and win rates beside them in the log): full rule +0.026 ± 0.079,
+下家 −0.194, opposite −0.025, 上家 +0.192; rule 2 alone −0.005 ± 0.077, 下家 −0.239, opposite
++0.119, 上家 +0.126 (each ± 0.08).
+
+* **Full rule: no gain.** −0.019 ± 0.037 is level with plain `stage`. 下家 is starved (0.23
+  points a hand), but the points go to 上家 (+0.24), not to the new bot.
+* **Rule 2 alone: a small loss.** −0.051 ± 0.029 is below zero beyond its range. It starves
+  下家 harder (−0.27; 0.60 melds from the bot's discards against 1.08 in the changed hands), but
+  keeping 下家's suit costs the bot its own hand: in the changed hands it wins 11.9 % against
+  14.7 % and ends in a flush 60 % against 70 %. The points go to opposite and 上家 (+0.16, +0.17).
+* **The two compared** on the same deals and seats: rule 2 alone − full rule −0.032 ± 0.029,
+  so rule 2 alone is a little worse, just beyond its range.
+
+### Verdict
+
+Neither rule gains with one new bot against three plain ones: the full rule is level
+(−0.019 ± 0.037) and rule 2 alone loses a little (−0.051 ± 0.029). The rule hurts 下家, as
+Brian said, but what 下家 loses goes to the two other plain seats, not to the bot that starves it,
+and the bot gives up some of its own flushes and wins to do it. Nothing becomes a default.
