@@ -30,7 +30,9 @@ false alarm from the true hands, and splits the points by kind.
   passed) is its own row. Test `false_alarm::tests::false_alarm_label_agrees_with_the_engine`
   checks the label against the engine's own settlement on 10 deals × 4 seats per bot.
 * All games were played under the 12-tile liability rule as it stood on 2026-11-23 (liability for
-  a discard win too); Task 27 changes it to self-draw only and replays this match.
+  a discard win too); Task 27 changes it to self-draw only (ADR 0004) and replays this match: cpu
+  job 310, output `runs/defence-false-alarms/match-40000-seed24-selfdraw-rule.txt` in the slot 2
+  worktree; its figures go beside these when it ends (`docs/study-results/liability-rule-change.md`).
 * "From ready" is the faan-aware distance after the best discard (0 = ready with a legal win).
   Plain `stage` deals in in 18.20 % of its hands, 1.174 % of its discards (15.5 discards a hand).
 

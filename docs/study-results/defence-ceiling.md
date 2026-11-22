@@ -25,6 +25,11 @@ reach.
   are one sample). Run directly on the orchestrator's word: 6,412 s (1 h 47 min) on 14 threads,
   sharing the cores with a poker cpu job. Output `runs/defence-ceiling/match-40000-seed23.txt` in the
   workers clone.
+* Rule: every figure below was played under the 12-tile liability rule before 2026-11-23 (the
+  feeder paid 3 shares on a discard win too). Task 27 (ADR 0004) replays this match under the
+  amended rule (self-draw only): cpu job 309, output
+  `runs/defence-ceiling/match-40000-seed23-selfdraw-rule.txt` in the slot 2 worktree; its figures
+  go beside these when it ends (`docs/study-results/liability-rule-change.md`).
 * Test: `oracle::tests::oracle_never_throws_a_dealing_tile_while_holding_a_safe_one` plays 10 deals
   per variant and checks every discard of the oracle seat from scratch.
 
