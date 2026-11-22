@@ -32,6 +32,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
     20. 地糊 after the dealer's concealed kong (#30): (a) it no longer counts (HKMA "東家若開了暗槓﹐便不算數"); (b) keep. Default (a).
   - Default: as marked on each point. Every change goes into the rules file, the engine and the oracle together, with tests, as Task 27 did.
   - Asked by the Task 28 worker (slot 3), 2026-11-23; report `docs/study-results/rules-check.md`.
+  - Card sent 2026-11-23 (orchestrator; checked in the Association rulebook text itself: "16 x 3" in the points table, 門前清（「無花」規則限定), 坎坎糊 "不可有槓", 搶槓 paid as 包自摸; the other points read from the report's quotes only).
 
 - **Knowing the true deal-in would be worth +0.60 points a hand before one-away (+1.50 for every hand not ready). Stop the defence work, or build the real version on the reading?**
   - What it is: Task 23 played a test-only bot that cheats (`stage-oracle`: plays as `stage`, but reads the true hands and never throws a tile that is won on at once while it holds one that is not) against three plain `stage` over 40,000 deals (seed 23), paired with plain `stage` in the same seat on the same walls. Gain a hand: hands two or more from ready +0.598 ± 0.036; every hand not ready +1.504 ± 0.057; every decision, ready included, +3.254 ± 0.082; two or more from ready, avoiding only deal-ins of 6 faan or more, +0.374 ± 0.030. Report: `docs/study-results/defence-ceiling.md`.
