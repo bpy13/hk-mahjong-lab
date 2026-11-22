@@ -178,3 +178,55 @@ range includes 0), as Task 7's network was; it is 0.24 a hand above Task 7's fig
 two ranges, so neither run beat the three-stage bot. Together with the hourly table: cutting the
 noise lets the learner recover from its early drop, but 4 hours of self-play at this speed bring
 it back to the start's level, not above it.
+
+## Luck taken out of the reward (Task 29, 2026-11-23)
+Why: Brian, 2026-11-23, after asking how Suphx and LuckyJ use reinforcement learning: "then try
+again? with the luck removal technique?". Both earlier runs ended level with `stage`, and the
+analysis (`2026-11-17-self-play-analysis.md`, fault M2) found the learning signal far smaller than
+the noise of each update.
+
+**What the earlier runs already had.** The plan's premise was that the reward was the hand's raw
+points. It was not: the trainer's paired mode (idea 5a, on by default since Task 17 and on in the
+10-hour run and the low-noise run) already plays every wall twice, once with the learner in a
+seat and once with the frozen start network in that seat, and the reward is the learner's points
+minus the start's points on the same deal with the same wall (log-scaled). That is the plan's
+"same-deal baseline" (switch 2). What the runs did not have is a critic: in paired mode the
+advantage of every decision of a hand was that one paired number, with nothing subtracted and no
+credit per decision (`ppo_cnn.py`, `update`, before this task). So what is new here is the oracle
+critic and the per-decision credit.
+
+**Built (part 1), each a switch of `python -m mahjong.rl.ppo_cnn`, default off:**
+1. `--oracle-baseline`: a scalar value head (`SuitCNN.oracle_paired`) on the same hidden layer as
+   the four-seat oracle critic reads the position and the hidden view (the three concealed hands
+   and the next 16 wall tiles, `features::encode_oracle`) and is trained on the paired reward; the
+   advantage is the paired reward minus its value. In unpaired mode (`--no-paired-reward`) the
+   four-seat critic's own-seat value is subtracted, as before; `--no-oracle-baseline` subtracts
+   nothing. The policy and target heads never read the hidden view, and the export leaves every
+   `oracle*` tensor out, so play never uses it (`test_luck.py`: the same weights and seed give
+   the same rollout with the switches on or off; after an update with them on the exported
+   network's policy equals PyTorch's within 1e-3).
+2. The same-deal baseline is the paired mode itself (above): no new switch.
+3. `--per-decision-credit` (a third way, Tencent's and Suphx's per-step credit in spirit): the
+   advantage of a decision is the critic's value at the learner's next decision of that hand (the
+   reward after its last one) minus its value now, so a decision is credited with what it
+   changed, not with the whole hand. It needs the critic; its sum over a hand is the whole hand's
+   advantage.
+4. `--keep-hourly`: a copy of the network at every hourly row (`hour-NN.pt` / `.mjnn`).
+
+**Measurement** (`python -m mahjong.rl.luck`, job script `experiments/stage/luck_variance.ps1`):
+one fixed set of 50,000 self-play hands from the start network `models/stage-imitation.pt`,
+played exactly as the trainer's rollout does (paired mode, the opponent pool with no older member
+yet: current network and `stage`, min faan 3). Per learner decision the trunk output, the hidden
+view, the paired reward and the learner's own points are kept. The critic heads are fitted on the
+first 80 % of the hands with the trunk frozen (5 epochs; the trainer fits them online with the
+trunk, so a long run's critic is at least this good), and every setting is measured on the last
+20 %: the standard deviation of the advantage per decision and per hand (the mean over the hand's
+decisions, the unit that adds up over an hour), in raw points where the advantage is a whole
+hand's result, and the critic's held-out R². Hands per hour: the paired rollout's own timing; an
+unpaired rollout of 4,000 hands for the two unpaired settings (the learner plays all four seats:
+four seat-hands a hand); one update per setting timed on the last chunk. The last two columns
+give the noise of one hour's mean advantage (the per-hand std over the square root of the
+seat-hands an hour gives) and that noise relative to Task 10's setting: the lower, the more an
+hour of training tells.
+
+TABLE-PLACEHOLDER
