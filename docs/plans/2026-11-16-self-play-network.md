@@ -436,7 +436,7 @@ watch session's plain work copy into this repository first, so the work has a hi
 
 ## Phase 12 – Is there anything to gain from defence before the hand is ready (opus)
 
-- [ ] **Task 23: the most a not-ready hand can gain from defence, measured with a bot that sees the true hands** (opus) (checkpoint) `[parallel-ok]`
+- [ ] **Task 23: the most a not-ready hand can gain from defence, measured with a bot that sees the true hands** (opus) (checkpoint) `[parallel-ok]` (taken: slot 1, 2026-11-22 19:39)
   - Why: every defence trial so far is level or loses against plain `stage` (Tasks 11, 12, 14, 20), and for a ready hand even the true deal-in figure gains only +0.87 a decision (Task 12). Nobody has measured the ceiling for a hand that is not ready, where a safer discard costs little. If the ceiling is low the defence work ends and plain `stage` stays; if it is high, the reading is what fails and is worth more work. Brian, 2026-11-22, asked "What to do about the defensive part" and offered (a) run the upper-bound check or (b) stop defence and take the three-stage bot as final: "a".
   - What: a test-only bot `stage-oracle` (never a default, never exported to the app, named so in the code: it cheats) that plays as `stage` but, at a discard decision, is told from the opponents' true hands which of its tiles would be won on at once and for how many points (liability included). Variants, each a switch:
     1. `far`: while the hand is two or more tiles from ready, it never throws a tile that deals in when it holds one that does not; among the safe tiles it keeps `stage`'s own order.
