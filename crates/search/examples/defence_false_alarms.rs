@@ -20,7 +20,9 @@
 use mahjong_games::Game;
 use mahjong_hk::{HandResult, RuleSet, State};
 use mahjong_search::belief::BeliefModel;
-use mahjong_search::false_alarm::{example_json, play, true_distance, Played, Reading, OUTCOMES};
+use mahjong_search::false_alarm::{
+    example_json, play, play_with, true_distance, Played, Reading, OUTCOMES,
+};
 use mahjong_search::oracle::{discards, distance};
 use mahjong_search::stage::{read_dealin, StageBot};
 use mahjong_search::{Agent, Bot, SeatView};
@@ -596,8 +598,8 @@ fn write_example_files(
             .filter(|r| r.info.is_some_and(|i| i.kind == 1))
             .collect();
         for r in pick_examples(&fa) {
-            let plain = play(rules, None, r.deal, r.seat);
-            let mine = play(rules, Some(bot), r.deal, r.seat);
+            let plain = play_with(rules, None, r.deal, r.seat, Some(model));
+            let mine = play_with(rules, Some(bot), r.deal, r.seat, Some(model));
             assert_eq!(mine.points, r.points, "replay of deal {}", r.deal);
             let info = r.info.expect("info");
             let c = mine.change.as_ref().expect("a change");
