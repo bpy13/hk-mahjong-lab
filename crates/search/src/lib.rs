@@ -13,6 +13,8 @@
 //! * [`log`]: self-play logs with hidden hands (belief-model training data).
 //! * [`net`]: running trained networks.
 //! * [`passed`]: passed-tile safety and the risk-taking read (plan Tasks 14–15).
+//! * [`oracle`]: `stage-oracle`, a test-only bot that reads the true hands to
+//!   avoid dealing in (plan 2026-11-16 Task 23; it cheats, never a default).
 //! * [`pimc`]: the Monte Carlo solver used for recommendations and study mode.
 //! * [`pushfold`]: the ready hand's push-or-fold choice learned from play-outs (plan Task 12).
 //! * [`race`]: the race bot (B28, `docs/race-bot.md`): equity over all four players'
@@ -42,6 +44,7 @@ pub mod giveup;
 pub mod labels;
 pub mod log;
 pub mod net;
+pub mod oracle;
 pub mod passed;
 pub mod pimc;
 pub mod pushfold;
