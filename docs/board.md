@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 4: Task 24 (writing the false-alarm report from job 308), running
 
 ## Results
 - Task 25 (slot 2, 2026-11-23): ticked; the false-alarm example hands as JSON files (`defence_false_alarms examples-json`, format `docs/study-results/false-alarm-hand-format.md`, worked example `docs/study-results/examples/safe1-99000316-seat0.json`); a test replays 23 files from wall and action lists to the stated endings; fmt, clippy, cargo test --workspace pass; no paid API calls.
