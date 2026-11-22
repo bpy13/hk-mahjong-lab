@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 30 (finishing after cpu job 311: report section 4, inbox question), building
 
 ## Results
 - Task 30 (slot 3, 2026-11-23): waiting on cpu job 311 (`hk-early`, 40,000 deals, seed 30, corrected 12-tile rule); built: three switches of the stage bot, off by default (A a suited tile outside the best flush suit first among tied stage 1 throws; B far lines, thirteen orphans with a +2 handicap, out of the other lines' key; C a scoring honour last, found in a fresh 40-deal scan), bots `stage-early-suit`, `-far`, `-value`, `-ab`, `stage-early`; deal 99000316's two positions fixed by A (position 1 throws 6p, position 2 9m), B alone leaves position 2 to the random draw; plain `stage` unchanged (200-deal fingerprint); report `docs/study-results/stage-early-game.md` (section 4 waits on the job); example with the switches on `docs/study-results/examples/early-99000316-seat2.json`; fmt, clippy, cargo test --workspace pass; no paid API calls.
