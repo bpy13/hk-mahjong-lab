@@ -55,6 +55,31 @@ with batched inference (GPU when there is one) for every game of a Rust
 * **Passed and history inputs**: a network that reads the passed block or the
   ``history`` block gets them from ``HkVecEnv.observe_passed()`` and
   ``observe_history()``, after the features in that order.
+* **Luck taken out of the reward** (plan 2026-11-16 Task 29; :func:`advantages`). Two
+  switches, orthogonal, each a baseline subtracted from the hand's reward before PPO's
+  per-batch normalisation:
+
+  1. *Same-deal baseline*: the paired mode above (on since Task 17, on in both earlier
+     runs; ``--no-paired-reward`` turns it off). The reward is the learner's points
+     minus the frozen start's points from the same seat on the same deal with the same
+     wall, so what the deal gives to anyone in that seat cancels.
+  2. *Oracle critic as baseline* (``--oracle-baseline`` / ``--no-oracle-baseline``): the
+     advantage is the reward minus a value head that sees the hidden view (the three
+     concealed hands and the next 16 wall tiles, ``features::encode_oracle``) at the
+     decision. In paired mode that head is ``SuitCNN.oracle_paired``, trained on the
+     paired reward; in unpaired mode it is the four-seat oracle critic's own-seat
+     value, as before. Without the flag the trainer does what it did: no critic in
+     paired mode, the critic in unpaired mode. The playing network's inputs do not
+     change and play never uses the hidden view (the heads with the ``oracle`` prefix
+     are left out of the export).
+
+  A third, ``--per-decision-credit`` (needs the critic): the advantage of a decision is
+  the critic's value at the learner's next decision of that hand (the reward after
+  its last one) minus its value now, so a decision is credited with what it changed,
+  not with the whole hand. ``--keep-hourly`` saves the network at every hourly row as
+  ``<out>/hour-<n>.pt`` and ``.mjnn``. The log entry gains ``adv_std`` (the advantage
+  used, before normalisation), ``reward_std`` and ``critic_r2`` (the share of the
+  reward's variance the critic explains on the batch).
 
 Checkpoints every 30 minutes of training to ``<out>/ckpt-<iteration>.pt`` (network,
 optimizer) with ``<out>/state.json`` (hands, iteration, elapsed time, curriculum
@@ -72,6 +97,7 @@ CLI::
         [--no-target-head] [--envs N] [--device cuda|cpu] [--baseline init|ev]
         [--priority normal|above_normal] [--pool] [--pool-minutes M] [--eval-deals N]
         [--pull W] [--pull-fade-hours H | --no-pull-fade] [--draw-limit X] [--no-stall]
+        [--oracle-baseline | --no-oracle-baseline] [--per-decision-credit] [--keep-hourly]
 """
 
 from __future__ import annotations
@@ -101,6 +127,7 @@ from mahjong.rl.cnn import (
     CnnConfig,
     SuitCNN,
     export,
+    load_state,
 )
 from mahjong.rl.pool import (
     CURRENT,
@@ -254,6 +281,58 @@ class PpoCnnConfig:
     stall: bool = True
     #: Minutes of training per row of the hourly training score (60; tests shorten it).
     score_minutes: float = 60.0
+    #: Plan 2026-11-16 Task 29: subtract the oracle critic from the reward. None = as
+    #: before (no critic in paired mode, the critic in unpaired mode).
+    oracle_baseline: bool | None = None
+    #: Task 29's third way: the critic's change between a decision and the learner's
+    #: next one (needs the critic).
+    per_decision: bool = False
+    #: Save the network at every hourly row (``hour-<n>.pt`` and ``.mjnn``).
+    keep_hourly: bool = False
+
+
+def uses_critic(cfg: PpoCnnConfig) -> bool:
+    """Whether the advantage subtracts the oracle critic (:func:`advantages`)."""
+    if cfg.per_decision:
+        return True
+    if cfg.oracle_baseline is None:
+        return not cfg.paired
+    return cfg.oracle_baseline
+
+
+def next_values(uid: np.ndarray, value: np.ndarray, reward: np.ndarray) -> np.ndarray:
+    """For every row (a learner decision, rows of one hand in time order under the same
+    ``uid``), the critic's value at the hand's next row, or the hand's reward after its
+    last row."""
+    n = len(uid)
+    out = np.empty(n, dtype=np.float32)
+    if n == 0:
+        return out
+    order = np.lexsort((np.arange(n), uid))  # by hand, then time
+    u, v = uid[order], value[order]
+    last = np.ones(n, dtype=bool)
+    last[:-1] = u[:-1] != u[1:]
+    nxt = np.empty(n, dtype=np.float32)
+    nxt[:-1] = v[1:]
+    nxt[last] = reward[order][last]
+    out[order] = nxt
+    return out
+
+
+def advantages(d: dict[str, np.ndarray], cfg: PpoCnnConfig) -> tuple[np.ndarray, np.ndarray]:
+    """The advantage of every row of a batch before normalisation (Task 29) and the
+    critic's value it subtracted (zeros when none): the squashed reward; minus the
+    critic's value when :func:`uses_critic` (the paired-reward head ``vpaired`` in
+    paired mode, the four-seat critic's own seat otherwise); with ``per_decision`` the
+    critic's value at the hand's next row (the reward after the last one) replaces the
+    reward."""
+    reward = d["reward"].astype(np.float32)
+    if not uses_critic(cfg):
+        return reward, np.zeros_like(reward)
+    critic = (d["vpaired"] if cfg.paired else d["value"][:, 0]).astype(np.float32)
+    if cfg.per_decision:
+        return next_values(d["uid"], critic, reward) - critic, critic
+    return reward - critic, critic
 
 
 @dataclass
@@ -362,9 +441,11 @@ def load_init(path: Path | None, cfg: CnnConfig | None = None) -> SuitCNN:
     missing, unexpected = net.load_state_dict(ckpt["state"], strict=False)
     if unexpected or any(not m.startswith("oracle") for m in missing):
         raise ValueError(f"{path}: not a SuitCNN checkpoint ({missing=}, {unexpected=})")
-    if missing:
-        torch.nn.init.zeros_(net.oracle_value.weight)
-        torch.nn.init.zeros_(net.oracle_value.bias)
+    for name in missing:
+        # The hidden view starts with no effect, and the paired-reward head at zero.
+        layer = net.oracle_value if name.startswith("oracle_value") else net.oracle_paired
+        torch.nn.init.zeros_(layer.weight)
+        torch.nn.init.zeros_(layer.bias)
     return net
 
 
@@ -508,7 +589,7 @@ class Trainer:
 
     def _restore(self, state: dict[str, Any]) -> None:
         ckpt = torch.load(self.out / state["checkpoint"], map_location="cpu")
-        self.net.load_state_dict(ckpt["model"])
+        load_state(self.net, ckpt["model"])
         self.opt.load_state_dict(ckpt["optimizer"])
         self.iteration = state["iteration"]
         self.hands = state["hands"]
@@ -612,11 +693,12 @@ class Trainer:
 
     def _act(
         self, net: SuitCNN, f: np.ndarray, o: np.ndarray, m: np.ndarray, greedy: bool
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Actions, their log-probabilities and the critic's values for rows."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Actions, their log-probabilities, the four-seat critic's values and the
+        paired-reward critic's values for rows."""
         x, orc, mask = self._tensors(f, o, m)
         with torch.no_grad():
-            pi, _, v = net(x, orc)
+            pi, _, v, vp = net.forward_all(x, orc)
             logits = masked(pi, mask)
             if greedy:
                 a = logits.argmax(1)
@@ -627,7 +709,7 @@ class Trainer:
                 logp_all = F.log_softmax(logits, 1)
                 a = torch.multinomial(logp_all.exp(), 1)[:, 0]
                 logp = logp_all.gather(1, a[:, None])[:, 0]
-        return a.cpu().numpy(), logp.cpu().numpy(), v.cpu().numpy()
+        return a.cpu().numpy(), logp.cpu().numpy(), v.cpu().numpy(), vp.cpu().numpy()
 
     def collect(self) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         """Steps the games until ``hands_per_iter`` learner hands have finished."""
@@ -645,6 +727,7 @@ class Trainer:
             actions = np.zeros(n, dtype=np.int64)
             logp = np.zeros(n, dtype=np.float32)
             values = np.zeros((n, 4), dtype=np.float32)
+            vpaired = np.zeros(n, dtype=np.float32)
             base = roles == ROLE_BASELINE
             lrn = ~base
             env_ids = np.asarray(ids, dtype=np.int64)
@@ -665,13 +748,15 @@ class Trainer:
                 for j in np.unique(member[older_rows]):
                     r = older_rows & (member == j)
                     net = self.pool.net(int(j), self.device)
-                    actions[r], _, _ = self._act(net, f[r], o[r], m[r], greedy=False)
+                    actions[r], _, _, _ = self._act(net, f[r], o[r], m[r], greedy=False)
             if lrn.any():
-                actions[lrn], logp[lrn], values[lrn] = self._act(
+                actions[lrn], logp[lrn], values[lrn], vpaired[lrn] = self._act(
                     self.net, f[lrn], o[lrn], m[lrn], greedy=False
                 )
             if base.any():
-                actions[base], _, _ = self._act(self.teacher, f[base], o[base], m[base], True)
+                actions[base], _, _, _ = self._act(
+                    self.teacher, f[base], o[base], m[base], True
+                )
             actions, forced = force_wins(actions, m)
             keep = (roles == ROLE_LEARNER) & ~forced & (m.sum(1) > 1)
             buf.add(
@@ -682,6 +767,7 @@ class Trainer:
                     "actions": actions[keep],
                     "logp": logp[keep],
                     "value": values[keep],
+                    "vpaired": vpaired[keep],
                     # Rust hands Vec<u8> over as bytes.
                     "seat": np.frombuffer(seats, dtype=np.uint8)[keep],
                 },
@@ -736,7 +822,7 @@ class Trainer:
         classes: list[int] = []
         while done < self.cfg.teacher_hands:
             f, o, m, _ids, _ = self._observe(env)
-            a, _, _ = self._act(self.teacher, f, o, m, greedy=False)
+            a, _, _, _ = self._act(self.teacher, f, o, m, greedy=False)
             a, _ = force_wins(a, m)
             env.step(a.tolist())
             for d in env.finished(detail=True):
@@ -751,8 +837,11 @@ class Trainer:
         cfg, dev = self.cfg, self.device
         n = len(d["actions"])
         reward = d["reward"]
-        adv = reward if cfg.paired else reward - d["value"][:, 0]
-        adv = ((adv - adv.mean()) / (adv.std() + 1e-6)).astype(np.float32)
+        raw_adv, critic = advantages(d, cfg)
+        adv = ((raw_adv - raw_adv.mean()) / (raw_adv.std() + 1e-6)).astype(np.float32)
+        # The paired-reward critic is fitted only when the advantage uses it (Task 29):
+        # with the switch off the update is the same as before.
+        fit_paired = cfg.paired and uses_critic(cfg)
 
         def t(a: np.ndarray, dtype: torch.dtype | None = None) -> torch.Tensor:
             x = torch.from_numpy(np.ascontiguousarray(a)).to(dev)
@@ -762,6 +851,7 @@ class Trainer:
         masks, actions = t(d["masks"]), t(d["actions"], torch.int64)
         old_logp, adv_t = t(d["logp"]), t(adv)
         returns, target = t(d["returns"]), t(d["target"].astype(np.int64))
+        reward_t = t(reward.astype(np.float32))
         mult = torch.tensor(self.stats.anchor_mult, dtype=torch.float32, device=dev)
         pull = cfg.pull * pull_scale(self.elapsed / 3600, cfg.pull_fade_hours)
         self.net.train()
@@ -772,7 +862,7 @@ class Trainer:
             for i in range(0, n, cfg.batch):
                 idx = perm[i : i + cfg.batch]
                 x, orc, mask = feats[idx], oracle[idx], masks[idx]
-                pi, tg, v = self.net(x, orc)
+                pi, tg, v, vp = self.net.forward_all(x, orc)
                 logits = masked(pi, mask)
                 logp_all = F.log_softmax(logits, 1)
                 logp = logp_all.gather(1, actions[idx][:, None])[:, 0]
@@ -782,6 +872,8 @@ class Trainer:
                     ratio * ad, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ad
                 ).mean()
                 loss_v = F.mse_loss(v, returns[idx])
+                if fit_paired:
+                    loss_v = loss_v + F.mse_loss(vp, reward_t[idx])
                 probs = logp_all.exp()
                 ent = -(probs * logp_all.masked_fill(mask == 0, 0.0)).sum(1).mean()
                 loss = loss_pi + cfg.value_coef * loss_v - cfg.entropy * ent
@@ -833,7 +925,11 @@ class Trainer:
         out = {k: v / max(1, steps) for k, v in sums.items()}
         out["decisions"] = float(n)
         out["pull"] = pull
-        out["advantage_std"] = float(reward.std())
+        out["advantage_std"] = float(reward.std())  # the reward's spread, as logged before
+        out["reward_std"] = float(reward.std())
+        out["adv_std"] = float(raw_adv.std())
+        var = float(reward.var())
+        out["critic_r2"] = 1.0 - float((reward - critic).var()) / var if var > 0 else 0.0
         return out
 
     # --- Evaluation -------------------------------------------------------------
@@ -942,6 +1038,12 @@ class Trainer:
         row = self.hour.summary(round(self.next_hour / (self.cfg.score_minutes * 60)), partial)
         row["iteration"] = self.iteration
         row["hours"] = round(self.elapsed / 3600, 4)
+        if self.cfg.keep_hourly:
+            # Task 29: a copy of the network at every row, so any hour can be matched.
+            name = f"hour-{row['hour']:02d}"
+            self.net.save(self.out / f"{name}.pt")
+            export(self.net, self.out / f"{name}.mjnn")
+            row["network"] = f"{name}.pt"
         self.hourly.append(row)
         self.hour = HourStats()
         self.next_hour += self.cfg.score_minutes * 60
@@ -1154,6 +1256,27 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="no stop after four results without a gain (Task 10); draws and collapse stay",
     )
+    critic = ap.add_mutually_exclusive_group()
+    critic.add_argument(
+        "--oracle-baseline",
+        action="store_true",
+        help="subtract the oracle critic (hidden view) from the reward (Task 29)",
+    )
+    critic.add_argument(
+        "--no-oracle-baseline",
+        action="store_true",
+        help="never subtract the critic (the reward alone, even unpaired)",
+    )
+    ap.add_argument(
+        "--per-decision-credit",
+        action="store_true",
+        help="advantage = critic at the next own decision (reward after the last) minus now",
+    )
+    ap.add_argument(
+        "--keep-hourly",
+        action="store_true",
+        help="save the network at every hourly row (hour-<n>.pt and .mjnn)",
+    )
     ap.add_argument(
         "--priority",
         choices=tuple(PRIORITY_CLASSES),
@@ -1209,6 +1332,11 @@ def main(argv: list[str] | None = None) -> None:
         draw_limit=args.draw_limit,
         stall=not args.no_stall,
         score_minutes=args.score_minutes,
+        oracle_baseline=(
+            True if args.oracle_baseline else False if args.no_oracle_baseline else None
+        ),
+        per_decision=args.per_decision_credit,
+        keep_hourly=args.keep_hourly,
     )
     train(cfg)
 

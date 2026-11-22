@@ -32,7 +32,9 @@ Design (the Rust side, ``crates/search/src/cnn.rs``, runs the same network):
   training, zero-sum (the mean is subtracted). With ``oracle=True`` the value head
   also reads the hidden oracle block (opponents' hands, next wall tiles) in training
   only (Suphx-style oracle critic, idea 5b); the exported network leaves it out,
-  which equals feeding zeros.
+  which equals feeding zeros. With ``oracle=True`` a scalar head ``oracle_paired`` on
+  the same hidden layer predicts the paired reward (plan 2026-11-16 Task 29;
+  :meth:`SuitCNN.forward_all`), training only too.
 
 * **Passed block** (``passed=True``; plan 2026-11-09 Task 18): the input is the 933
   features followed by the 488 values of ``features::encode_passed``. Its 14 tile
@@ -208,6 +210,12 @@ class SuitCNN(nn.Module):
         self.value2 = nn.Linear(vh, VALUE_LEN)
         if cfg.oracle:
             self.oracle_value = nn.Linear(ORACLE_LEN, vh)
+            # Plan 2026-11-16 Task 29: a scalar head on the same hidden layer that
+            # predicts the paired reward (learner minus the frozen start on the same
+            # tiles, squashed) from the position and the hidden view; training only
+            # (the ``oracle`` prefix keeps it out of the export), used as the
+            # advantage baseline when ``ppo_cnn --oracle-baseline`` is on.
+            self.oracle_paired = nn.Linear(vh, 1)
 
     def forward(
         self, x: torch.Tensor, oracle: torch.Tensor | None = None
@@ -219,6 +227,14 @@ class SuitCNN(nn.Module):
         Returns policy logits ``(B, 134)``, target logits ``(B, 45)`` and values
         ``(B, 4)`` (relative seats, summing to zero).
         """
+        policy, target, v, _paired = self.forward_all(x, oracle)
+        return policy, target, v
+
+    def forward_all(
+        self, x: torch.Tensor, oracle: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """:meth:`forward` plus the paired-reward critic ``(B,)`` (zeros for a network
+        without the oracle block). The policy and target heads never read ``oracle``."""
         b = x.shape[0]
         want = input_len(self.cfg.passed, self.cfg.history)
         if x.shape[1] != want:
@@ -263,12 +279,35 @@ class SuitCNN(nn.Module):
             target[:, (0, 3, 4)[j // 3] * 9 + j % 3] = other[:, j]
 
         # Value.
+        v, paired = self.critics(z, oracle)
+        return policy, target, v, paired
+
+    def critics(
+        self, z: torch.Tensor, oracle: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """The two value heads on the merged trunk output ``z`` (``(B, merge)``, as
+        :meth:`trunk` returns it): the four-seat values and the paired-reward value."""
         pre = self.value1(z)
         if self.cfg.oracle and oracle is not None:
             pre = pre + self.oracle_value(oracle)
-        v = self.value2(F.relu(pre))
+        hidden = F.relu(pre)
+        v = self.value2(hidden)
         v = v - v.mean(1, keepdim=True)
-        return policy, target, v
+        paired = self.oracle_paired(hidden)[:, 0] if self.cfg.oracle else z.new_zeros(len(z))
+        return v, paired
+
+    def trunk(self, x: torch.Tensor) -> torch.Tensor:
+        """The merged trunk output ``z`` ``(B, merge)`` every head reads (the value heads
+        through :meth:`critics`); lets a critic be fitted on cached trunk outputs."""
+        b = x.shape[0]
+        suits, rest = split_planes(x, self.cfg.passed, self.cfg.history)
+        h = F.relu(self.honour2(F.relu(self.honour1(rest))))
+        y = F.relu(self.stem(suits.reshape(b * 3, self.in_planes, SUIT_LEN)))
+        for blk in self.blocks:
+            _, ctx_in = _pool(y, h)
+            y = blk(y, ctx_in)
+        _, merge_in = _pool(y, h)
+        return F.relu(self.merge(merge_in))
 
     def parameters_at_play(self) -> int:
         """Parameters of the exported network (the oracle critic is training only)."""
@@ -282,8 +321,20 @@ class SuitCNN(nn.Module):
     def load(path: Path) -> SuitCNN:
         ckpt = torch.load(path, map_location="cpu")
         net = SuitCNN(CnnConfig(**ckpt["cfg"]))
-        net.load_state_dict(ckpt["state"])
+        load_state(net, ckpt["state"])
         return net
+
+
+def load_state(net: SuitCNN, state: dict[str, torch.Tensor]) -> None:
+    """``net.load_state_dict(state)`` that accepts a file saved before the paired-reward
+    critic existed (plan 2026-11-16 Task 29): a missing ``oracle_paired`` head starts at
+    zero; anything else missing or unexpected is an error."""
+    missing, unexpected = net.load_state_dict(state, strict=False)
+    if unexpected or any(not m.startswith("oracle_paired") for m in missing):
+        raise RuntimeError(f"state does not fit the network ({missing=}, {unexpected=})")
+    if missing:
+        nn.init.zeros_(net.oracle_paired.weight)
+        nn.init.zeros_(net.oracle_paired.bias)
 
 
 # --- Suit-swap augmentation -------------------------------------------------------
