@@ -25,11 +25,11 @@ reach.
   are one sample). Run directly on the orchestrator's word: 6,412 s (1 h 47 min) on 14 threads,
   sharing the cores with a poker cpu job. Output `runs/defence-ceiling/match-40000-seed23.txt` in the
   workers clone.
-* Rule: every figure below was played under the 12-tile liability rule before 2026-11-23 (the
-  feeder paid 3 shares on a discard win too). Task 27 (ADR 0004) replays this match under the
-  amended rule (self-draw only): cpu job 309, output
-  `runs/defence-ceiling/match-40000-seed23-selfdraw-rule.txt` in the slot 2 worktree; its figures
-  go beside these when it ends (`docs/study-results/liability-rule-change.md`).
+* Rule: the main table, the split tables and the reading check below were played under the 12-tile
+  liability rule before 2026-11-23 (the feeder paid 3 shares on a discard win too). Task 27
+  (ADR 0004) replayed the match under the amended rule (self-draw only): cpu job 309, 1,603 s,
+  exit 0, output `runs/defence-ceiling/match-40000-seed23-selfdraw-rule.txt` in the slot 2
+  worktree; its figures are in the table "Under the amended rule" beside the old ones.
 * Test: `oracle::tests::oracle_never_throws_a_dealing_tile_while_holding_a_safe_one` plays 10 deals
   per variant and checks every discard of the oracle seat from scratch.
 
@@ -42,6 +42,25 @@ reach.
 | `notready` | **+1.504 ± 0.057** | 24.24 % | 8.93 % | 19.16 % | 41.18 % | 6.49 % | 11.63 % | 1.532 % | +6.21 |
 | `all` | **+3.254 ± 0.082** | 24.94 % | 1.02 % | 21.10 % | 44.79 % | 8.14 % | 17.40 % | 2.416 % | +8.41 |
 | `far-big` | **+0.374 ± 0.030** | 24.09 % | 17.22 % | 16.86 % | 36.36 % | 5.48 % | 1.30 % | 0.162 % | +14.90 |
+
+### Under the amended rule (self-draw only, Task 27, job 309)
+
+Same deals (seed 23), same bots, binaries built from the engine after ADR 0004. Old = the table
+above (liability on a discard win too); new = the amended rule.
+
+| Bot | Paired, old rule | Paired, amended rule | Deal-in, new | Hands changed, new | Decisions changed, new | Per changed decision, new |
+|---|---|---|---|---|---|---|
+| plain `stage` | — | — (−0.075 ± 0.159 a hand; win 24.08 %) | 18.03 % | — | — | — |
+| `far` | +0.598 ± 0.036 | **+0.633 ± 0.034** | 13.99 % | 6.01 % | 0.755 % | +5.35 |
+| `notready` | +1.504 ± 0.057 | **+1.566 ± 0.055** | 8.67 % | 11.93 % | 1.570 % | +6.31 |
+| `all` | +3.254 ± 0.082 | **+3.342 ± 0.078** | 0.48 % | 17.88 % | 2.481 % | +8.41 |
+| `far-big` | +0.374 ± 0.030 | **+0.388 ± 0.029** | 17.18 % | 1.36 % | 0.171 % | +14.64 |
+
+The ceiling is 2–6 % higher under the amended rule, each new figure within about one range of the
+old: the oracle changes a few more picks (2–3 % more hands), and `all`'s deal-in rate falls from
+1.02 % to 0.48 %: under the old rule some of its "deal-ins" were liabilities for another seat's
+discard, which avoiding its own dealing tile could not prevent. The rest of this study's text quotes
+the old-rule figures.
 
 So the one-away hands add +0.91 a hand (`notready` − `far`) and the ready hands +1.75 (`all` −
 `notready`). Task 12 put the ready hand's push-or-fold oracle at +0.87 a decision (about +0.55 a
@@ -134,7 +153,8 @@ the oracle's changes, which also include later decisions of hands the oracle kep
 ## Verdict
 
 Perfect knowledge of the deal-in is worth +0.60 ± 0.04 points a hand before one-away (+1.50 ± 0.06
-for every hand that is not ready, +3.25 ± 0.08 with ready hands too), far more than the level
+for every hand that is not ready, +3.25 ± 0.08 with ready hands too; under the amended 12-tile rule
++0.63 ± 0.03, +1.57 ± 0.06 and +3.34 ± 0.08), far more than the level
 results so far; a reading as good as `belief-order.mjnn` (AUC 0.87 on those decisions) could reach
 at best about 30 % of it (+0.18 / +0.38 a hand) flagging 1 % of safe picks and about 60 % (+0.37 /
 +0.88) flagging 5 %, if its false flags cost little.

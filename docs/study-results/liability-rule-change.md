@@ -99,5 +99,8 @@ Queued on the cpu lane from the slot 2 worktree, binaries built from the new eng
   (`experiments/stage/false_alarms.ps1 -Bin ...`), output
   `runs/defence-false-alarms/match-40000-seed24-selfdraw-rule.txt`.
 
-Check: `jobq.ps1 status`, `jobq.ps1 log 309`, `jobq.ps1 log 310`. When they end, the figures go
-beside the old ones in `defence-ceiling.md` and `defence-false-alarms.md`, each named with its rule.
+Both ended exit 0 (job 309: 1,603 s; job 310: 2,466 s); their figures are beside the old ones in
+`defence-ceiling.md` and `defence-false-alarms.md`, each named with its rule. The ceiling rose a
+little (`notready` +1.504 → +1.566 a hand); `safe1`'s gain fell from +0.242 ± 0.074 to
++0.160 ± 0.067 (its false alarms had been escaping liabilities on others' discard wins); `ev` and
+`fold` are unchanged.

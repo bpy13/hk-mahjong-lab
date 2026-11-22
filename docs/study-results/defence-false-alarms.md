@@ -29,10 +29,12 @@ false alarm from the true hands, and splits the points by kind.
   included), a **false alarm** otherwise; a first change that is not a discard (a claim or a win
   passed) is its own row. Test `false_alarm::tests::false_alarm_label_agrees_with_the_engine`
   checks the label against the engine's own settlement on 10 deals × 4 seats per bot.
-* All games were played under the 12-tile liability rule as it stood on 2026-11-23 (liability for
-  a discard win too); Task 27 changes it to self-draw only (ADR 0004) and replays this match: cpu
-  job 310, output `runs/defence-false-alarms/match-40000-seed24-selfdraw-rule.txt` in the slot 2
-  worktree; its figures go beside these when it ends (`docs/study-results/liability-rule-change.md`).
+* Rule: the main table, the split tables and the example hands were played under the 12-tile
+  liability rule as it stood on 2026-11-23 (liability for a discard win too). Task 27 changed it to
+  self-draw only (ADR 0004) and replayed this match: cpu job 310, 2,466 s, exit 0, output
+  `runs/defence-false-alarms/match-40000-seed24-selfdraw-rule.txt` in the slot 2 worktree (with its
+  own split tables and example hands); its headline figures are in the table "Under the amended
+  rule" beside the old ones.
 * "From ready" is the faan-aware distance after the best discard (0 = ready with a legal win).
   Plain `stage` deals in in 18.20 % of its hands, 1.174 % of its discards (15.5 discards a hand).
 
@@ -49,6 +51,27 @@ false alarm from the true hands, and splits the points by kind.
 Points are a hand over all 160,000 hands; the three parts sum to the paired gain in every row
 (the job prints the sum beside the gain; unchanged hands add +0.0000). ¹ plain `stage`'s win rate is
 Task 23's (seed 23); this job prints only its deal-in rate.
+
+### Under the amended rule (self-draw only, Task 27, job 310)
+
+Same deals (seed 24), same bots and reading, binaries built from the engine after ADR 0004.
+
+| Bot | Paired, old rule | Paired, amended rule | Win, new | Deal-in, new | First changes true / false, new | True-alarm points, new | False-alarm points, old → new | Mean false alarm, old → new | "Liable for a win" false alarms, old → new |
+|---|---|---|---|---|---|---|---|---|---|
+| plain `stage` | — | — | — | 18.20 % | — | — | — | — | — |
+| `safe1` | +0.242 ± 0.074 | **+0.160 ± 0.067** | 23.93 % | 16.77 % | 16.9 % / 82.5 % | +0.2398 | +0.0059 → −0.0846 | +0.05 → −0.73 | 158 → 43 |
+| `safe5` | −0.164 ± 0.139 | **−0.354 ± 0.130** | 22.03 % | 13.51 % | 7.4 % / 92.1 % | +0.3709 | −0.5165 → −0.7247 | −1.24 → −1.74 | 332 → 111 |
+| `ev` | −2.293 ± 0.178 | **−2.310 ± 0.169** | 19.74 % | 16.23 % | 4.3 % / 94.1 % | +0.2992 | −2.5711 → −2.5916 | −5.06 → −5.12 | 349 → 123 |
+| `fold` | −0.675 ± 0.069 | **−0.675 ± 0.063** | 22.09 % | 17.30 % | 13.0 % / 86.5 % | +0.2119 | −0.8843 → −0.8829 | −12.50 → −12.51 | 69 → 15 |
+
+`safe1` still gains under the amended rule (+0.160 ± 0.067, 2.4 times its range from zero) but by
+a third less: its true alarms bring the same (+0.24 a hand) and its false alarms, level under the old
+rule, now cost −0.085 a hand. Under the old rule a changed pick often also escaped a liability the
+plain game paid on another seat's discard win (its "same ending" false alarms were worth +0.073 a
+hand, now +0.012); that part of the gain came from the wrong rule. `safe5` loses twice as much for
+the same reason; `ev` and `fold` are unchanged. The split tables below are the old rule's; in the
+new run the one-away hands carry the whole false-alarm loss of `safe1` (9,816 hands, −0.086 a hand,
+−1.40 each; hands two or three away level), which supports the proposal in the verdict.
 
 Per hand, false alarms are common: `safe1` raises one in 11.6 % of hands (0.75 % of discards),
 `safe5` in 41.6 % (2.6 %), `ev` in 50.8 % (3.2 %), `fold` in 7.1 % (0.45 %). True alarms are 2.3 %,
@@ -1520,9 +1543,9 @@ Plain game: previous (上家) won off opposite (對家) with 10 faan (bot +0). B
   alarms end better than the plain game (`safe1`: 17.3 % of them, +36 each).
 * Each hand is labelled by its first change only; later changes in the same hand are counted in its
   points but not labelled.
-* One seed (24), one reading (`belief-order.mjnn`), the old liability rule. The thresholds came from
-  seed 23, so `safe1`'s gain is out of sample, but it is one match: +0.242 ± 0.074 is 3.3 times its
-  range from zero.
+* One seed (24), one reading (`belief-order.mjnn`). The thresholds came from seed 23, so `safe1`'s
+  gain is out of sample, but it is one match: +0.242 ± 0.074 under the old liability rule (3.3 times
+  its range from zero), +0.160 ± 0.067 under the amended rule (2.4 times).
 * The ready-state outputs of the reading (far / one away / ready per opponent) were not used by any
   bot here.
 
@@ -1532,8 +1555,10 @@ Most of the false-alarm loss comes from changing the pick of a hand **one away f
 **low reading (below 0.05)** against an opponent who is **truly far**, usually one with one or two
 open sets: in `safe5` those kinds carry 62–90 % of the loss, `ev` changes picks rated below 0.01
 and loses the wins (−4.81 a hand), and `fold` breaks ready hands (−12.50 each). At the 1 % setting
-(`safe1`, threshold 0.135) false alarms cost nothing on average and the bot **gains +0.242 ± 0.074
-points a hand** over plain `stage`, the first defence bot to beat it. Proposal (not built): keep
+(`safe1`, threshold 0.135) false alarms cost nothing on average under the old 12-tile rule and the bot
+**gains +0.242 ± 0.074 points a hand** over plain `stage`, the first defence bot to beat it; under
+the amended rule (self-draw only, the rule now in force) it **gains +0.160 ± 0.067**, its false
+alarms costing −0.085 a hand, all of it in one-away hands. Proposal (not built): keep
 `safe1`'s rule, and never change a one-away hand's pick on a reading below 0.135 (the 1 % threshold
 for one-away hands, the 5 % one only for hands three or more away, where its false alarms are level or gain), and leave `ev` and `fold` aside;
-then confirm on a fresh seed under Task 27's liability rule.
+then confirm on a fresh seed under the amended liability rule.
