@@ -13,6 +13,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Default: (a), since the ceiling is large and the test is cheap.
   - Asked by the Task 23 worker (slot 1), 2026-11-22; figures from `runs/defence-ceiling/match-40000-seed23.txt` and `reading-40000-seed23.txt` in the workers clone.
   - Card sent 2026-11-22 (orchestrator; paired gains and AUC checked against `runs/defence-ceiling/match-40000-seed23.txt` and `reading-40000-seed23.txt`).
+  - Brian (2026-11-23), question still open: "well maybe we should figure out how to deal with the false alarm. You should be able to figure out which hands' EV were lost because of false alarm, and we can investigate those". Task 24 measures that (it plays option (a)'s bot at both thresholds as part of it).
 
 - **One new bot against three plain ones: the full neighbour rule is level (−0.02 ± 0.04 points a hand), rule 2 alone loses a little (−0.05 ± 0.03). Drop the rule, or keep it as a switch?**
   - What it is: Task 22 played your one-against-three match over 200,000 deals (seed 21): one new bot and three plain `stage`, the new bot rotated through the winds, each game beside an all-plain twin on the same walls. Gain over the same seat in the twin: full rule (`stage-neighbour-tiles`: not 上家's suit, then 下家's) −0.019 ± 0.037, level; rule 2 alone (`stage-neighbour-next`: keep 下家's suit, ignore 上家) −0.051 ± 0.029, a small loss. Paired on the same deals, rule 2 alone is 0.032 ± 0.029 worse than the full rule. Report: `docs/study-results/flush-suit-neighbours.md`, section "One against three".
