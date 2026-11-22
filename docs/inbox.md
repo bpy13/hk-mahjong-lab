@@ -60,6 +60,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) confirm `stage-safe:t=1` with one more 40,000-deal match on a fresh seed under Task 27's rule (about 45 min of CPU through the queue), then take it as the defending bot and close the milestone; (b) first build the proposed rule (the 0.135 threshold for one-away hands, the 0.022 one only for hands three or more from ready) and measure it beside `t=1` in the same match; (c) stop the defence work and keep plain `stage`
   - Default: (a), since the gain is measured out of sample and the confirmation is cheap; (b) can follow as a later round.
   - Asked by the Task 24 worker (slot 4), 2026-11-23; figures from `runs/defence-false-alarms/match-40000-seed24.txt` in the workers clone.
+  - Card sent 2026-11-23 (orchestrator; the four paired gains and the three-part splits checked against the match output; note for the card: under the old liability rule `t=1` paid for a liability in 158 hands, -0.092 a hand, and Task 27 replays this match under the new rule).
 
 ## Answered
 
