@@ -39,6 +39,7 @@ pub mod danger_tables;
 pub mod defence;
 pub mod ev;
 pub mod exact_wait;
+pub mod false_alarm;
 pub mod features;
 pub mod giveup;
 pub mod labels;

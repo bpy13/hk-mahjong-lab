@@ -32,7 +32,7 @@ use mahjong_analysis::{faan_shanten, for_each_route_target, Structure, SuitPlan}
 use mahjong_games::Policy;
 use mahjong_hk::{Action, Meld, State};
 use mahjong_tiles::{Suit, Tile, TileCounts};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -547,6 +547,15 @@ pub struct Note {
 /// `stage-neighbour-three`); 4 = rule 2 alone, close by tile count as in 2,
 /// 上家's suit plays no part (bot `stage-neighbour-next`, plan Task 22). Stage 1
 /// of a leading flush only; see [`StageBot::neighbour_order`].
+///
+/// `safe` switches on the false-alarm test bot of plan Task 24 (bot
+/// `stage-safe:t=1,belief=...` or `t=5`): for a hand that is not ready (one or
+/// more from ready after its best discard), when the reading's deal-in chance
+/// of `stage`'s pick, `1 - prod_o (1 - dealin_o)`, is above the threshold that
+/// flags 1 % (`safe` = 1) or 5 % (`safe` = 5) of safe picks
+/// ([`safe_threshold`]), it throws `stage`'s pick among the tiles read below
+/// the threshold; no such tile, no change. 0 (the default) is off; nothing
+/// without `reading`.
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
@@ -558,6 +567,30 @@ pub struct StageBot {
     pub reading: u16,
     pub defence: bool,
     pub neighbour: u8,
+    pub safe: u8,
+}
+
+/// Plan Task 24: the reading's deal-in chance above which `stage-safe:t=<pct>`
+/// refuses `stage`'s pick, the threshold that flags `pct` % of the safe picks of
+/// a hand that is not ready (`models/belief-order.mjnn`, Task 23's reading check
+/// on 40,000 deals, seed 23: `runs/defence-ceiling/reading-40000-seed23.txt`,
+/// range `notready`). `None` for any other `pct`.
+pub fn safe_threshold(pct: u8) -> Option<f64> {
+    match pct {
+        1 => Some(0.1347),
+        5 => Some(0.0220),
+        _ => None,
+    }
+}
+
+/// The reading's chance that throwing kind `i` deals in to any opponent:
+/// `1 - prod_o (1 - dealin_o[i])` (plan Task 23's figure).
+pub fn read_dealin(b: &crate::belief::BeliefOutput, i: usize) -> f64 {
+    1.0 - b
+        .opponents
+        .iter()
+        .map(|o| 1.0 - o.dealin[i])
+        .product::<f64>()
 }
 
 impl Default for StageBot {
@@ -579,6 +612,7 @@ impl StageBot {
             reading: 0,
             defence: false,
             neighbour: 0,
+            safe: 0,
         }
     }
 
@@ -622,6 +656,45 @@ impl StageBot {
     /// flush distance, 2 close by tile count, 3 three suits, 4 rule 2 alone).
     pub const fn with_neighbour(self, neighbour: u8) -> StageBot {
         StageBot { neighbour, ..self }
+    }
+
+    /// The same bot with the false-alarm test switch (plan Task 24): 0 off, 1 or
+    /// 5 the share of safe picks flagged.
+    pub const fn with_safe(self, safe: u8) -> StageBot {
+        StageBot { safe, ..self }
+    }
+
+    /// Plan Task 24, `stage-safe`: the tile to throw instead of `tile`, when the
+    /// reading flags it and the hand is not ready. The re-pick draws its
+    /// tie-breaks from its own generator (seeded by the position), so the main
+    /// stream stays in step with plain `stage`.
+    pub fn safe_pick(
+        &self,
+        state: &State,
+        view: &SeatView,
+        candidates: &[Tile],
+        tile: Tile,
+        model: &BeliefModel,
+    ) -> Option<Tile> {
+        let thr = safe_threshold(self.safe)?;
+        if rank_discards(view, candidates, Metric::Faan)[0].1 .0 < 1 {
+            return None;
+        }
+        let b = model.run_for(state, view.seat);
+        if read_dealin(&b, tile.index() as usize) <= thr {
+            return None;
+        }
+        let below: Vec<Tile> = candidates
+            .iter()
+            .copied()
+            .filter(|&t| t != tile && read_dealin(&b, t.index() as usize) < thr)
+            .collect();
+        if below.is_empty() {
+            return None;
+        }
+        let key = (state.wall_remaining() * 4 + view.seat) * 64 + tile.index() as usize;
+        let mut own = rand_chacha::ChaCha8Rng::seed_from_u64(key as u64);
+        Some(self.pick_discard(view, &below, &mut own).0)
     }
 
     /// Plan Task 21: reorders the flush suits by the neighbours' suits among the
@@ -1191,6 +1264,17 @@ impl StageBot {
                         };
                         return (Action::Discard(t), Some(note));
                     }
+                }
+            }
+        }
+        if self.safe > 0 {
+            if let Some(m) = danger::reading() {
+                if let Some(t) = self.safe_pick(state, &view, &candidates, tile, &m) {
+                    let note = Note {
+                        gave_up: true,
+                        ..note
+                    };
+                    return (Action::Discard(t), Some(note));
                 }
             }
         }

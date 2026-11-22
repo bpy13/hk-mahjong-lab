@@ -639,6 +639,11 @@ impl Bot {
             "stage-neighbour-three" => Bot::Stage(StageBot::default().with_neighbour(3)),
             // Plan Task 22: rule 2 alone (prefer 下家's suit; 上家's plays no part).
             "stage-neighbour-next" => Bot::Stage(StageBot::default().with_neighbour(4)),
+            // Plan Task 24: the false-alarm test bot; flags `stage`'s pick of a hand
+            // that is not ready when the reading (`belief=...`) puts it above the
+            // threshold of 1 % of safe picks (`t=5`: 5 %). Without `belief=...` it
+            // plays as `stage`. A test bot, not a default.
+            "stage-safe" => Bot::Stage(StageBot::default().with_safe(1)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),

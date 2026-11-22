@@ -385,20 +385,29 @@ impl Agent {
             }
             // Plan Task 20: a three-stage bot reading its danger from a belief
             // model (`stage-fold:belief=...`, `stage-fold-learned:belief=...`,
-            // `stage-ev:belief=...`).
+            // `stage-ev:belief=...`; plan Task 24 `stage-safe:t=1,belief=...`).
             _ if name.starts_with("stage") && !opts.is_empty() => {
                 let Some(Bot::Stage(bot)) = Bot::by_name(name) else {
                     return Err(format!("unknown agent {name:?}"));
                 };
                 let mut belief = None;
+                let mut bot = bot;
                 options(opts, |k, v| match k {
                     "belief" => {
                         belief = Some(v.to_string());
                         Ok(())
                     }
+                    // Plan Task 24: `stage-safe:t=1` or `t=5`.
+                    "t" if bot.safe > 0 => {
+                        let t: u8 = v.parse().map_err(|_| format!("{name}: t={v:?}"))?;
+                        crate::stage::safe_threshold(t)
+                            .ok_or(format!("{name}: t is 1 or 5, not {v:?}"))?;
+                        bot = bot.with_safe(t);
+                        Ok(())
+                    }
                     _ => Err(format!("unknown {name} option {k:?}")),
                 })?;
-                let path = belief.ok_or(format!("{name} takes only belief=..."))?;
+                let path = belief.ok_or(format!("{name} needs belief=..."))?;
                 if !std::path::Path::new(&path).exists() {
                     return Err(format!("belief model {path:?} not found"));
                 }
