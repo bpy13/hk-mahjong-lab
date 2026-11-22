@@ -306,9 +306,6 @@ struct Payment {
     p: [[f64; NUM_KINDS]; 4],
     /// `Pay(o)`: expected points per share of `o`'s discard win now.
     pay: [f64; 4],
-    /// Shares I pay when `o` wins on my discard: 1, 3 when I am liable for `o`,
-    /// 0 when someone else is (they pay everything).
-    shares: [f64; 4],
     /// Seats with three exposed melds and nobody liable for them yet.
     three_exposed: [bool; 4],
     /// `P_claim4_o(t)`: o can claim `t` as its fourth exposed meld (a pung from
@@ -526,7 +523,9 @@ impl Danger {
                 } else {
                     p.pay[o]
                 };
-                p.p[o][i] * pay * p.shares[o]
+                // A discard win costs me 1 share whoever is liable (§8.3: liability
+                // covers self-draws only).
+                p.p[o][i] * pay
             }
             None => 0.0,
         }
@@ -609,7 +608,6 @@ impl Danger {
         let mut pay = Payment {
             p: [[0.0; NUM_KINDS]; 4],
             pay: [0.0; 4],
-            shares: [0.0; 4],
             three_exposed: [false; 4],
             claim4: [[0.0; NUM_KINDS]; 4],
             can_claim4: [[false; NUM_KINDS]; 4],
@@ -626,11 +624,6 @@ impl Danger {
                 .enumerate()
                 .map(|(k, &pb)| pb * points(FIRST_FAAN_BUCKET + k as u8))
                 .sum();
-            pay.shares[o] = match state.liable_for(o) {
-                None => 1.0,
-                Some(l) if l == me => 3.0,
-                Some(_) => 0.0,
-            };
             pay.three_exposed[o] = rules.twelve_tile_liability
                 && state.melds(o).exposed_count() == 3
                 && state.liable_for(o).is_none();
@@ -680,8 +673,8 @@ impl Danger {
         d
     }
 
-    /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o) ×
-    /// shares(o)` (every winner is paid under the default `multiple_winners`
+    /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o)`, one
+    /// share each (liability covers only self-draws, §8.3) (every winner is paid under the default `multiple_winners`
     /// rule). Built by [`Danger::estimate`], which knows no hand values, it is
     /// `tile(t) × 8` (one share of the 3-faan minimum).
     pub fn expected_loss(&self, t: Tile) -> f64 {
@@ -949,12 +942,8 @@ mod tests {
                                 }
                             }
                             safe *= 1.0 - p;
-                            let shares = match s.liable_for(o) {
-                                None => 1.0,
-                                Some(l) if l == me => 3.0,
-                                Some(_) => 0.0,
-                            };
-                            loss += p * pts * shares;
+                            // 1 share on a discard win, liable or not (§8.3).
+                            loss += p * pts;
                         }
                         let want = 1.0 - safe;
                         assert!(

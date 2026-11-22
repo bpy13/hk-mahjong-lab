@@ -350,6 +350,89 @@ fn twelve_tile_liability_8_3() {
     assert_eq!(r.deltas, [0, 48, -48, 0]);
 }
 
+/// The hand of [`twelve_tile_liability_8_3`] up to seat 1's fourth pung (fed by
+/// seat 2), with `wall` as the wall.
+fn four_pungs_fed_by_seat_2(wall: &str) -> State {
+    let mut s = deal(
+        no_flowers(),
+        [
+            "1s 9p 9p 1p 2p 3p 4p 4m 4m 8m 8m 9s 9s Wh",
+            "11s 22s 33s 44s 9m E S W N",
+            "2s 3s 4s 5m 6m 7m 1p 2p 3p 5p 6p 7p R",
+            "1m 2m 3m 4m 5m 6m 7m 8m 9m Wh Wh G G",
+        ],
+        wall,
+        "",
+    );
+    play(
+        &mut s,
+        &[(0, Discard(t("1s"))), (1, Pung), (1, Discard(t("E")))],
+    );
+    play(
+        &mut s,
+        &[(2, Discard(t("2s"))), (1, Pung), (1, Discard(t("S")))],
+    );
+    play(
+        &mut s,
+        &[(2, Discard(t("3s"))), (1, Pung), (1, Discard(t("W")))],
+    );
+    play(
+        &mut s,
+        &[(2, Discard(t("4s"))), (1, Pung), (1, Discard(t("N")))],
+    );
+    assert_eq!(s.liable_for(1), Some(2));
+    s
+}
+
+#[test]
+fn twelve_tile_liability_not_on_a_discard_win_8_3() {
+    // §8.3.2 (ADR 0004, 十二張落地包自摸): seat 2 fed seat 1's fourth exposed meld,
+    // but seat 1 wins on seat 3's discard: seat 3 pays 1 share (對對糊 3 faan =
+    // 8), seat 2 pays nothing.
+    let mut s = four_pungs_fed_by_seat_2("8p 8p 8p 1s 2s 3s 9m");
+    play(&mut s, &[(2, Discard(t("1s"))), (3, Discard(t("9m")))]);
+    assert!(s.legal_actions_vec().contains(&Win), "{s:?}");
+    play(&mut s, &[(1, Win)]);
+    let r = s.result().unwrap();
+    assert_eq!(r.wins[0].score.faan, 3);
+    assert_eq!(r.wins[0].liable, None);
+    assert_eq!(r.wins[0].paid_by, [0, 0, 0, 8]);
+    assert_eq!(r.deltas, [0, 8, 0, -8]);
+
+    // The same hand, seat 1 self-drawing the 9m: seat 2 pays all 3 shares
+    // (對對糊 3 + 自摸 1 = 4 faan = 16 × 3).
+    let mut s = four_pungs_fed_by_seat_2("8p 8p 8p 1s 2s 3s 9m");
+    play(
+        &mut s,
+        &[
+            (2, Discard(t("1s"))),
+            (3, Discard(t("2s"))),
+            (0, Discard(t("3s"))),
+            (1, SelfDrawnWin),
+        ],
+    );
+    let r = s.result().unwrap();
+    assert_eq!(r.wins[0].liable, Some(2));
+    assert_eq!(r.wins[0].paid_by, [0, 0, 48, 0]);
+    assert_eq!(r.deltas, [0, 48, -48, 0]);
+}
+
+#[test]
+fn twelve_tile_liable_discarder_pays_one_share_8_3() {
+    // §8.3.2: the liable seat 2 itself throws seat 1's winning 9m: 1 share (8).
+    let mut s = four_pungs_fed_by_seat_2("8p 8p 8p 9m 2s 3s 1s");
+    play(&mut s, &[(2, Discard(t("9m")))]);
+    while s.current_player() != Some(1) {
+        let p = s.current_player().unwrap();
+        play(&mut s, &[(p, Pass)]);
+    }
+    play(&mut s, &[(1, Win)]);
+    let r = s.result().unwrap();
+    assert_eq!(r.wins[0].liable, None);
+    assert_eq!(r.wins[0].paid_by, [0, 0, 8, 0]);
+    assert_eq!(r.deltas, [0, 8, -8, 0]);
+}
+
 #[test]
 fn initial_flower_replacement_3_3() {
     let rules = RuleSet::default();

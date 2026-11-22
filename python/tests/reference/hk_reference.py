@@ -467,7 +467,8 @@ class RefGame:
         for seat, sc, self_drawn, source, _tile in wins:
             share = self.rules.points(sc[0])
             paid = [0, 0, 0, 0]
-            liable = None if flower else self.liable[seat]
+            # §8.3: the liable seat covers a self-drawn win only (包自摸).
+            liable = None if flower or not self_drawn else self.liable[seat]
             if liable is not None:
                 paid[liable] = 3 * share
             elif self_drawn:

@@ -117,6 +117,8 @@ fn random_hands_respect_the_invariants() {
             assert!(w.score.faan <= rules.faan_cap);
             if let Some(l) = w.liable {
                 liability += 1;
+                // §8.3.2: liability covers self-draws only.
+                assert!(w.self_drawn, "liability on a discard win: {w:?}");
                 assert_eq!(w.paid_by.iter().filter(|&&p| p != 0).count(), 1);
                 assert_eq!(w.paid_by[l], 3 * rules.points(w.score.faan) as i32);
             }

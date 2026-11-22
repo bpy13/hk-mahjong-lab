@@ -401,7 +401,6 @@ struct Table {
     has_one: [[f64; NUM_KINDS]; 4],
     has_two: [[f64; NUM_KINDS]; 4],
     mean_count: [[f64; NUM_KINDS]; 4],
-    liable_me: bool,
     feed_avg: f64,
 }
 
@@ -437,7 +436,6 @@ impl Table {
             has_one: [[0.0; NUM_KINDS]; 4],
             has_two: [[0.0; NUM_KINDS]; 4],
             mean_count: [[0.0; NUM_KINDS]; 4],
-            liable_me: state.liable_for(me).is_some(),
             feed_avg: 0.0,
         };
         let mut hidden = 0usize;
@@ -453,11 +451,13 @@ impl Table {
                 t.pay[o] += pb * points(f);
                 t.pay_sd[o] += pb * points((f + 1).min(10));
             }
-            // Share multipliers (§1): who pays when o wins.
+            // Share multipliers (§1): who pays when o wins. The 12-tile liability
+            // covers only o's self-draw (rules §8.3): a discard win is paid by the
+            // discarder, 1 share, whoever is liable.
             let (l_disc, l_sd, l_other) = match state.liable_for(o) {
                 None => (1.0, 1.0, 0.0),
-                Some(l) if l == me => (3.0, 3.0, 3.0),
-                Some(_) => (0.0, 0.0, 0.0),
+                Some(l) if l == me => (1.0, 3.0, 0.0),
+                Some(_) => (1.0, 0.0, 0.0),
             };
             t.l_disc[o] = l_disc;
             t.l_sd[o] = l_sd;
@@ -532,15 +532,13 @@ impl Table {
     }
 
     /// Values one candidate: `after` is my hand after the action (13 tiles less 3
-    /// per meld), `tile` the tile discarded now, `four_exposed` whether the
-    /// action gives me four exposed melds (the discarder becomes liable for me).
+    /// per meld), `tile` the tile discarded now.
     fn value(
         &self,
         cfg: &EvConfig,
         action: Action,
         after: &SeatView,
         tile: Option<Tile>,
-        four_exposed: bool,
     ) -> EvTerms {
         let rules = &self.rules;
         // Offence: the target table.
@@ -566,11 +564,10 @@ impl Table {
         } else {
             1.0
         };
-        let shares_me = if self.liable_me || four_exposed {
-            3.0
-        } else {
-            3.0 * p_sd + (1.0 - p_sd) * phi
-        };
+        // A seat liable for me pays the 3 shares of my self-draw that the three
+        // opponents would pay anyway, and nothing on a discard win (rules §8.3),
+        // so liability does not change my shares.
+        let shares_me = 3.0 * p_sd + (1.0 - p_sd) * phi;
 
         // The tile discarded now.
         let mut p_now = [0.0; 4];
@@ -585,11 +582,12 @@ impl Table {
                 deal_in_now[o] = p_now[o] * self.pay[o] * self.l_disc[o];
                 if self.liab_seat[o] {
                     let sd4 = cfg.four_meld_win / 3.0;
-                    let x4 = 2.0 * cfg.four_meld_win / 3.0;
                     liability_by_seat[o] = self.p_claim4(o, t)
                         * (1.0 - p_now[o])
                         * self.kappa
-                        * (sd4 * 2.0 * self.pay_sd[o] + x4 * 3.0 * self.pay[o]);
+                        * sd4
+                        * 2.0
+                        * self.pay_sd[o];
                 }
             }
         }
@@ -661,20 +659,13 @@ impl Table {
         cfg: &EvConfig,
         action: Action,
         view: &SeatView,
-        four_exposed: bool,
     ) -> Option<EvTerms> {
         view.concealed
             .kinds()
             .map(|d| {
                 let mut h = view.concealed;
                 h.remove(d);
-                self.value(
-                    cfg,
-                    action,
-                    &view.with(h, view.melds.clone()),
-                    Some(d),
-                    four_exposed,
-                )
+                self.value(cfg, action, &view.with(h, view.melds.clone()), Some(d))
             })
             .max_by(|a, b| a.ev.total_cmp(&b.ev))
     }
@@ -745,7 +736,7 @@ impl EvBot {
         let mut cands: Vec<EvTerms> = Vec::new();
         let action = if state.in_claim() || state.in_rob() {
             // Pass: the current hand, no tile now.
-            let pass = table.value(cfg, Action::Pass, &view, None, false);
+            let pass = table.value(cfg, Action::Pass, &view, None);
             let pass_ev = pass.ev;
             cands.push(pass);
             if let Some((tile, from)) = state.claim_tile().filter(|_| state.in_claim()) {
@@ -753,13 +744,12 @@ impl EvBot {
                     let Some(after) = after_claim(&view, a, tile, from) else {
                         continue;
                     };
-                    let four = state.rules().twelve_tile_liability && exposed(&after.melds) == 4;
                     let terms = if a == Action::ClaimKong {
                         // The replacement draw is unknown and adds nothing (A8):
                         // the hand after the kong is valued as it stands.
-                        Some(table.value(cfg, a, &after, None, four))
+                        Some(table.value(cfg, a, &after, None))
                     } else {
-                        table.best_discard_after(cfg, a, &after, four)
+                        table.best_discard_after(cfg, a, &after)
                     };
                     cands.extend(terms);
                 }
@@ -779,18 +769,12 @@ impl EvBot {
                     Action::Discard(t) => {
                         let mut h = view.concealed;
                         h.remove(t);
-                        cands.push(table.value(
-                            cfg,
-                            a,
-                            &view.with(h, view.melds.clone()),
-                            Some(t),
-                            false,
-                        ));
+                        cands.push(table.value(cfg, a, &view.with(h, view.melds.clone()), Some(t)));
                         discards.push(t);
                     }
                     Action::ConcealedKong(_) | Action::AddedKong(_) => {
                         if let Some(after) = after_own_kong(&view, a) {
-                            cands.push(table.value(cfg, a, &after, None, false));
+                            cands.push(table.value(cfg, a, &after, None));
                         }
                     }
                     _ => {}
@@ -907,17 +891,14 @@ fn reasons(
                 seat: seat(o),
                 p: Some(star.p_now[o]),
                 points: Some(table.pay[o]),
-                // L_disc(o) is 0, 1 or 3.
+                // L_disc(o) is always 1 (rules §8.3 covers self-draws only).
                 shares: Some(table.l_disc[o] as u8),
                 ..ReasonArgs::default()
             },
         ));
     }
     for o in table.opponents() {
-        let multiplied = table.l_disc[o] == 3.0
-            && (star.deal_in_now[o] != 0.0
-                || star.self_draw[o] != 0.0
-                || star.other_feeds[o] != 0.0);
+        let multiplied = table.l_sd[o] == 3.0 && star.self_draw[o] != 0.0;
         let avoided = star.liability_by_seat[o] < 1.0
             && cands
                 .iter()

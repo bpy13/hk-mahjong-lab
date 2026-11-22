@@ -141,9 +141,12 @@ collapses before my hazard pays, and my equity goes negative even with a good ha
 ### 3.2 Payments
 
 When I win in round `k`: by a self-draw I collect `Pay_sd(me) × 3`; on `j`'s discard
-`Pay(me) × 1`; if someone is liable for me (12-tile rule), `× 3` either way, paid by them.
+`Pay(me) × 1`; if someone is liable for me (12-tile rule), it pays the 3 shares of a
+self-draw, and a discard win is still 1 share from the discarder (rules §8.3.2 since
+2026-11-23; before, `× 3` either way).
 When `o` wins: by self-draw I pay `Pay_sd(o) × L_sd(o)`; on my discard `Pay(o) × L_disc(o)`;
-on another's discard `Pay(o) × L_other(o)` (0 unless I am liable for `o`). `Pay(me)` is
+on another's discard `Pay(o) × L_other(o)` (always 0 since 2026-11-23: a discard win is
+paid by the discarder even when I am liable for `o`). `Pay(me)` is
 `points(f_T)` plus the faan my win way adds (self-draw +1; the cap applies). No floor and no
 table mean: hand value enters only through these payments (B28).
 
@@ -181,8 +184,8 @@ A tile `o` can claim speeds `o` up by one state step this round: in round 1 add
 `c_o(t) = P_claim_o(t) × (1 − P_o(t))` to `o`'s transition (`F → O` or `O → R`, split by
 `p_F : p_O`), where `P_claim_o(t) = min(1, P2_o(t) + 1[o is my next seat] × max_chow
 P1_o(u) × P1_o(v))`, the same as `ev-bot.md`'s `P_claim4_o`. If `o` shows three exposed melds
-and nobody is liable for `o`, the claim also makes me liable: `L_sd = L_disc = L_other = 3`
-for `o` from round 2 on, weighted by `c_o(t)` (`ev-bot.md`'s `Liab` term, now inside the
+and nobody is liable for `o`, the claim also makes me liable: `L_sd = 3` (since 2026-11-23;
+before, `L_disc` and `L_other` became 3 too) for `o` from round 2 on, weighted by `c_o(t)` (`ev-bot.md`'s `Liab` term, now inside the
 race). Source: `Danger::liability_tile`, `Danger::liability_chance` (`danger.rs`).
 
 ### 4.3 My live and improvement tiles
@@ -229,7 +232,8 @@ nothing).
 **A legal win is one more candidate** (Task 21, `passwin=on`, the default; `passwin=off` takes
 every legal win as before). Win now is what the win pays: `points(faan) × shares`, with the
 faan of the actual win (`claim_score` / `self_drawn_score`, so a self-draw includes its +1)
-and one share for a discard win (three when I am liable, §8.3) or three for a self-draw.
+and one share for a discard win (also when a seat is liable for me, §8.3 since 2026-11-23)
+or three for a self-draw.
 Pass is the race value of the hand kept: for a discard win the `Pass` candidate of the claim
 window; for a self-draw the best discard of the 14 tiles. The win is taken unless the pass is
 worth more than `win + tie_margin`. Nothing special is added for "far ahead": the race's own
@@ -426,6 +430,11 @@ and Brian decide what the review uses next.
 
 ## 9. Worked example: Brian's pung hand (decision 85)
 
+**Old rule.** This example was worked under the 12-tile rule before 2026-11-23, when the liable
+seat paid 3 shares on a discard win too (the pung path's "384 from seat 2 however I win").
+Since ADR 0004 a discard win on the pung path pays 128 from its discarder and only a
+self-draw pays 384 from seat 2; the numbers below are not redone.
+
 Fixture `crates/search/tests/data/brian-2026-11-09.json`, history index 85, printed by
 `target\release\examples\regrade.exe <fixture> 85 0`. Rules: minimum 3 faan, cap 10,
 half-spicy, flowers on, 12-tile liability on. Only seat 0's view is used until §9.5.
@@ -598,7 +607,11 @@ match may revisit. The rest is built as written.
    one-away hand's live copies once ready are computed as §4.3 says (per accepting kind, the
    best ready discard's live winning tiles), with the unseen counts before the draw.
 8. **Deviation: §5.2's cost from me** is `P̂_sd(me) × Pay_sd(me) + P̂_fed by o(me) × Pay(me)` for
-   an unliable `o`, three times all of my wins for the seat liable for me, 0 for the others.
+   an unliable `o`; for the seat liable for me, three times my self-draws plus my wins on its
+   own discards; for the others, my wins on their discards (since 2026-11-23; before, three
+   times all of my wins for the liable seat and 0 for the others). An opponent `i`'s wins
+   cost `o` 1 share, 2 when `o` is liable for `i`, 0.5 when another seat is (half of `i`'s
+   wins counted as self-draws; before, 3 and 0).
    `P̂(me)` is my hazard over the rounds with nobody else racing and `φ` before folds. A seat
    counts as folded (no mode of its own, §5.1) when `π_fold ≥ 0.5`.
 9. **Deviation: `φ`'s usefulness** for a hand that is not ready uses the accepting kinds in

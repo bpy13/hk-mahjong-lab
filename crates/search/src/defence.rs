@@ -12,14 +12,14 @@
 //! ```text
 //! EV(t) = P(I self-draw | after t) × 3 × my self-drawn points
 //!       + P(I win off a discard | after t) × my discard points
-//!       − Σ_o deal-in_o(t) × Pay(o) × shares(o)
+//!       − Σ_o deal-in_o(t) × Pay(o)
 //!       − Σ_o P(o self-draws | after t) × o's self-drawn points × my share
-//!       − Σ_o P(t gives o its fourth exposed meld) × P(o wins | after t) × Pay(o) × 2
+//!       − Σ_o P(t gives o its fourth exposed meld) × P(o self-draws | after t) × o's self-drawn points × 2
 //! ```
 //!
 //! * `deal-in_o(t)` is the model's `dealin` head read **before** the discard (the
 //!   chance `o` wins on `t` now); `Pay(o)` its `faan` head's expected points and
-//!   `shares(o)` the liability rule's 1, 3 or 0 ([`Danger::expected_loss`]),
+//!   one share whoever is liable (§8.3 covers self-draws only; [`Danger::expected_loss`]),
 //!   times the loss factor refitted on this reading for stage 3 discards
 //!   ([`crate::giveup::danger_of`], [`crate::giveup::READ_LOSS_FACTOR`]: the model's
 //!   deal-in chance is 6.6 times too low on the safest tiles and 0.6 times on the
@@ -38,7 +38,8 @@
 //! * An opponent's self-drawn points use its `faan` head shifted by one faan
 //!   (自摸); my share is 1, 3 when I am liable for it, 0 when another seat is.
 //! * Liability (12-tile rule): when `t` could be the fourth exposed meld of `o`
-//!   ([`Danger::liability_chance`]), I would pay the two other shares of its win.
+//!   ([`Danger::liability_chance`]), I would pay the two other shares of its
+//!   self-drawn win (§8.3: the liability covers self-draws only).
 //!
 //! Later deal-ins of mine are left out, as in Brian's sum. The tile with the
 //! largest `EV` is played; the stage pick wins ties within [`TIE`].
@@ -158,8 +159,7 @@ pub fn evaluate(
             let o = (me + r) % 4;
             self_draw += w[2 * r] * sd_pay[o] * sd_share[o];
             their_win[r - 1] = w[2 * r] + w[2 * r + 1];
-            liability +=
-                danger.liability_chance(o, t) * their_win[r - 1] * danger.points_if_win(o) * 2.0;
+            liability += danger.liability_chance(o, t) * w[2 * r] * sd_pay[o] * 2.0;
         }
         let ev = win - deal_in - self_draw - liability;
         out.push(Terms {

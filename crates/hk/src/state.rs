@@ -203,7 +203,8 @@ pub struct WinRecord {
     pub win_tile: Option<Tile>,
     /// Who paid how much for this win (positive = paid).
     pub paid_by: [i32; 4],
-    /// Set if a liable player paid for the whole table (§8.3).
+    /// Set if a liable player paid for the whole table (§8.3): only on a
+    /// self-drawn win.
     pub liable: Option<usize>,
     /// Won by robbing a kong (§5.1–§5.2).
     pub robbed: bool,
@@ -1080,9 +1081,10 @@ impl State {
         {
             let share = self.rules.points(score.faan) as i32;
             let mut paid_by = [0i32; 4];
-            // §8.3 covers hands won with tiles; a flower win (§8.2) is always
-            // paid by all three others.
-            let liable = if score.is_flower_win() {
+            // §8.3 covers only a self-drawn win with tiles (十二張落地包自摸): on a
+            // discard the discarder pays 1 share as in §8.2, and a flower win is
+            // always paid by all three others.
+            let liable = if score.is_flower_win() || !self_drawn {
                 None
             } else {
                 self.liable[seat].map(usize::from)

@@ -115,26 +115,34 @@ fn position_2_deals_into_the_small_hand_to_stop_the_big_self_draw() {
     assert!(state.legal_actions_vec().contains(&d.action));
 }
 
+/// `docs/ev-bot.md` §5 example 3 under rules §8.3 as amended 2026-11-23 (ADR
+/// 0004): being liable for B makes only B's self-draw cost 3 shares; B's win on
+/// my `2m` costs 1 share, so liability no longer keeps `2m` back. Without the
+/// floor the bot deals in, as in position 2.
 #[test]
-fn position_3_does_not_deal_in_when_liable() {
+fn position_3_liability_does_not_protect_the_deal_in() {
     let (state, beliefs) = position_2(true);
     assert_eq!(state.liable_for(1), Some(0));
-    for d in [
-        bot(beliefs.clone()).decide(&state),
-        bot_without_floor(beliefs).decide(&state),
-    ] {
-        print(&d);
-        let deal_in = Action::Discard(t("2m"));
-        assert_ne!(d.action, deal_in);
-        assert_eq!(
-            d.candidates.last().unwrap().0,
-            deal_in,
-            "explain ranks 2m last"
+    let deal_in = Action::Discard(t("2m"));
+    let d = bot_without_floor(beliefs.clone()).decide(&state);
+    print(&d);
+    check_position_2(&d, 8.0);
+    assert_eq!(arg(&d, "reason.ev.liability", "seat"), Some(1.0));
+    let with_floor = bot(beliefs).decide(&state);
+    print(&with_floor);
+    for d in [&d, &with_floor] {
+        let x = &d.candidates.iter().find(|c| c.0 == deal_in).unwrap().1;
+        // 0.95 × 16 × 1 share, not × 3.
+        assert!(
+            (x.deal_in_total() - 15.2).abs() < 1e-9,
+            "{}",
+            x.deal_in_total()
         );
-        assert!(d.candidates[0].1.ev - ev_of(&d, deal_in) >= 8.0);
-        assert_eq!(arg(&d, "reason.ev.liability", "seat"), Some(1.0));
-        assert!(!keys(&d).contains(&"reason.ev.stops_big_hand"));
+        // B's self-draw at 3 shares: 0.05 × 24 × 3 = 3.6, beside A's 28.8.
+        assert!((x.self_draw[1] - 3.6).abs() < 1e-9, "{}", x.self_draw[1]);
+        assert_eq!(x.other_feeds[1], 0.0);
     }
+    assert_eq!(arg(&with_floor, "reason.ev.liability", "seat"), Some(1.0));
 }
 
 #[test]

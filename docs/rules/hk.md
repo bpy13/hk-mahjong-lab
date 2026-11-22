@@ -303,9 +303,14 @@ Kongs carry no separate payment. Every hand is zero-sum.
 1. If a player's discard is claimed to form another player's **fourth exposed meld**,
    so that 12 of that player's tiles are showing, the discarder becomes **liable** for
    that player. (Concealed kongs do not count toward the four.)
-2. If that player then wins the hand, by discard or by self-draw (not by a flower
-   win, §7.5), the liable player
-   pays **3 shares** and nobody else pays.
+2. If that player then wins by **self-draw** (not by a flower win, §7.5), the
+   liable player pays **3 shares** and nobody else pays (十二張落地包自摸). If that
+   player wins on a **discard** (or by robbing a kong), the discarder pays 1 share as
+   in §8.2 and the liable player pays nothing, also when the liable player is the
+   discarder (1 share). (Until 2026-11-23 this point charged the liable player
+   3 shares on a discard win too; the draft of 17 Oct cited no source. Sources:
+   zh.wikipedia 香港麻雀胡牌列表 and 包牌, zh-yue.wikipedia 香港蔴雀食糊牌型,
+   en.wikipedia Hong Kong mahjong scoring rules; ADR 0004.)
 3. This is the only liability rule *(default; variant `twelve_tile_liability = off`)*.
    Feeding the third dragon pung or the fourth wind pung does not create liability.
 
