@@ -2,6 +2,7 @@
 
 ## Workers
 - slot 2: Task 29 (self-play with the luck taken out of the reward), building part 1 (switches, variance table); started 2026-11-23 05:28
+- slot 3: Task 30 (early throws of the stage bot), building
 
 ## Results
 - Task 27 (slot 2 and slot 1, 2026-11-23): ticked; engine change on main (12-tile liability on self-draw only, rules §8.3.2, ADR 0004) with oracle, tests, search values, example file 99000316 (bot at 0) and report `docs/study-results/liability-rule-change.md` (slot 2); cpu jobs 309 and 310 ended exit 0, figures beside the old ones (slot 1): ceiling `notready` +1.504 -> +1.566 a hand (`docs/study-results/defence-ceiling.md`); `safe1` +0.242 ± 0.074 -> +0.160 ± 0.067, still above `stage`, `safe5` -0.164 -> -0.354, `ev` and `fold` unchanged (`docs/study-results/defence-false-alarms.md`); nothing retrained; no paid API calls.
