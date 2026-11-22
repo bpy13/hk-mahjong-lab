@@ -482,6 +482,23 @@ pub struct Note {
     pub neighbour: u8,
 }
 
+/// One candidate discard's figures in `stage`'s ranking
+/// ([`StageBot::discard_figures`], plan Task 26).
+#[derive(Clone, Copy, Debug)]
+pub struct DiscardFigures {
+    pub tile: Tile,
+    /// Faan-aware distance from ready after the throw (0 = ready).
+    pub distance_after: i8,
+    /// Tile acceptance after the throw, for the tiles at the best distance.
+    pub acceptance: Option<i32>,
+    /// Faan of the nearest target hand after the throw.
+    pub target_faan: i32,
+    /// How many tiles of the hand are near this tile (higher: less isolated).
+    pub connectedness: i32,
+    /// The stage 3 count, for the tiles within the start distance of stage 3.
+    pub stage3_value: Option<f64>,
+}
+
 /// The three-stage bot. The number is the version of the stage 1 pung rule for a
 /// suited tile while the half flush leads:
 /// 1 = a pair with no tile of the hand within two steps (my first reading);
@@ -695,6 +712,30 @@ impl StageBot {
         let key = (state.wall_remaining() * 4 + view.seat) * 64 + tile.index() as usize;
         let mut own = rand_chacha::ChaCha8Rng::seed_from_u64(key as u64);
         Some(self.pick_discard(view, &below, &mut own).0)
+    }
+
+    /// Plan Task 26 (log only): the figures `stage` ranks the discards of a
+    /// 14-tile view by, best first: for each candidate the tile, the distance from
+    /// ready after throwing it (faan-aware), the acceptance count (counted only
+    /// for the tiles tied at the best distance, else `None`), the target's faan,
+    /// the connectedness of the tile in the hand, and the stage 3 value (only for
+    /// the tiles within `ready` of ready, else `None`).
+    pub fn discard_figures(&self, view: &SeatView, candidates: &[Tile]) -> Vec<DiscardFigures> {
+        let ranked = rank_discards(view, candidates, Metric::Faan);
+        let best = ranked[0].1 .0;
+        let memo = Memo::default();
+        ranked
+            .iter()
+            .map(|&(tile, k)| DiscardFigures {
+                tile,
+                distance_after: k.0,
+                acceptance: (k.0 == best).then_some(-k.1),
+                target_faan: -k.2,
+                connectedness: k.3,
+                stage3_value: (k.0 <= self.ready)
+                    .then(|| stage3_value(&discard(view, tile), self.ready, &memo)),
+            })
+            .collect()
     }
 
     /// Plan Task 21: reorders the flush suits by the neighbours' suits among the

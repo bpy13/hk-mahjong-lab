@@ -15,8 +15,10 @@
 //! *false alarm* otherwise. A first change that is not a discard replacing a
 //! discard (a claim, a kong) is kept apart.
 
+use crate::belief::BeliefModel;
 use crate::oracle::{deal_in, DealIn};
-use crate::stage::StageBot;
+use crate::stage::{read_dealin, safe_threshold, StageBot};
+use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView};
 use mahjong_games::{Game, Policy};
 use mahjong_hk::{Action, HandResult, RuleSet, State};
@@ -121,6 +123,10 @@ pub struct Played {
     pub last: Option<(u32, Action)>,
     /// The bot's first change (bot games only).
     pub change: Option<Change>,
+    /// Plan Task 26 (only from [`play_with`] given a reading): for each action of
+    /// [`Played::actions`] the estimates of the seat that took it when it was a
+    /// discard ([`estimate_json`]), else null; empty without a reading.
+    pub estimates: Vec<Value>,
 }
 
 /// The generator of the game of `deal` with the tested seat `seat`.
@@ -154,6 +160,19 @@ pub fn replay(rules: &RuleSet, wall: Vec<Tile>, actions: &[Action]) -> Option<Ha
 /// Plays `deal` with `bot` in `seat` and plain `stage` elsewhere (`bot` =
 /// `None`: four plain `stage`).
 pub fn play(rules: &RuleSet, bot: Option<&StageBot>, deal: u64, seat: usize) -> Played {
+    play_with(rules, bot, deal, seat, None)
+}
+
+/// [`play`], and with a reading `model` it also records every discard
+/// decision's estimates ([`Played::estimates`]). Recording reads copies of the
+/// position and of the generator and changes no action.
+pub fn play_with(
+    rules: &RuleSet,
+    bot: Option<&StageBot>,
+    deal: u64,
+    seat: usize,
+    model: Option<&BeliefModel>,
+) -> Played {
     let stage = StageBot::default();
     let mut state = State::new_deal(*rules, &mut ChaCha8Rng::seed_from_u64(deal));
     let mut rng = game_rng(deal, seat);
@@ -163,9 +182,19 @@ pub fn play(rules: &RuleSet, bot: Option<&StageBot>, deal: u64, seat: usize) -> 
     let mut last = None;
     let mut change: Option<Change> = None;
     let mut actions: Vec<Action> = Vec::new();
+    let mut estimates: Vec<Value> = Vec::new();
     while !state.is_terminal() {
         let legal = state.legal_actions_vec();
         let p = state.current_player().expect("not over");
+        let mut est = match model {
+            Some(m) if !state.in_claim() && !state.in_rob() => {
+                let thr = bot
+                    .filter(|_| p == seat)
+                    .and_then(|b| safe_threshold(b.safe));
+                estimate_json(&state, &legal, &stage, &rng, m, thr)
+            }
+            _ => None,
+        };
         let action = match bot {
             Some(b) if p == seat => {
                 if change.is_none() {
@@ -214,6 +243,15 @@ pub fn play(rules: &RuleSet, bot: Option<&StageBot>, deal: u64, seat: usize) -> 
             decisions += 1;
             discards += matches!(action, Action::Discard(_)) as u32;
         }
+        if model.is_some() {
+            estimates.push(match (est.as_mut(), action) {
+                (Some(e), Action::Discard(t)) => {
+                    mark_thrown(e, t);
+                    std::mem::take(e)
+                }
+                _ => Value::Null,
+            });
+        }
         actions.push(action);
         state.apply(action);
     }
@@ -229,7 +267,101 @@ pub fn play(rules: &RuleSet, bot: Option<&StageBot>, deal: u64, seat: usize) -> 
         changed_discards,
         last,
         change,
+        estimates,
     }
+}
+
+fn mark_thrown(e: &mut Value, t: Tile) {
+    let name = t.to_string();
+    for x in e["tiles"].as_array_mut().expect("tiles") {
+        x["thrown"] = json!(x["tile"] == json!(name));
+    }
+}
+
+/// Plan Task 26: what the acting seat's `stage` computes from its own view at a
+/// discard decision (`None` when the action list has no discard to make). `rng`
+/// is the decision's generator (only cloned). `threshold` is the defence
+/// threshold in force for this seat, if any. The reading `model` is run on the
+/// seat's view for every seat, plain ones too, for the record only (plain
+/// `stage` does not use it to choose). Format: `docs/study-results/false-alarm-hand-format.md`.
+pub fn estimate_json(
+    state: &State,
+    legal: &[Action],
+    stage: &StageBot,
+    rng: &ChaCha8Rng,
+    model: &BeliefModel,
+    threshold: Option<f64>,
+) -> Option<Value> {
+    let tiles: Vec<Tile> = legal
+        .iter()
+        .filter_map(|a| match a {
+            Action::Discard(t) => Some(*t),
+            _ => None,
+        })
+        .collect();
+    if tiles.is_empty()
+        || legal
+            .iter()
+            .any(|a| matches!(a, Action::Win | Action::SelfDrawnWin))
+    {
+        return None;
+    }
+    let seat = state.current_player()?;
+    let view = SeatView::of_current(state);
+    let (pick, note) = match stage.decide(state, legal, &mut rng.clone()) {
+        (Action::Discard(t), Some(n)) => (Some(t), Some(n)),
+        (_, n) => (None, n),
+    };
+    let figures = stage.discard_figures(&view, &tiles);
+    let own_distance = figures[0].distance_after;
+    let b = model.run_for(state, seat);
+    let rows: Vec<Value> = figures
+        .iter()
+        .map(|f| {
+            let i = f.tile.index() as usize;
+            let combined = read_dealin(&b, i);
+            let dealin = [0, 1, 2].map(|j| b.opponents[j].dealin[i]);
+            json!({
+                "tile": f.tile.to_string(),
+                "stage_value": {
+                    "distance_after": f.distance_after,
+                    "acceptance": f.acceptance,
+                    "target_faan": f.target_faan,
+                    "connectedness": f.connectedness,
+                    "stage3_value": f.stage3_value,
+                },
+                "dealin": dealin,
+                "dealin_combined": combined,
+                "above_threshold": threshold.map(|t| combined > t),
+                "stage_pick": pick == Some(f.tile),
+                "thrown": false,
+            })
+        })
+        .collect();
+    let opponents: Vec<Value> = (0..3)
+        .map(|j| {
+            let o = (seat + 1 + j) % 4;
+            let ob = &b.opponents[j];
+            json!({
+                "seat": o,
+                "role": ROLES[j + 1],
+                "p_ready": ob.state.map_or(ob.tenpai, |s| s[2]),
+                "p_tenpai": ob.tenpai,
+                "p_state": ob.state,
+                "true_distance": true_distance(state, o),
+            })
+        })
+        .collect();
+    Some(json!({
+        "seat": seat,
+        "own_distance": own_distance,
+        "stage": note.map(|n| n.stage),
+        "line": note.and_then(|n| n.line).map(|l| format!("{l:?}")),
+        "threshold": threshold,
+        "defence_active": threshold.is_some() && own_distance >= 1,
+        "tiles": rows,
+        "opponents": opponents,
+    }))
 }
 
 /// Seat `o`'s true faan-aware distance to a ready hand that meets the minimum
@@ -358,7 +490,7 @@ pub fn example_json(
         })
         .collect();
     json!({
-        "format": 1,
+        "format": 2,
         "deal": deal,
         "bot": bot,
         "seat": seat,
@@ -368,6 +500,8 @@ pub fn example_json(
         "wall": wall_of(rules, deal).iter().map(|t| t.to_string()).collect::<Vec<_>>(),
         "plain_actions": mine_actions(&plain.actions),
         "bot_actions": mine_actions(&mine.actions),
+        "plain_estimates": estimates_or_null(plain),
+        "bot_estimates": estimates_or_null(mine),
         "first_change_index": c.index,
         "label": if c.true_alarm() { "true alarm" } else { "false alarm" },
         "ending_kind": ending_kind,
@@ -386,6 +520,14 @@ pub fn example_json(
         "bot_points": mine.points,
         "plain_points": plain.points,
     })
+}
+
+fn estimates_or_null(p: &Played) -> Vec<Value> {
+    if p.estimates.is_empty() {
+        vec![Value::Null; p.actions.len()]
+    } else {
+        p.estimates.clone()
+    }
 }
 
 fn mine_actions(a: &[Action]) -> Vec<Value> {
@@ -469,6 +611,50 @@ mod tests {
         };
         let (plain, bot) = (actions("plain_actions"), actions("bot_actions"));
         let at = v["first_change_index"].as_u64().expect("index") as usize;
+        for (list, key) in [(&plain, "plain_estimates"), (&bot, "bot_estimates")] {
+            let est = v[key].as_array().expect("estimates");
+            assert_eq!(est.len(), list.len(), "{key}: one entry per action");
+            for (a, e) in list.iter().zip(est) {
+                // An entry for every discard (and only those), with exactly one tile thrown.
+                match a {
+                    Action::Discard(t) => {
+                        let thrown: Vec<&Value> = e["tiles"]
+                            .as_array()
+                            .expect("an entry for a discard")
+                            .iter()
+                            .filter(|x| x["thrown"] == json!(true))
+                            .collect();
+                        assert_eq!(thrown.len(), 1);
+                        assert_eq!(thrown[0]["tile"], json!(t.to_string()));
+                    }
+                    _ => assert!(e.is_null(), "{key}: entry for a non-discard"),
+                }
+            }
+        }
+        let e = &v["bot_estimates"][at];
+        let c = &v["change"];
+        assert_eq!(e["seat"], v["seat"]);
+        let pick = e["tiles"]
+            .as_array()
+            .expect("tiles")
+            .iter()
+            .find(|x| x["stage_pick"] == json!(true))
+            .expect("a stage pick");
+        assert_eq!(pick["tile"], c["stage_pick"], "stage pick at the change");
+        let thrown = e["tiles"]
+            .as_array()
+            .expect("tiles")
+            .iter()
+            .find(|x| x["thrown"] == json!(true))
+            .expect("a thrown tile");
+        assert_eq!(thrown["tile"], c["thrown_instead"], "thrown at the change");
+        for r in 0..3 {
+            assert_eq!(
+                pick["dealin"][r],
+                c["seats"][r + 1]["read_dealin_on_pick"],
+                "the reading at the change"
+            );
+        }
         assert_eq!(plain[..at], bot[..at], "the games agree up to the change");
         assert_ne!(plain[at], bot[at], "and differ at it");
         for (list, key, pts) in [
@@ -504,14 +690,17 @@ mod tests {
             let model = Arc::new(
                 crate::belief::BeliefModel::load(p.to_str().expect("utf-8")).expect("model"),
             );
-            let bot = bot.with_reading(Some(model));
+            let bot = bot.with_reading(Some(model.clone()));
             for deal in 0..10u64 {
                 for seat in 0..4 {
-                    let mine = play(&rules, Some(&bot), 7000 + deal, seat);
+                    let mine = play_with(&rules, Some(&bot), 7000 + deal, seat, Some(&model));
                     if mine.change.is_none() {
                         continue;
                     }
-                    let plain = play(&rules, None, 7000 + deal, seat);
+                    let bare = play(&rules, Some(&bot), 7000 + deal, seat);
+                    assert_eq!(bare.actions, mine.actions, "recording changes no action");
+                    assert_eq!(bare.points, mine.points, "recording changes no ending");
+                    let plain = play_with(&rules, None, 7000 + deal, seat, Some(&model));
                     let v = example_json(
                         &rules,
                         7000 + deal,
@@ -520,7 +709,7 @@ mod tests {
                         "test",
                         &plain,
                         &mine,
-                        &Reading::default(),
+                        &reading_of(&model, &mine),
                     );
                     check_file(&serde_json::to_string_pretty(&v).expect("text"), &rules);
                     files += 1;
@@ -529,6 +718,17 @@ mod tests {
         }
         assert!(files > 0, "no changed hand to write");
         eprintln!("{files} example files replayed");
+    }
+
+    /// The change's reading, as the example binary builds it.
+    fn reading_of(model: &BeliefModel, mine: &Played) -> Reading {
+        let c = mine.change.as_ref().expect("a change");
+        let b = model.run_for(&c.state, c.state.current_player().expect("seat"));
+        let i = c.stage_pick().expect("discard").index() as usize;
+        Reading {
+            dealin: [0, 1, 2].map(|j| b.opponents[j].dealin[i]),
+            ..Reading::default()
+        }
     }
 
     #[test]
