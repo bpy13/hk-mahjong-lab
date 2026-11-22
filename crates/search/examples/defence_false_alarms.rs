@@ -598,11 +598,14 @@ fn write_example_files(
             .map(|d| &d[k])
             .filter(|r| r.info.is_some_and(|i| i.kind == 1))
             .collect();
-        let picks = match only {
-            Some((deal, seat)) => fa
+        // `only=`: that hand whatever its ending and whatever the kind of its
+        // first change (plan Task 30: with `base=` the hand may hold no false
+        // alarm).
+        let picks: Vec<&Rec> = match only {
+            Some((deal, seat)) => flat
                 .iter()
-                .copied()
-                .filter(|r| r.deal == deal && r.seat == seat)
+                .map(|d| &d[k])
+                .filter(|r| r.deal == deal && r.seat == seat && r.info.is_some())
                 .collect(),
             None => pick_examples(&fa),
         };
@@ -650,11 +653,23 @@ fn main() {
         let (d, s) = a[5..].split_once(':').expect("only=<deal>:<seat>");
         (d.parse().expect("deal"), s.parse().expect("seat"))
     });
+    // `base=<stage bot>` (plan Task 30): the other seats and the plain game play
+    // that bot, and the tested bot gets its early-game switches.
+    let base: Option<StageBot> = args.iter().position(|a| a.starts_with("base=")).map(|i| {
+        let a = args.remove(i);
+        match Bot::by_name(&a[5..]) {
+            Some(Bot::Stage(b)) => b,
+            _ => panic!("{a}: not a stage bot"),
+        }
+    });
+    if let Some(b) = base {
+        mahjong_search::false_alarm::set_base(b);
+    }
     let json_dir = if args.first().map(String::as_str) == Some("examples-json") {
         args.remove(0);
         assert!(
             !args.is_empty(),
-            "examples-json <out dir> <deals> [seed] [model] [bot ...] [only=<deal>:<seat>]"
+            "examples-json <out dir> <deals> [seed] [model] [bot ...] [only=<deal>:<seat>] [base=<stage bot>]"
         );
         Some(args.remove(0))
     } else {
@@ -682,7 +697,7 @@ fn main() {
                 if spec.contains(':') { "," } else { ":" }
             );
             match Agent::parse(&full).unwrap_or_else(|e| panic!("{full}: {e}")) {
-                Agent::Bot(Bot::Stage(b)) => (full, b),
+                Agent::Bot(Bot::Stage(b)) => (full, b.with_early(base.map_or(0, |x| x.early))),
                 _ => panic!("{full}: not a stage bot"),
             }
         })

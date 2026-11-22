@@ -157,8 +157,24 @@ pub fn replay(rules: &RuleSet, wall: Vec<Tile>, actions: &[Action]) -> Option<Ha
     state.result().cloned()
 }
 
+/// The bot of the other seats and of the plain game: plain `stage` unless
+/// [`set_base`] named another (plan Task 30 writes the worked example with the
+/// early-game switches on, `examples-json ... base=stage-early`).
+static BASE: std::sync::OnceLock<StageBot> = std::sync::OnceLock::new();
+
+/// Plan Task 30: plays every seat but the tested one, and the plain game, with
+/// `base` instead of plain `stage`, for the rest of the process (set once; a
+/// second call is ignored). Measurement tools only.
+pub fn set_base(base: StageBot) {
+    let _ = BASE.set(base);
+}
+
+fn base() -> StageBot {
+    BASE.get().copied().unwrap_or_default()
+}
+
 /// Plays `deal` with `bot` in `seat` and plain `stage` elsewhere (`bot` =
-/// `None`: four plain `stage`).
+/// `None`: four plain `stage`; see [`set_base`]).
 pub fn play(rules: &RuleSet, bot: Option<&StageBot>, deal: u64, seat: usize) -> Played {
     play_with(rules, bot, deal, seat, None)
 }
@@ -173,7 +189,7 @@ pub fn play_with(
     seat: usize,
     model: Option<&BeliefModel>,
 ) -> Played {
-    let stage = StageBot::default();
+    let stage = base();
     let mut state = State::new_deal(*rules, &mut ChaCha8Rng::seed_from_u64(deal));
     let mut rng = game_rng(deal, seat);
     let mut decisions = 0u32;

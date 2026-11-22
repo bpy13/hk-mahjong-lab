@@ -573,6 +573,20 @@ pub struct DiscardFigures {
 /// ([`safe_threshold`]), it throws `stage`'s pick among the tiles read below
 /// the threshold; no such tile, no change. 0 (the default) is off; nothing
 /// without `reading`.
+///
+/// `early` switches on the early-game fixes of plan Task 30 (Brian,
+/// 2026-11-23, on deal 99000316: "The early game algorithm needs fixing"), a
+/// bit each, 0 (the default) plays exactly as before. They act only in stage 1,
+/// among the throws tied on the leading line's distance, faan and helpers:
+/// [`EARLY_SUIT`] a suited tile outside the best flush suit goes before a tile
+/// of that suit or an honour (Brian: "it's a tiebreaker for all pungs but not
+/// for half flush"; bot `stage-early-suit`); [`EARLY_FAR`] a far line counts
+/// for nothing in the other lines' distances: a line counts only within 1 tile
+/// of the leading line, each line read with its handicap (thirteen orphans
+/// [`ORPHANS_HANDICAP`] tiles further, all chows its lead further; bot
+/// `stage-early-far`); [`EARLY_VALUE`] an honour that scores a faan as a pung
+/// goes after the other tied throws (found in the builder's 40-deal scan; bot
+/// `stage-early-value`). All three: `stage-early`; A and B: `stage-early-ab`.
 #[derive(Clone, Copy, Debug)]
 pub struct StageBot {
     pub pung: u8,
@@ -585,7 +599,23 @@ pub struct StageBot {
     pub defence: bool,
     pub neighbour: u8,
     pub safe: u8,
+    pub early: u8,
 }
+
+/// [`StageBot::early`] bit: among tied stage 1 throws, a suited tile outside
+/// the best flush suit goes first (plan Task 30).
+pub const EARLY_SUIT: u8 = 1;
+/// [`StageBot::early`] bit: a far line does not count in the other lines'
+/// distances of the stage 1 order (plan Task 30).
+pub const EARLY_FAR: u8 = 2;
+/// [`StageBot::early`] bit: among tied stage 1 throws, an honour that scores a
+/// faan as a pung (a dragon, the seat's or the round's wind) goes last (plan
+/// Task 30, found in the 40-deal scan).
+pub const EARLY_VALUE: u8 = 4;
+/// Tiles thirteen orphans reads further than its distance under [`EARLY_FAR`]
+/// (it needs thirteen given kinds and may claim only its last tile; the
+/// builder's figure).
+pub const ORPHANS_HANDICAP: i8 = 2;
 
 /// Plan Task 24: the reading's deal-in chance above which `stage-safe:t=<pct>`
 /// refuses `stage`'s pick, the threshold that flags `pct` % of the safe picks of
@@ -630,6 +660,7 @@ impl StageBot {
             defence: false,
             neighbour: 0,
             safe: 0,
+            early: 0,
         }
     }
 
@@ -673,6 +704,12 @@ impl StageBot {
     /// flush distance, 2 close by tile count, 3 three suits, 4 rule 2 alone).
     pub const fn with_neighbour(self, neighbour: u8) -> StageBot {
         StageBot { neighbour, ..self }
+    }
+
+    /// The same bot with the early-game fixes of plan Task 30 (bits
+    /// [`EARLY_SUIT`], [`EARLY_FAR`], [`EARLY_VALUE`]; 0 off).
+    pub const fn with_early(self, early: u8) -> StageBot {
+        StageBot { early, ..self }
     }
 
     /// The same bot with the false-alarm test switch (plan Task 24): 0 off, 1 or
@@ -894,7 +931,8 @@ impl StageBot {
                 .min()
                 .unwrap_or(FAR)
         };
-        let lines = order(LINES.map(best_of));
+        let line_d = LINES.map(best_of);
+        let lines = order(line_d);
         let lead = lines[0];
         let feasible = best_of(lead) < FAR;
         let kept_off = |suits: &[Suit]| {
@@ -934,8 +972,9 @@ impl StageBot {
         if flags & NB_CHANGED != 0 {
             (kept, off) = kept_off(&suits);
         }
-        let (tile, note) =
-            self.line_discard(view, &after, &suits, &lines, &kept, &off, candidates, rng);
+        let (tile, note) = self.line_discard(
+            view, &after, &suits, &lines, line_d, &kept, &off, candidates, rng,
+        );
         let note = Note {
             neighbour: flags,
             ..note
@@ -977,6 +1016,7 @@ impl StageBot {
         after: &[(Tile, SeatView, Goals)],
         suits: &[Suit],
         lines: &[Line; 4],
+        line_d: [i8; 4],
         kept: &[Suit],
         off: &[Tile],
         candidates: &[Tile],
@@ -987,9 +1027,40 @@ impl StageBot {
         // spare tiles until it is ready, so it stays in stage 1.
         let stage1 = lead != Line::Flush || !off.is_empty();
         let pool = if off.is_empty() { candidates } else { off };
-        // (distance, -faan, -helpers, other lines' distances, connection,
-        // -visible, random): lowest wins.
-        type Key = (i8, i32, i32, [i8; 3], i32, i32, u32);
+        // Plan Task 30, `EARLY_FAR`: the other lines that count, each read with
+        // its handicap; a line further than 1 tile past the lead counts as 0.
+        let handicap = |l: Line| match l {
+            Line::Orphans => ORPHANS_HANDICAP,
+            Line::Chows => chows_lead(),
+            _ => 0,
+        };
+        let counts = |l: Line| {
+            self.early & EARLY_FAR == 0
+                || line_d[l as usize].saturating_add(handicap(l))
+                    <= line_d[lead as usize]
+                        .saturating_add(handicap(lead))
+                        .saturating_add(1)
+        };
+        // Plan Task 30, `EARLY_SUIT`: 1 for a tile of the best flush suit or an
+        // honour, 0 for a suited tile outside it (thrown first).
+        let best_suit = suits.first().copied();
+        let in_suit = |t: Tile| {
+            let on = self.early & EARLY_SUIT != 0 && stage1 && best_suit.is_some();
+            i32::from(on && t.suit().is_none_or(|s| Some(s) == best_suit))
+        };
+        // Plan Task 30, `EARLY_VALUE`: 1 for an honour that scores a faan as a
+        // pung (a dragon, the seat's wind, the round's wind), thrown last.
+        let value = |t: Tile| {
+            let on = self.early & EARLY_VALUE != 0 && stage1;
+            let scores = t.is_honour()
+                && (!t.is_wind()
+                    || t == Tile::wind(view.seat)
+                    || t == Tile::wind(view.rules.prevailing_wind));
+            i32::from(on && scores)
+        };
+        // (distance, -faan, -helpers, in best suit, value honour, other lines'
+        // distances, connection, -visible, random): lowest wins.
+        type Key = (i8, i32, i32, (i32, i32), [i8; 3], i32, i32, u32);
         let mut keyed: Vec<(Tile, Key)> = after
             .iter()
             .filter(|(t, _, _)| pool.contains(t))
@@ -1000,13 +1071,16 @@ impl StageBot {
                 let mut others = [0i8; 3];
                 if stage1 {
                     for (o, l) in others.iter_mut().zip(&lines[1..]) {
-                        *o = all[*l as usize];
+                        if counts(*l) {
+                            *o = all[*l as usize];
+                        }
                     }
                 }
                 let key = (
                     dist(&targets),
                     -faan,
                     0,
+                    (in_suit(*t), value(*t)),
                     others,
                     connection(&view.concealed, *t),
                     -visible(view, *t),
@@ -1923,6 +1997,112 @@ mod tests {
         assert_eq!(read_suit(&[], tiles("1m2m3mE").into_iter()), None);
         assert_eq!(read_suit(&[], tiles("1m2m3m1p2p9sE").into_iter()), None);
         assert_eq!(read_suit(&[], [].into_iter()), None);
+    }
+
+    // Plan Task 30, deal 99000316 (`docs/study-results/examples/safe1-99000316-seat0.json`).
+    // Action 2, seat 2, first throw after drawing 1m: all pungs leads; seven
+    // tiles tie on every ranked figure.
+    const EARLY_1: &str = "1133m6m16p466sENWWh";
+    // Action 24, seat 3, fifth throw after drawing 5m: all pungs leads; the hand
+    // collects 索 and honours; 9m counts only for thirteen orphans (6 away).
+    const EARLY_2: &str = "559m22588sESWNGWh";
+
+    /// The tiles `bot` throws from `hand` over 64 random streams, as text.
+    fn picks(bot: StageBot, hand: &str) -> Vec<String> {
+        let v = view(hand);
+        let c: Vec<Tile> = v.concealed.kinds().collect();
+        let mut out: Vec<String> = (0..64)
+            .map(|seed| {
+                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+                bot.pick_discard(&v, &c, &mut rng).0.to_string()
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    #[test]
+    fn early_suit_throws_an_off_suit_single_first() {
+        // Position 1: the plain bot may throw 6m, a tile of its best flush suit
+        // (萬: 1133m6m); with the switch an off-suit single goes: 1p, 6p or 4s.
+        assert_eq!(view(EARLY_1).concealed.total(), 14);
+        assert!(picks(StageBot::default(), EARLY_1).contains(&"6m".to_string()));
+        for bot in [
+            StageBot::default().with_early(EARLY_SUIT),
+            StageBot::default().with_early(EARLY_SUIT | EARLY_FAR),
+            StageBot::default().with_early(EARLY_SUIT | EARLY_FAR | EARLY_VALUE),
+        ] {
+            let p = picks(bot, EARLY_1);
+            assert!(
+                p.iter().all(|t| ["1p", "6p", "4s"].contains(&t.as_str())),
+                "{p:?}"
+            );
+            assert_eq!(pick_with(bot, EARLY_1).1.line, Some(Line::Pungs));
+        }
+    }
+
+    #[test]
+    fn early_switches_keep_5s_while_9m_is_held() {
+        // Position 2: plain `stage` throws 5s (9m and the honours count for
+        // thirteen orphans); with both switches 9m goes, never 5s.
+        assert_eq!(view(EARLY_2).concealed.total(), 14);
+        assert_eq!(picks(StageBot::default(), EARLY_2), ["5s"]);
+        assert_eq!(
+            picks(
+                StageBot::default().with_early(EARLY_SUIT | EARLY_FAR),
+                EARLY_2
+            ),
+            ["9m"]
+        );
+        assert_eq!(
+            picks(StageBot::default().with_early(EARLY_SUIT), EARLY_2),
+            ["9m"]
+        );
+        assert_eq!(
+            picks(
+                StageBot::default().with_early(EARLY_SUIT | EARLY_FAR | EARLY_VALUE),
+                EARLY_2
+            ),
+            ["9m"]
+        );
+        // The far switch alone: orphans no longer decides; the tie goes on.
+        let far = picks(StageBot::default().with_early(EARLY_FAR), EARLY_2);
+        assert!(far.len() > 1, "{far:?}");
+    }
+
+    #[test]
+    fn early_switch_off_leaves_stage_as_before() {
+        // Plan Task 30: with the switches off, `stage` plays 200 seeded deals as
+        // before the early-game variants.
+        assert_eq!(StageBot::default().early, 0);
+        assert_eq!(
+            fingerprint(StageBot::default().with_early(0)),
+            FINGERPRINT_BEFORE
+        );
+        let of = |name: &str| match crate::Bot::by_name(name) {
+            Some(crate::Bot::Stage(b)) => (b.gate, b.neighbour, b.early),
+            _ => panic!("{name} is no three-stage bot"),
+        };
+        assert_eq!(of("stage"), (1, 0, 0));
+        assert_eq!(of("stage-early-suit"), (1, 0, EARLY_SUIT));
+        assert_eq!(of("stage-early-far"), (1, 0, EARLY_FAR));
+        assert_eq!(of("stage-early-value"), (1, 0, EARLY_VALUE));
+        assert_eq!(of("stage-early-ab"), (1, 0, EARLY_SUIT | EARLY_FAR));
+        assert_eq!(
+            of("stage-early"),
+            (1, 0, EARLY_SUIT | EARLY_FAR | EARLY_VALUE)
+        );
+    }
+
+    #[test]
+    fn show_early_picks() {
+        for hand in [EARLY_1, EARLY_2] {
+            for early in 0..8 {
+                let p = picks(StageBot::default().with_early(early), hand);
+                println!("{hand} early={early}: {p:?}");
+            }
+        }
     }
 
     #[test]

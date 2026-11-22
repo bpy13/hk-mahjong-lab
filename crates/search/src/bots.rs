@@ -644,6 +644,15 @@ impl Bot {
             // threshold of 1 % of safe picks (`t=5`: 5 %). Without `belief=...` it
             // plays as `stage`. A test bot, not a default.
             "stage-safe" => Bot::Stage(StageBot::default().with_safe(1)),
+            // Plan Task 30: the early-game fixes, test bots, not defaults: a suited
+            // tile outside the best flush suit first among tied stage 1 throws
+            // (`-suit`), far lines out of the other lines' distances (`-far`), a
+            // scoring honour last (`-value`), A and B (`-ab`), all three.
+            "stage-early-suit" => Bot::Stage(StageBot::default().with_early(1)),
+            "stage-early-far" => Bot::Stage(StageBot::default().with_early(2)),
+            "stage-early-value" => Bot::Stage(StageBot::default().with_early(4)),
+            "stage-early-ab" => Bot::Stage(StageBot::default().with_early(3)),
+            "stage-early" => Bot::Stage(StageBot::default().with_early(7)),
             "chain" => Bot::Route(RouteBot::chain()),
             "chain2" => Bot::Route(RouteBot::chain2_from_env().unwrap_or_else(|e| panic!("{e}"))),
             "route" => Bot::Route(RouteBot::route_from_env().unwrap_or_else(|e| panic!("{e}"))),
