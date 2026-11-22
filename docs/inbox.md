@@ -61,6 +61,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Default: (a), since the gain is measured out of sample and the confirmation is cheap; (b) can follow as a later round.
   - Asked by the Task 24 worker (slot 4), 2026-11-23; figures from `runs/defence-false-alarms/match-40000-seed24.txt` in the workers clone.
   - Card sent 2026-11-23 (orchestrator; the four paired gains and the three-part splits checked against the match output; note for the card: under the old liability rule `t=1` paid for a liability in 158 hands, -0.092 a hand, and Task 27 replays this match under the new rule).
+  - Brian (2026-11-23): "I guess this is somewhat good news. Please check if the same results still holds under the corrected rules about 12 tiles. The early game algorithm needs fixing though. Please go ahead with the self-play simulation. Play beyond 8 hours, suggest a reasonable number." (orchestrator: Task 27 replays this match, seed 24, under the corrected rule; Task 30 added for the early game; Task 29's run set to 24 hours. Whether the milestone closes stays open until the replay is in.)
 
 ## Answered
 
