@@ -53,6 +53,14 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Default: (a), as the analysis set out beforehand.
   - Card sent 2026-11-19 (orchestrator; figures checked against `runs/rl-lownoise/final/vs-stage-40000.txt` and the hourly table).
 
+- **The 1 % defence bot `stage-safe:t=1` beats plain `stage` by +0.24 points a hand. Take it as the milestone's defending bot after a check on a fresh seed, or first build the rule that removes the costly false alarms?**
+  - What it is: Task 24 played four defence bots on `models/belief-order.mjnn`, each against three plain `stage` over 40,000 deals (seed 24, cpu job 308), paired with plain `stage` on the same walls, and labelled each hand's first changed discard a true alarm (`stage`'s pick would have been won on at once) or a false alarm. Paired gain a hand: `stage-safe:t=1` (throws `stage`'s pick among the tiles read below 0.135 when its pick is read above it, hands not ready) **+0.242 ± 0.074**; `stage-safe:t=5` (threshold 0.022) −0.164 ± 0.139; `stage-ev` −2.293 ± 0.178; `stage-fold` −0.675 ± 0.069. Report: `docs/study-results/defence-false-alarms.md`.
+  - Example: `t=1` changes a discard in 14 % of hands; 83 % of its first changes are false alarms, but they cost +0.006 a hand in total (+0.05 each), and its true alarms bring +0.23 (+10.2 a catch). `t=5` raises a false alarm in 42 % of hands at −1.24 each: 90 % of that loss is in hands one away from ready, 77 % on readings 0.022–0.050, 76 % against an opponent who is truly far. `ev` changes picks the reading rates below 0.01 and loses wins (−4.81 a hand); `fold` breaks ready hands (−12.50 each).
+  - Why it matters: Brian, 2026-11-20: a measured gain of a defending bot over plain `stage` passes the milestone. `t=1` is the first defence bot with a gain above its range; its threshold came from seed 23, so seed 24 is out of sample. It was played under the old liability rule (Task 27 changes it to self-draw only). No default changed; nothing reaches the app.
+  - Options: (a) confirm `stage-safe:t=1` with one more 40,000-deal match on a fresh seed under Task 27's rule (about 45 min of CPU through the queue), then take it as the defending bot and close the milestone; (b) first build the proposed rule (the 0.135 threshold for one-away hands, the 0.022 one only for hands three or more from ready) and measure it beside `t=1` in the same match; (c) stop the defence work and keep plain `stage`
+  - Default: (a), since the gain is measured out of sample and the confirmation is cheap; (b) can follow as a later round.
+  - Asked by the Task 24 worker (slot 4), 2026-11-23; figures from `runs/defence-false-alarms/match-40000-seed24.txt` in the workers clone.
+
 ## Answered
 
 - **The flush suit chosen by the neighbours' suits plays level with plain `stage` (+0.04 ± 0.09 points a hand over 200,000 deals). Keep it, change it, or drop it?**
