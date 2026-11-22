@@ -99,6 +99,7 @@ Example, Why it matters, Options with the Default marked. The orchestrator turns
   - Options: (a) A becomes the default of `stage` and `StageBot::default()`; today's bot stays as a named bot (`stage-plain`); B and C stay as switches. (b) A and C both become the default (C alone is level and just worse than A paired; A+B+C level). (c) Keep the default and keep all three as switches. (d) Check A on a fresh seed first (one more 40,000-deal cpu job, about 8 minutes), then decide.
   - Default: (a).
   - Asked by the Task 30 workers (slot 3 built it, slot 1 read job 311), 2026-11-23.
+  - Card sent 2026-11-23 (orchestrator; the five gains and the four paired differences checked against `runs/early/one-40000-seed30.txt`).
 
 ## Answered
 
