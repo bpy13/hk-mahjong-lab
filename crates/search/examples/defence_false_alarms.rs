@@ -20,7 +20,7 @@
 use mahjong_games::Game;
 use mahjong_hk::{HandResult, RuleSet, State};
 use mahjong_search::belief::BeliefModel;
-use mahjong_search::false_alarm::{play, true_distance, Played, OUTCOMES};
+use mahjong_search::false_alarm::{example_json, play, true_distance, Played, Reading, OUTCOMES};
 use mahjong_search::oracle::{discards, distance};
 use mahjong_search::stage::{read_dealin, StageBot};
 use mahjong_search::{Agent, Bot, SeatView};
@@ -519,10 +519,25 @@ fn report(
         }
         println!("{line}");
     }
-    // Examples: 20 across the endings, by their share of the loss (at least 2
-    // for each ending that loses), the costliest in each.
+    let picks = pick_examples(&fa);
+    println!();
+    println!("  examples (the costliest false alarms across the endings):");
+    println!();
+    for (n, r) in picks.iter().enumerate() {
+        let plain = play(rules, None, r.deal, r.seat);
+        let mine = play(rules, Some(bot), r.deal, r.seat);
+        assert_eq!(mine.points, r.points, "replay of deal {}", r.deal);
+        let info = r.info.expect("info");
+        println!("{}", example_text(n + 1, r, &info, &plain, &mine, model));
+    }
+}
+
+/// Up to 20 examples across the endings, by their share of the loss (at least 2
+/// for each ending that loses), the costliest in each, filled up with the
+/// costliest left.
+fn pick_examples<'a>(fa: &[&'a Rec]) -> Vec<&'a Rec> {
     let mut by_end: Vec<Vec<&Rec>> = vec![Vec::new(); ENDINGS.len()];
-    for r in &fa {
+    for &r in fa {
         by_end[ending(r)].push(r);
     }
     let losses: Vec<f64> = by_end
@@ -560,20 +575,73 @@ fn report(
         let need = 20 - picks.len();
         picks.extend(rest.into_iter().take(need));
     }
-    println!();
-    println!("  examples (the costliest false alarms across the endings):");
-    println!();
-    for (n, r) in picks.iter().enumerate() {
-        let plain = play(rules, None, r.deal, r.seat);
-        let mine = play(rules, Some(bot), r.deal, r.seat);
-        assert_eq!(mine.points, r.points, "replay of deal {}", r.deal);
-        let info = r.info.expect("info");
-        println!("{}", example_text(n + 1, r, &info, &plain, &mine, model));
+    picks
+}
+
+/// `examples-json`: one file per example the report prints (the same choice),
+/// `<bot>-<deal>-seat<n>.json`, in `dir`.
+fn write_example_files(
+    dir: &str,
+    chosen: &[&(&str, &str)],
+    bots: &[(String, StageBot)],
+    flat: &[Vec<Rec>],
+    rules: &RuleSet,
+    model: &BeliefModel,
+) {
+    std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{dir}: {e}"));
+    for (k, ((name, _), (_, bot))) in chosen.iter().zip(bots).enumerate() {
+        let fa: Vec<&Rec> = flat
+            .iter()
+            .map(|d| &d[k])
+            .filter(|r| r.info.is_some_and(|i| i.kind == 1))
+            .collect();
+        for r in pick_examples(&fa) {
+            let plain = play(rules, None, r.deal, r.seat);
+            let mine = play(rules, Some(bot), r.deal, r.seat);
+            assert_eq!(mine.points, r.points, "replay of deal {}", r.deal);
+            let info = r.info.expect("info");
+            let c = mine.change.as_ref().expect("a change");
+            let b = model.run_for(&c.state, r.seat);
+            let i = c.stage_pick().expect("discard").index() as usize;
+            let rd = Reading {
+                own_dist: info.dist,
+                cost: info.cost,
+                dealin: [0, 1, 2].map(|j| b.opponents[j].dealin[i]),
+                wall_third: info.third,
+            };
+            let v = example_json(
+                rules,
+                r.deal,
+                r.seat,
+                name,
+                ENDINGS[ending(r)],
+                &plain,
+                &mine,
+                &rd,
+            );
+            let path = format!("{dir}/{name}-{}-seat{}.json", r.deal, r.seat);
+            std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&v).expect("json") + "\n",
+            )
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+            println!("wrote {path}");
+        }
     }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let json_dir = if args.first().map(String::as_str) == Some("examples-json") {
+        args.remove(0);
+        assert!(
+            !args.is_empty(),
+            "examples-json <out dir> <deals> [seed] [model] [bot ...]"
+        );
+        Some(args.remove(0))
+    } else {
+        None
+    };
     let deals: u64 = args.first().and_then(|x| x.parse().ok()).unwrap_or(100);
     let seed: u64 = args.get(1).and_then(|x| x.parse().ok()).unwrap_or(24);
     let path = args
@@ -647,6 +715,11 @@ fn main() {
         names.join(", "),
         start.elapsed().as_secs_f64()
     );
+    let flat: Vec<Vec<Rec>> = rows.iter().flat_map(|r| r.0.clone()).collect();
+    if let Some(dir) = json_dir {
+        write_example_files(&dir, &chosen, &bots, &flat, &rules, &model);
+        return;
+    }
     // Plain stage per hand and per discard (Brian: "dangerous moments are not rare").
     let plain: Vec<(i32, usize, u32)> = rows.iter().flat_map(|r| r.1.clone()).collect();
     let n = plain.len() as f64;
@@ -658,7 +731,6 @@ fn main() {
         100.0 * dealt / disc.max(1) as f64,
         disc as f64 / n
     );
-    let flat: Vec<Vec<Rec>> = rows.iter().flat_map(|r| r.0.clone()).collect();
     for (k, ((name, _), (spec, bot))) in chosen.iter().zip(&bots).enumerate() {
         report(name, spec, bot, &flat, k, &rules, &model);
     }
