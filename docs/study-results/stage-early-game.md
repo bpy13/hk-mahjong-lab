@@ -89,7 +89,7 @@ third suit is thrown even when it holds a pair. In 20 of the first three throws 
 broke a pair of the third suit. That comes from Brian's rule (the third suit goes first), not
 from a tie-break, so no switch was built for it here.
 
-## 4. Matches (cpu job 311, pending)
+## 4. Matches (cpu job 311)
 
 One variant against three plain `stage`, rotated through the four seats; every rotation is
 played beside an all-plain twin on the same wall and random stream (`flush_neighbours one`,
@@ -100,15 +100,35 @@ points a hand minus the same seat in the twin, with its 95 % range over deals. T
 Smoke run, 200 deals (direct, 38 s, ranges too wide to read): A +1.92 ± 1.43, B −0.87 ± 2.13,
 C +0.69 ± 0.76, A+B +1.29 ± 2.61, all +1.30 ± 2.52.
 
-| Bot | Gain a hand | Verdict |
-|---|---|---|
-| `stage-early-suit` | pending (job 311) | |
-| `stage-early-far` | pending | |
-| `stage-early-value` | pending | |
-| `stage-early-ab` | pending | |
-| `stage-early` | pending | |
+Job 311 ended exit 0 on 2026-11-23 (05:44–06:20, 2,139 s for the five bots). Figures read
+and entered by slot 1.
 
-Output: `runs/early/one-40000-seed30.txt` in checkout `hk-mahjong-lab-3`.
+| Bot | Gain a hand (± 95 %) | Win (twin 24.12 %) | Deal-in (twin 18.05 %) | Verdict |
+|---|---|---|---|---|
+| `stage-early-suit` (A) | **+0.160 ± 0.097** | 24.31 % | 18.04 % | above `stage` (range +0.06 to +0.26) |
+| `stage-early-far` (B) | −0.060 ± 0.145 | 24.23 % | 18.07 % | level |
+| `stage-early-value` (C) | +0.058 ± 0.062 | 24.10 % | 18.07 % | level (range −0.004 to +0.12, just touches 0) |
+| `stage-early-ab` (A+B) | +0.090 ± 0.157 | 24.40 % | 18.08 % | level |
+| `stage-early` (A+B+C) | +0.116 ± 0.159 | 24.43 % | 18.14 % | level |
+
+Paired against A on the same deals and seats (the gain of each minus A's gain):
+
+| Difference | Points a hand (± 95 %) | Reading |
+|---|---|---|
+| B − A | −0.219 ± 0.160 | B is worse than A |
+| C − A | −0.101 ± 0.099 | C is (just) worse than A |
+| A+B − A | −0.069 ± 0.137 | level |
+| A+B+C − A | −0.043 ± 0.142 | level |
+
+Reading: A alone is the only switch with a gain whose range excludes 0, and it is the switch
+that fixes both of Brian's positions. B (far lines out of the key) changes about twice as many
+picks as A and adds noise (its range is half as wide again) but no gain; adding it to A gives
+back part of A's gain, though not measurably. C is small and level on its own. Every variant's
+win rate rises (by up to 0.3 points) with deal-in unchanged, except all three together
+(deal-in +0.09 points). Defaults are unchanged; which switches become the default is asked
+in the inbox.
+
+Output: `runs/early/one-40000-seed30.txt` in checkout `.worktrees/.worktrees/hk-mahjong-lab-3`.
 
 ## 5. Example file with the switches on
 
