@@ -141,6 +141,7 @@ fn position_3_liability_does_not_protect_the_deal_in() {
         // B's self-draw at 3 shares: 0.05 × 24 × 3 = 3.6, beside A's 28.8.
         assert!((x.self_draw[1] - 3.6).abs() < 1e-9, "{}", x.self_draw[1]);
         assert_eq!(x.other_feeds[1], 0.0);
+        assert_eq!(ev_of(d, deal_in), x.ev);
     }
     assert_eq!(arg(&with_floor, "reason.ev.liability", "seat"), Some(1.0));
 }

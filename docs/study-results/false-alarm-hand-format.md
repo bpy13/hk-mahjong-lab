@@ -1,7 +1,7 @@
 # The false-alarm example hands as files
 
 Plan 2026-11-16, Task 25. `defence_false_alarms examples-json <out dir> <deals> [seed] [model]
-[bot ...]` (`crates/search/examples/defence_false_alarms.rs`) writes one JSON file for each
+[bot ...] [only=<deal>:<seat>]` (`crates/search/examples/defence_false_alarms.rs`) writes one JSON file for each
 example hand the report prints (the same choice of examples, per bot), named
 `<bot>-<deal>-seat<n>.json`. The builder is `example_json` in `crates/search/src/false_alarm.rs`.
 The tile names (`5p`, `E`, `Wh`, `F2`) and the actions (`action.*`, with the engine's action
@@ -46,7 +46,7 @@ same up to `first_change_index`, where the bot throws something other than `stag
 An ending (`plain_ending`, `bot_ending`): `draw` (wall ran out), `points` (all four seats, sum 0),
 and `wins`, one per winner: `winner`, `from` (the discarder, null for a self-draw), `self_drawn`,
 `faan`, `win_tile`, `paid_by` (what each seat paid), `liable` (the seat that paid for the whole
-table under the 12-tile rule, or null), `robbed`.
+table under the 12-tile rule, or null; since 2026-11-23 only on a self-draw, rules §8.3.2), `robbed`.
 
 ## Worked example: `examples/safe1-99000316-seat0.json`
 
@@ -62,8 +62,13 @@ example the report prints:
 * `stage_pick` 5p, read 0.254 on the opposite seat (nobody wins on it: `label` false alarm,
   `paid_at_once_if_picked` 0); `thrown_instead` 9m, `progress_steps_cost` 0.
 * Plain game: seat 2 wins off seat 1 with 5 faan on R; the bot's points 0.
-  Bot game: seat 2 wins off seat 1 with 6 faan on R; the bot is liable (`liable`: 0) and pays
-  96 (`bot_points` −96). `ending_kind`: `liable for a win`.
+  Bot game: seat 2 wins off seat 1 with 6 faan on R; seat 1, the discarder, pays 32 and the bot
+  pays nothing (`liable` null, `bot_points` 0). `ending_kind`: `same ending`. The bot fed seat 2's
+  fourth open set, and until 2026-11-23 the rules made it pay 96 for this discard win (`liable` 0,
+  `bot_points` −96, `liable for a win`); plan Task 27 (ADR 0004) rewrote the file under the
+  amended rule with `examples-json out 40 99 models/belief-order.mjnn safe1 only=99000316:0`
+  (`only=<deal>:<seat>` writes that hand whatever its ending: under the amended rule it no longer
+  loses points, so it is not among the examples the report picks).
 
 ## Estimates (format 2, Task 26)
 

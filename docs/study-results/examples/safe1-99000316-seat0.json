@@ -434,19 +434,19 @@
   "bot_ending": {
     "draw": false,
     "points": [
-      -96,
       0,
-      96,
+      -32,
+      32,
       0
     ],
     "wins": [
       {
         "faan": 6,
         "from": 1,
-        "liable": 0,
+        "liable": null,
         "paid_by": [
-          96,
           0,
+          32,
           0,
           0
         ],
@@ -15441,7 +15441,7 @@
     null,
     null
   ],
-  "bot_points": -96,
+  "bot_points": 0,
   "change": {
     "own_distance": 3,
     "paid_at_once_if_picked": 0,
@@ -15624,7 +15624,7 @@
   },
   "deal": 99000316,
   "dealer": 0,
-  "ending_kind": "liable for a win",
+  "ending_kind": "same ending",
   "first_change_index": 37,
   "format": 2,
   "label": "false alarm",

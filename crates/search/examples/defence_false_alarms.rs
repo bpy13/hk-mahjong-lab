@@ -584,6 +584,7 @@ fn pick_examples<'a>(fa: &[&'a Rec]) -> Vec<&'a Rec> {
 /// `<bot>-<deal>-seat<n>.json`, in `dir`.
 fn write_example_files(
     dir: &str,
+    only: Option<(u64, usize)>,
     chosen: &[&(&str, &str)],
     bots: &[(String, StageBot)],
     flat: &[Vec<Rec>],
@@ -597,7 +598,15 @@ fn write_example_files(
             .map(|d| &d[k])
             .filter(|r| r.info.is_some_and(|i| i.kind == 1))
             .collect();
-        for r in pick_examples(&fa) {
+        let picks = match only {
+            Some((deal, seat)) => fa
+                .iter()
+                .copied()
+                .filter(|r| r.deal == deal && r.seat == seat)
+                .collect(),
+            None => pick_examples(&fa),
+        };
+        for r in picks {
             let plain = play_with(rules, None, r.deal, r.seat, Some(model));
             let mine = play_with(rules, Some(bot), r.deal, r.seat, Some(model));
             assert_eq!(mine.points, r.points, "replay of deal {}", r.deal);
@@ -634,11 +643,18 @@ fn write_example_files(
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `only=<deal>:<seat>` (examples-json): write that hand whatever its ending (plan
+    // Task 27 rewrites the worked example under the amended 12-tile rule).
+    let only: Option<(u64, usize)> = args.iter().position(|a| a.starts_with("only=")).map(|i| {
+        let a = args.remove(i);
+        let (d, s) = a[5..].split_once(':').expect("only=<deal>:<seat>");
+        (d.parse().expect("deal"), s.parse().expect("seat"))
+    });
     let json_dir = if args.first().map(String::as_str) == Some("examples-json") {
         args.remove(0);
         assert!(
             !args.is_empty(),
-            "examples-json <out dir> <deals> [seed] [model] [bot ...]"
+            "examples-json <out dir> <deals> [seed] [model] [bot ...] [only=<deal>:<seat>]"
         );
         Some(args.remove(0))
     } else {
@@ -719,7 +735,7 @@ fn main() {
     );
     let flat: Vec<Vec<Rec>> = rows.iter().flat_map(|r| r.0.clone()).collect();
     if let Some(dir) = json_dir {
-        write_example_files(&dir, &chosen, &bots, &flat, &rules, &model);
+        write_example_files(&dir, only, &chosen, &bots, &flat, &rules, &model);
         return;
     }
     // Plain stage per hand and per discard (Brian: "dangerous moments are not rare").
