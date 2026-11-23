@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 31 (payment rule points from ADR 0005), building
 
 ## Results
 - Task 30 (slot 3 and slot 1, 2026-11-23): ticked; cpu job 311 ended exit 0 (40,000 deals, seed 30, corrected 12-tile rule), gain a hand against the all-plain twin: A `stage-early-suit` +0.160 ± 0.097 (above), B `stage-early-far` −0.060 ± 0.145, C `stage-early-value` +0.058 ± 0.062, A+B +0.090 ± 0.157, A+B+C +0.116 ± 0.159 (all level); paired B − A −0.219 ± 0.160; inbox asks which switches become the default (default answer: A only); figures and inbox by slot 1. Built by slot 3: three switches of the stage bot, off by default (A a suited tile outside the best flush suit first among tied stage 1 throws; B far lines, thirteen orphans with a +2 handicap, out of the other lines' key; C a scoring honour last, found in a fresh 40-deal scan), bots `stage-early-suit`, `-far`, `-value`, `-ab`, `stage-early`; deal 99000316's two positions fixed by A (position 1 throws 6p, position 2 9m), B alone leaves position 2 to the random draw; plain `stage` unchanged (200-deal fingerprint); report `docs/study-results/stage-early-game.md`; example with the switches on `docs/study-results/examples/early-99000316-seat2.json`; fmt, clippy, cargo test --workspace pass; no paid API calls.
