@@ -207,3 +207,32 @@ def test_luck_measurement_smoke(tmp_path: Path) -> None:
     assert r["same-deal baseline"]["hour_noise"] > 0
     assert (tmp_path / "luck" / "variance.md").read_text(encoding="utf-8").count("|") > 40
     assert res["fit_hands"] + res["held_out_hands"] >= 40
+
+
+def test_unpaired_run_keeps_hourly_copies_and_stops_at_time(tmp_path: Path) -> None:
+    """Task 29's ``oracle`` setting (unpaired, no pool): the hourly row has no paired
+    figure but still comes with its copy, and the run's end writes ``stopped.txt`` so a
+    resume ends at once and the final match can start."""
+    init = tmp_path / "init.pt"
+    torch.manual_seed(8)
+    SuitCNN(SMALL).save(init)
+    out = tmp_path / "run"
+    args = (
+        ["--init", str(init), "--minutes", "0.001", "--out", str(out), "--envs", "16"]
+        + ["--device", "cpu", "--hands-per-iter", "8", "--no-curriculum", "--anchor-weight", "0"]
+        + ["--no-paired-reward", "--oracle-baseline", "--keep-hourly", "--score-minutes", "0.001"]
+    )
+    main(args)
+    log = json.loads((out / "log.json").read_text())
+    hours = [e["hour"] for e in log if "hour" in e]
+    assert hours and hours[0]["paired_mean"] is None and hours[0]["ci95"] is None
+    assert hours[0]["hands"] > 0 and hours[0]["updates"] == 1
+    assert (out / hours[0]["network"]).exists()
+    assert (out / hours[0]["network"]).with_suffix(".mjnn").exists()
+    assert "n/a (unpaired)" in (out / "hourly.txt").read_text()
+    assert (out / "stopped.txt").read_text().startswith("time:")
+    assert (out / "final.mjnn").exists()
+    state = json.loads((out / "state.json").read_text())
+    assert state["config"]["paired"] is False
+    main([*args, "--resume"])
+    assert json.loads((out / "state.json").read_text())["iteration"] == state["iteration"]

@@ -46,12 +46,15 @@ with batched inference (GPU when there is one) for every game of a Rust
 * **Pull toward the init network** (``--pull W``): ``W * KL(init || net)`` on every
   decision, fading linearly to zero by ``--pull-fade-hours``; ``--no-pull-fade`` keeps
   it constant (plan 2026-11-16 Task 10).
-* **Hourly training score** (paired mode, Task 10): every hour of training the mean
+* **Hourly training score** (Task 10): every hour of training the mean
   paired difference over that hour's learner hands (learner minus the frozen start,
   raw points a hand) with its 95 % range, the mean entropy and the distance from the
   start (mean ``KL(init || net)``) are printed and kept in ``<out>/hourly.json``,
-  ``<out>/hourly.txt`` and the log entry (``"hour"``). ``--no-stall`` turns the pool's
-  stall rule off (the draw and collapse rules stay).
+  ``<out>/hourly.txt`` and the log entry (``"hour"``). An unpaired run has no frozen
+  start on the same deals: its row keeps the hands, entropy and distance, with the
+  paired figure ``None`` (Task 29). ``--no-stall`` turns the pool's stall rule off (the
+  draw and collapse rules stay). When the training time is up, with or without the
+  pool, ``<out>/stopped.txt`` says so and a resume ends at once.
 * **Passed and history inputs**: a network that reads the passed block or the
   ``history`` block gets them from ``HkVecEnv.observe_passed()`` and
   ``observe_history()``, after the features in that order.
@@ -809,8 +812,8 @@ class Trainer:
             "learner_win_rate": learner_wins / finished / (1 if cfg.paired else 4),
             "paired_mean": paired_sum / finished if cfg.paired else None,
         }
-        if cfg.paired:
-            self.hour.add_hands(finished, paired_sum, paired_sq)
+        # Unpaired runs count the hour's hands too (the row has no paired figure, Task 29).
+        self.hour.add_hands(finished, paired_sum, paired_sq)
         return batch, info
 
     def measure_teacher(self, min_faan: int) -> None:
@@ -1038,6 +1041,11 @@ class Trainer:
         row = self.hour.summary(round(self.next_hour / (self.cfg.score_minutes * 60)), partial)
         row["iteration"] = self.iteration
         row["hours"] = round(self.elapsed / 3600, 4)
+        if not self.cfg.paired:
+            # Task 29's unpaired setting: no frozen start plays the same deals, so the
+            # row keeps hands, entropy and distance only; the hourly copies are matched later.
+            row["paired_mean"] = None
+            row["ci95"] = None
         if self.cfg.keep_hourly:
             # Task 29: a copy of the network at every row, so any hour can be matched.
             name = f"hour-{row['hour']:02d}"
@@ -1047,9 +1055,13 @@ class Trainer:
         self.hourly.append(row)
         self.hour = HourStats()
         self.next_hour += self.cfg.score_minutes * 60
+        paired = (
+            f"paired difference {row['paired_mean']:+.3f} +- {row['ci95']:.3f} points a hand"
+            if row["paired_mean"] is not None
+            else "unpaired (no paired difference)"
+        )
         print(
-            f"ppo_cnn: hour {row['hour']}: paired difference {row['paired_mean']:+.3f} "
-            f"+- {row['ci95']:.3f} points a hand over {row['hands']:,} hands, entropy "
+            f"ppo_cnn: hour {row['hour']}: {paired} over {row['hands']:,} hands, entropy "
             f"{row['entropy']:.4f}, distance {row['distance']:.4f}",
             flush=True,
         )
@@ -1063,9 +1075,13 @@ class Trainer:
         ]
         for r in self.hourly:
             mark = " (part)" if r.get("partial") else ""
+            if r["paired_mean"] is None:
+                diff = "n/a (unpaired) | n/a"
+            else:
+                diff = f"{r['paired_mean']:+.2f} | +- {r['ci95']:.2f}"
             lines.append(
-                f"| {r['hour']}{mark} | {r['hands']:,} | {r['paired_mean']:+.2f} "
-                f"| +- {r['ci95']:.2f} | {r['entropy']:.3f} | {r['distance']:.3f} |"
+                f"| {r['hour']}{mark} | {r['hands']:,} | {diff} "
+                f"| {r['entropy']:.3f} | {r['distance']:.3f} |"
             )
         tmp = self.out / "hourly.txt.tmp"
         tmp.write_text("\n".join(lines) + "\n")
@@ -1089,6 +1105,11 @@ class Trainer:
         session_hands0 = self.hands
         start_elapsed = self.elapsed
         last_log = 0.0
+        if self.stopped and self.stopped.startswith("time:") and self.elapsed < cfg.seconds:
+            # Stopped only because its time was up: a resume with more time goes on.
+            print(f"ppo_cnn: resumed with more time ({self.stopped}); going on", flush=True)
+            self.stopped = None
+            (self.out / "stopped.txt").unlink(missing_ok=True)
         if self.stopped:
             print(f"ppo_cnn: this run has stopped ({self.stopped}); nothing to do", flush=True)
         while self.elapsed < cfg.seconds and not self.stopped:
@@ -1110,8 +1131,7 @@ class Trainer:
             t2 = time.time()
             if self.anchor > 0:
                 self.stats.update_anchor(min_faan)
-            if cfg.paired:
-                self.hour.add_update(losses["entropy"], losses["distance"])
+            self.hour.add_update(losses["entropy"], losses["distance"])
             self.iteration += 1
             self.elapsed = start_elapsed + (time.time() - session_start)
             session_hours = max(1e-9, (time.time() - session_start) / 3600)
@@ -1136,7 +1156,7 @@ class Trainer:
                     if x > 1.0001
                 }
             saved = False
-            if cfg.paired and self.elapsed >= self.next_hour:
+            if self.elapsed >= self.next_hour:
                 entry["hour"] = self.close_hour()
                 saved = True
             if self.elapsed >= self.next_eval:
@@ -1167,9 +1187,11 @@ class Trainer:
             if "eval" in entry or "hour" in entry or time.time() - last_log >= cfg.log_seconds:
                 self.write_log()
                 last_log = time.time()
-        if self.pool is not None and not self.stopped and self.elapsed >= cfg.seconds:
+        if not self.stopped and self.elapsed >= cfg.seconds:
+            # With or without the pool (Task 29's unpaired run has none): the run is over
+            # for good, `stopped.txt` says so and a resume ends at once.
             self.stop(f"time: {cfg.seconds / 3600:g} h of training reached")
-        if self.stopped and cfg.paired and self.hour.hands > 0:
+        if self.stopped and self.hour.hands > 0:
             # The hands after the last full hour of a run that has ended.
             self.close_hour(partial=True)
         ckpt = self.checkpoint()

@@ -297,4 +297,47 @@ hour the learner minus the frozen start on the same tiles with its 95 % range, e
 distance from the start (`runs/luckless/hourly.txt`). The engine is the one on main after Task 32
 (two-share discard payment, 食換 ban, flower choice, ADR 0004–0007), built into this checkout and
 frozen with the package. Then the end network against three strict `stage` bots over 40,000
-deals (cpu lane, `-Final`). gpu job 316 `hk-luckless` (queued 2026-11-23 15:10, about 24 GPU h plus the hourly 2,000-deal results) and cpu job 317 `hk-luckless-final` (after 316, about 0.8 CPU h); check `runs\luckless\hourly.txt`, `progress.txt`, `stopped.txt`, then `runs\lucklessinals-stage-40000.txt` in checkout `hk-mahjong-lab-2`. Results: RESULT-PLACEHOLDER (the hourly table, the end network's paired gain, and one verdict line: above `stage`, level or below; whether the hourly paired difference was still rising at hour 24).
+deals (cpu lane, `-Final`). gpu job 316 `hk-luckless` (queued 2026-11-23 15:10) and cpu job 317
+`hk-luckless-final` were queued for it from checkout `hk-mahjong-lab-2`.
+
+**The `both` run was stopped at 1.3 hours.** Brian, 2026-11-23 about 16:30, after the orchestrator
+laid out both settings (`both` keeps the hourly paired figure and the pool at Task 10's noise;
+unpaired `oracle` has 0.47 of that noise and drops both) and recommended the switch: "so you
+recommend to swtich?", then "okay". The orchestrator cancelled job 316 (it ran 15:07 to 16:28,
+52 updates, 213,069 hands, 160,000 hands an hour; its one hourly row: hour 1, −1.80 ± 0.32 points
+a hand against the frozen start, entropy 0.216, distance 0.104) and job 317. Its partial output is
+not a result; it is kept at `runs\luckless-both-stopped` in checkout `hk-mahjong-lab-2`.
+
+**The run redone with the `oracle` setting (slot 1, 2026-11-23).** Script
+`experiments/stage/luckless.ps1 -Setting oracle` from checkout `hk-mahjong-lab-workers`: the same
+start network `models/stage-imitation.pt` (byte-identical to the one job 316 used), the same other
+settings (24 hours of training across restarts, pull 0.02 constant, 4,096 hands an update, one
+pass, learning rate 3e-5, stall rule off, a copy of the network every hour), the engine on main
+after Task 32 (plus Task 33's read-only result field), rebuilt into the checkout and frozen with
+the package. What differs from Task 10's setting:
+- *Unpaired reward with the oracle critic* (`--no-paired-reward --oracle-baseline`): no second
+  game a wall with the frozen start; the reward is the learner's own log-scaled points and the
+  advantage is the reward minus the four-seat oracle critic's own-seat value (the critic reads
+  the hidden view; play never does, the test in `test_luck.py` holds).
+- *What the learner plays against:* the pool needs paired games, so there is none. The learner's
+  current network plays all four seats of every hand (four learner seat-hands a hand, which is
+  where the 0.47 comes from); no `stage` seat and no older copy is at the table.
+- *No hourly paired figure:* nothing plays the same deals as the learner, so the hourly row
+  (`runs\luckless\hourly.txt`) keeps hands, entropy and distance from the start only (the trainer
+  was changed to write that row, the hourly copies and `stopped.txt` in unpaired mode too; a new
+  test holds it). The hourly result is instead `evaluate()`: 2,000 hands against three `value`
+  bots and 2,000 against three frozen start networks (`--eval-walls 500`, in `log.json`).
+- *Hourly copies matched afterwards* (`-Hourly`, cpu lane): hours 4, 8, 12, 16, 20, 24 and the
+  start each plus three strict `stage` bots on the same 20,000 deals (seed 2), so the report can
+  say whether the network was still rising at hour 24 (each copy's gain minus the start's).
+Smoke run before queueing (`-DryRun -Setting oracle`, 6 minutes on 4 CPU threads, 256 hands an
+update): exit 0, 11 updates, 2,819 hands (24,000 hands an hour on 4 CPU threads), three 2-minute "hourly" rows with n/a for the paired figure and entropy and distance filled in, copies hour-01 to hour-03 (.pt and .mjnn), two results against `value` and the frozen start, and `stopped.txt` ("time: 0.1 h of training reached") at the end; a second start on the same folder ends at once.
+
+Jobs: gpu job 318 `hk-luckless` (queued 2026-11-23 16:44, started at once, 24 GPU h plus the hourly
+results; expected end about 2026-11-24 17:15), cpu job 319 `hk-luckless-final` (after it, about
+0.8 CPU h: `runs\luckless\final\vs-stage-40000.txt`) and cpu job 320 `hk-luckless-hourly`
+(after it, about 2.8 CPU h: `runs\luckless\hourly-match\*.txt`), all in checkout
+`hk-mahjong-lab-workers`; check `runs\luckless\hourly.txt`, `progress.txt`, `stopped.txt`.
+Results: RESULT-PLACEHOLDER (the hourly table, the hourly copies against the start, the end
+network's paired gain against three `stage`, and one verdict line: above `stage`, level or
+below; whether the gain over the start was still rising at hour 24).

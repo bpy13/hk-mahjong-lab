@@ -11,7 +11,12 @@
 #   paired       same-deal baseline only (Task 10's run; no new switch)
 #   both         same-deal baseline + the oracle critic as baseline (--oracle-baseline)
 #   perdecision  both, with per-decision credit (--oracle-baseline --per-decision-credit)
-#   oracle       unpaired, the oracle critic as baseline (--no-paired-reward --oracle-baseline)
+#   oracle       unpaired, the oracle critic as baseline (--no-paired-reward --oracle-baseline);
+#                the learner plays all four seats itself (no pool: the pool needs paired games),
+#                the hourly row has no paired figure (hands, entropy, distance only), and the
+#                hourly result is 2,000 hands against three `value` bots and 2,000 against three
+#                frozen start networks (the trainer's evaluate()). Chosen on 2026-11-23 (plan
+#                Task 29 CHANGE 16:30, Brian: "okay") after the `both` run was stopped at 1.3 h.
 #
 # Resumable: adding the job again, with the same -Setting, continues from the last checkpoint
 # (state.json); a run that has stopped exits at once.
@@ -32,8 +37,15 @@
 # build it first: cargo build --release --example compare -p mahjong-search), into
 # runs\luckless\final\vs-stage-40000.txt.
 #   jobq.ps1 add -Lane cpu -Label hk-luckless-final -After <run job> -Script "<this file>" -ScriptArgs "-Final"
+# -Hourly (cpu lane, after the run; the unpaired setting has no hourly paired figure): the hourly
+# copies hour-04, -08, -12, -16, -20, -24 (-HourList) and the frozen start (runs\luckless\teacher.mjnn)
+# each plus three strict `stage` bots on the same 20,000 deals (-HourDeals, seed 2), into
+# runs\luckless\hourly-match\<name>.txt, so the report can say whether the network was still
+# rising at hour 24 (each copy's gain minus the start's on the same deals).
+#   jobq.ps1 add -Lane cpu -Label hk-luckless-hourly -After <run job> -Script "<this file>" -ScriptArgs "-Hourly"
 param([string]$Init = 'models\stage-imitation.pt', [string]$Setting = 'both', [double]$Hours = 24,
-      [switch]$Freeze, [switch]$DryRun, [switch]$Final)
+      [switch]$Freeze, [switch]$DryRun, [switch]$Final, [switch]$Hourly,
+      [int[]]$HourList = @(4, 8, 12, 16, 20, 24), [int]$HourDeals = 20000)
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $python = 'C:\Users\brian\miniconda3\envs\mahjong\python.exe'
@@ -51,6 +63,30 @@ if ($Final) {
     $env:RAYON_NUM_THREADS = if ($env:HKQ_THREADS) { $env:HKQ_THREADS } else { '16' }
     & $compare "net:path=$net" stage stage stage 40000 1 | Out-File -Encoding utf8 (Join-Path $dir 'vs-stage-40000.txt')
     exit $LASTEXITCODE
+}
+
+if ($Hourly) {
+    $compare = Join-Path $repo 'target\release\examples\compare.exe'
+    foreach ($f in $compare, (Join-Path $runs 'stopped.txt'), (Join-Path $runs 'teacher.mjnn')) {
+        if (-not (Test-Path $f)) { Write-Output "missing $f (the run has not ended, or compare is not built)"; exit 1 }
+    }
+    $dir = Join-Path $runs 'hourly-match'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $env:RAYON_NUM_THREADS = if ($env:HKQ_THREADS) { $env:HKQ_THREADS } else { '16' }
+    $nets = @(@{ name = 'start'; path = (Join-Path $runs 'teacher.mjnn') })
+    foreach ($h in $HourList) {
+        $p = Join-Path $runs ('hour-{0:D2}.mjnn' -f $h)
+        if (Test-Path $p) { $nets += @{ name = ('hour-{0:D2}' -f $h); path = $p } }
+        else { Write-Output "no copy for hour $h ($p): skipped" }
+    }
+    $code = 0
+    foreach ($n in $nets) {
+        $outFile = Join-Path $dir ("$($n.name)-vs-stage-$HourDeals.txt")
+        if ((Test-Path $outFile) -and (Get-Content $outFile | Select-String 'draws')) { continue }  # done in an earlier attempt
+        & $compare "net:path=$($n.path)" stage stage stage $HourDeals 2 | Out-File -Encoding utf8 $outFile
+        if ($LASTEXITCODE -ne 0) { $code = $LASTEXITCODE }
+    }
+    exit $code
 }
 
 if ($Freeze) {
@@ -98,6 +134,8 @@ if ($DryRun) {
            '--hands-per-iter', '4096', '--score-minutes', '60',
            '--ckpt-minutes', '30', '--eval-minutes', '60', '--pool-minutes', '120',
            '--eval-deals', '2000')
+    # Without the pool the hourly result is evaluate(): --eval-walls walls x 4 seatings.
+    if ($Setting -eq 'oracle') { $a += @('--eval-walls', '500') }
 }
 $env:PYTHONIOENCODING = 'utf-8'
 Set-Location $repo
