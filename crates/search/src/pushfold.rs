@@ -265,7 +265,8 @@ pub fn decision(
     let rounds = state.wall_remaining() / 4;
     let unseen = view.unseen.total() as f64;
     // Task 11's pay figure: the chosen tile's deal-in points, else the threats'
-    // average.
+    // average, the discarder's 2 shares (rules §8.2; the network in
+    // `pushfold_tables.rs` was fitted when it was 1 share).
     let pay = if d_t > 1e-6 {
         loss_t / d_t
     } else {
@@ -274,11 +275,7 @@ pub fn decision(
             w += danger.threat(o);
             p += danger.threat(o) * danger.points_if_win(o);
         }
-        if w > 0.0 {
-            p / w
-        } else {
-            8.0
-        }
+        mahjong_hk::DISCARD_SHARES as f64 * if w > 0.0 { p / w } else { 8.0 }
     };
     let v = giveup::push_value(&giveup::measured(), rounds, &outs, unseen, pay, 1.0);
     let mut discards = [0.0f64; 4];

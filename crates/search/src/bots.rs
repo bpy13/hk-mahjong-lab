@@ -363,9 +363,10 @@ impl Brain {
             if self.metric == Metric::FaanQuick {
                 danger.apply_passed(&Passed::of(state));
             }
-            // The "clearly safer" margin: 0.3 % deal-in, or that much of one
-            // 3-faan share (8 points) in expected loss.
-            let margin = if self.belief.is_some() { 0.024 } else { 0.003 };
+            // The "clearly safer" margin: 0.3 % deal-in, or that much of a 3-faan
+            // deal-in (2 shares of 8 points, rules §8.2; 0.024 when it was 1
+            // share, until 2026-11-23) in expected loss.
+            let margin = if self.belief.is_some() { 0.048 } else { 0.003 };
             let flush_risk =
                 flush.map(|(o, suit)| (suit, Opponent::of(state, o), danger.threat(o)));
             let risk = |t: Tile| {

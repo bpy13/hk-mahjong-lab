@@ -141,9 +141,10 @@ collapses before my hazard pays, and my equity goes negative even with a good ha
 ### 3.2 Payments
 
 When I win in round `k`: by a self-draw I collect `Pay_sd(me) × 3`; on `j`'s discard
-`Pay(me) × 1`; if someone is liable for me (12-tile rule), it pays the 3 shares of a
-self-draw, and a discard win is still 1 share from the discarder (rules §8.3.2 since
-2026-11-23; before, `× 3` either way).
+`Pay(me) × 2` (the discarder's 2 shares, rules §8.2 since 2026-11-23, ADR 0005; `× 1`
+before); if someone is liable for me (12-tile rule), it pays the 3 shares of a
+self-draw, and a discard win is still 2 shares from the discarder (rules §8.3.2 since
+2026-11-23; before, `× 3` either way). `L_disc` is 2 (`ev-bot.md` §1).
 When `o` wins: by self-draw I pay `Pay_sd(o) × L_sd(o)`; on my discard `Pay(o) × L_disc(o)`;
 on another's discard `Pay(o) × L_other(o)` (always 0 since 2026-11-23: a discard win is
 paid by the discarder even when I am liable for `o`). `Pay(me)` is
@@ -232,8 +233,8 @@ nothing).
 **A legal win is one more candidate** (Task 21, `passwin=on`, the default; `passwin=off` takes
 every legal win as before). Win now is what the win pays: `points(faan) × shares`, with the
 faan of the actual win (`claim_score` / `self_drawn_score`, so a self-draw includes its +1)
-and one share for a discard win (also when a seat is liable for me, §8.3 since 2026-11-23)
-or three for a self-draw.
+and two shares for a discard win (rules §8.2 since 2026-11-23; one before; also when a seat
+is liable for me, §8.3), three for a robbed kong, or three for a self-draw.
 Pass is the race value of the hand kept: for a discard win the `Pass` candidate of the claim
 window; for a self-draw the best discard of the 14 tiles. The win is taken unless the pass is
 worth more than `win + tie_margin`. Nothing special is added for "far ahead": the race's own
@@ -610,8 +611,10 @@ match may revisit. The rest is built as written.
    an unliable `o`; for the seat liable for me, three times my self-draws plus my wins on its
    own discards; for the others, my wins on their discards (since 2026-11-23; before, three
    times all of my wins for the liable seat and 0 for the others). An opponent `i`'s wins
-   cost `o` 1 share, 2 when `o` is liable for `i`, 0.5 when another seat is (half of `i`'s
-   wins counted as self-draws; before, 3 and 0).
+   cost `o` 1.5 shares, 2.5 when `o` is liable for `i`, 1 when another seat is (half of `i`'s
+   wins counted as self-draws, half as `o`'s deal-ins at the discarder's 2 shares; 1, 2 and
+   0.5 while a deal-in cost 1 share, until 2026-11-23; before 2026-11-23's liability change,
+   3 and 0). My wins on `o`'s discards cost it 2 shares.
    `P̂(me)` is my hazard over the rounds with nobody else racing and `φ` before folds. A seat
    counts as folded (no mode of its own, §5.1) when `π_fold ≥ 0.5`.
 9. **Deviation: `φ`'s usefulness** for a hand that is not ready uses the accepting kinds in
@@ -674,7 +677,7 @@ the logger `crates/search/examples/race_log.rs`, the heads in `python/mahjong/be
    - **push**: `t*` is best for the hand, whatever its danger;
    - **clearly safer**: `Danger::expected_loss(t*)` (the public estimate, as before) is at
      most half the lowest expected loss among the best-for-hand discards, and lower by at
-     least 0.16 points;
+     least 0.32 points (0.16 while a deal-in cost 1 share, until 2026-11-23);
    - **fold**: clearly safer, and the distance rises or the acceptance falls below half
      the best's; **detour**: clearly safer, same distance, the rest;
    - **mistake**: neither best for the hand nor clearly safer. The log writes it as push
@@ -692,7 +695,8 @@ the logger `crates/search/examples/race_log.rs`, the heads in `python/mahjong/be
    scales it for wide hands (20 tiles of acceptance allow 3). One faan is the gap between
    `faan_shanten`'s near-equal targets. Below half the acceptance, the next step takes
    more than twice as long: speed is mostly given up, which is a fold. "Clearly safer"
-   halves the deal-in risk and, at `Danger::estimate`'s 8 points per deal-in, cuts it by
+   halves the deal-in risk and, at `Danger::estimate`'s 16 points per deal-in (2 shares of
+   8), cuts it by
    at least 2 percentage points; early in a hand every tile is under 2 % there, so no
    discard there counts as defensive.
 

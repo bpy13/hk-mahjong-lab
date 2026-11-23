@@ -53,10 +53,14 @@ use crate::ev::{Belief, Beliefs, HeuristicBelief, FIRST_FAAN_BUCKET};
 use crate::exact_wait::exact_wait;
 use crate::passed::Passed;
 use crate::risk_net::RiskNet;
-use mahjong_hk::{Event, Meld, State};
+use mahjong_hk::{Event, Meld, State, DISCARD_SHARES};
 use mahjong_tiles::{Tile, TileCounts, NUM_KINDS};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+
+/// Points a deal-in costs when [`Danger::estimate`] knows no hand values: the
+/// discarder's 2 shares (rules §8.2) of the 3-faan minimum, 8 points a share.
+const ESTIMATE_LOSS: f64 = DISCARD_SHARES as f64 * 8.0;
 
 thread_local! {
     static EXACT: Cell<bool> = const { Cell::new(false) };
@@ -503,13 +507,14 @@ impl Danger {
         out.table_tile = 1.0 - safe_table;
         out.exact_tile = 1.0 - safe_exact;
         if self.payment.is_none() {
-            // Built by `estimate`: 8 points per deal-in, on the calibrated table part.
+            // Built by `estimate`: 2 shares of 8 points per deal-in (§8.2), on the
+            // calibrated table part.
             out.table_loss = if self.calibrated {
                 calibrate(out.table_tile)
             } else {
                 out.table_tile
-            } * 8.0;
-            out.exact_loss = out.exact_tile * 8.0;
+            } * ESTIMATE_LOSS;
+            out.exact_loss = out.exact_tile * ESTIMATE_LOSS;
         }
         Some(out)
     }
@@ -523,9 +528,9 @@ impl Danger {
                 } else {
                     p.pay[o]
                 };
-                // A discard win costs me 1 share whoever is liable (§8.3: liability
-                // covers self-draws only).
-                p.p[o][i] * pay
+                // A discard win costs me the discarder's 2 shares whoever is liable
+                // (§8.2; §8.3: liability covers self-draws only).
+                p.p[o][i] * pay * DISCARD_SHARES as f64
             }
             None => 0.0,
         }
@@ -673,15 +678,17 @@ impl Danger {
         d
     }
 
-    /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o)`, one
-    /// share each (liability covers only self-draws, §8.3) (every winner is paid under the default `multiple_winners`
-    /// rule). Built by [`Danger::estimate`], which knows no hand values, it is
-    /// `tile(t) × 8` (one share of the 3-faan minimum).
+    /// Expected points I lose if I discard `t` now: `Σ_o P_o(t) × Pay(o) × 2`,
+    /// the discarder's 2 shares (rules §8.2; liability covers only self-draws,
+    /// §8.3; every winner is paid under the default `multiple_winners` rule).
+    /// Built by [`Danger::estimate`], which knows no hand values, it is
+    /// `tile(t) × 16` (2 shares of the 3-faan minimum). Until 2026-11-23 the
+    /// discarder paid 1 share and these figures were half.
     pub fn expected_loss(&self, t: Tile) -> f64 {
         let i = t.index() as usize;
         match &self.payment {
             Some(_) => (0..4).map(|o| self.loss_from(o, i)).sum(),
-            None => self.tiles[i] * 8.0,
+            None => self.tiles[i] * ESTIMATE_LOSS,
         }
     }
 
@@ -942,8 +949,8 @@ mod tests {
                                 }
                             }
                             safe *= 1.0 - p;
-                            // 1 share on a discard win, liable or not (§8.3).
-                            loss += p * pts;
+                            // 2 shares on a discard win, liable or not (§8.2, §8.3).
+                            loss += p * pts * 2.0;
                         }
                         let want = 1.0 - safe;
                         assert!(
@@ -952,9 +959,9 @@ mod tests {
                             on.tile(t)
                         );
                         assert!((on.expected_loss(t) - loss).abs() < 1e-9, "{t}");
-                        // `estimate` leaves the calibration curve: the same chance, 8 points each.
+                        // `estimate` leaves the calibration curve: the same chance, 2 shares of 8 points each.
                         assert!((est.tile(t) - want).abs() < 1e-12);
-                        assert!((est.expected_loss(t) - want * 8.0).abs() < 1e-9);
+                        assert!((est.expected_loss(t) - want * 16.0).abs() < 1e-9);
                         if unseen[t] == 0 {
                             assert_eq!(on.tile(t), 0.0);
                         }

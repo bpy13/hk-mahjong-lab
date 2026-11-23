@@ -34,7 +34,10 @@ false alarm from the true hands, and splits the points by kind.
   self-draw only (ADR 0004) and replayed this match: cpu job 310, 2,466 s, exit 0, output
   `runs/defence-false-alarms/match-40000-seed24-selfdraw-rule.txt` in the slot 2 worktree (with its
   own split tables and example hands); its headline figures are in the table "Under the amended
-  rule" beside the old ones.
+  rule" beside the old ones. Task 31 then made a deal-in cost the discarder 2 shares (ADR 0005)
+  and queued the match a third time: cpu job 313, output
+  `runs/defence-false-alarms/match-40000-seed24-two-share-rule.txt` in the workers clone
+  (figures to follow, under "Under the two-share rule").
 * "From ready" is the faan-aware distance after the best discard (0 = ready with a legal win).
   Plain `stage` deals in in 18.20 % of its hands, 1.174 % of its discards (15.5 discards a hand).
 

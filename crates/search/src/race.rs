@@ -36,7 +36,7 @@ use crate::passed::{risk_scores, Passed, PASSED_FACTOR, PASSED_FACTOR_MODEL};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
-use mahjong_hk::{Action, Event, RuleSet, State};
+use mahjong_hk::{Action, Event, RuleSet, State, DISCARD_SHARES, ROBBED_KONG_SHARES};
 use mahjong_tiles::{Suit, Tile, TileCounts, NUM_KINDS};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -315,8 +315,9 @@ pub struct RaceTerms {
     /// Points per share of my discard win and of my self-draw.
     pub pay_me: f64,
     pub pay_sd_me: f64,
-    /// Shares paid to me on a discard win and on a self-draw: 1 and 3, also
-    /// when a seat is liable for me (it pays the 3 of a self-draw, rules §8.3).
+    /// Shares paid to me on a discard win and on a self-draw: 2 and 3 (rules
+    /// §8.2; 1 and 3 until 2026-11-23), also when a seat is liable for me (it
+    /// pays the 3 of a self-draw, rules §8.3).
     pub shares_disc: f64,
     pub shares_sd: f64,
     /// My live winning tiles (ready hands only).
@@ -617,10 +618,13 @@ impl Table {
                 t.pay[o] += pb * points(&rules, f) * m_pay;
                 t.pay_sd[o] += pb * points(&rules, (f + 1).min(10)) * m_pay;
             }
+            // The discarder pays 2 shares of a discard win (rules §8.2), whoever
+            // is liable (§8.3 covers self-draws only).
+            let disc = DISCARD_SHARES as f64;
             (t.l_disc[o], t.l_sd[o], t.l_other[o]) = match state.liable_for(o) {
-                None => (1.0, 1.0, 0.0),
-                Some(l) if l == me => (1.0, 3.0, 0.0),
-                Some(_) => (1.0, 0.0, 0.0),
+                None => (disc, 1.0, 0.0),
+                Some(l) if l == me => (disc, 3.0, 0.0),
+                Some(_) => (disc, 0.0, 0.0),
             };
             let melds = state.melds(o);
             t.liab_seat[o] = rules.twelve_tile_liability
@@ -764,8 +768,8 @@ impl Mine {
         let fs = fs_of(&after, &after.concealed);
         let target_faan = fs.target.as_ref().map_or(0, |x| x.faan);
         // A seat liable for me pays the 3 shares of a self-draw; a discard win is
-        // 1 share from the discarder either way (rules §8.3).
-        let (shares_disc, shares_sd) = (1.0, 3.0);
+        // 2 shares from the discarder either way (rules §8.2, §8.3).
+        let (shares_disc, shares_sd) = (DISCARD_SHARES as f64, 3.0);
         let mut m = Mine {
             shanten: fs.shanten,
             target_faan,
@@ -1078,7 +1082,13 @@ impl RaceBot {
                 state.self_drawn_score()
             };
             let faan = score.map_or(state.rules().min_faan, |s| s.faan);
-            let shares = if w == Action::Win { 1.0 } else { 3.0 };
+            // Rules §8.2: 2 shares from a discarder, 3 from a robbed kong's maker,
+            // 3 on a self-draw.
+            let shares = match w {
+                Action::Win if state.in_rob() => ROBBED_KONG_SHARES as f64,
+                Action::Win => DISCARD_SHARES as f64,
+                _ => 3.0,
+            };
             let now = points(state.rules(), faan) * shares;
             let best_discard = terms
                 .iter()
@@ -1280,21 +1290,24 @@ impl RaceBot {
                     for i in t.opponents().filter(|&i| i != o) {
                         // §8.3 covers self-draws only: liable, o pays 3 shares of
                         // i's self-draw; another seat liable, o pays only when it
-                        // deals in. Half of i's wins counted as self-draws.
+                        // deals in. Half of i's wins counted as self-draws, half as
+                        // o's deal-ins at 2 shares (§8.2; 1 until 2026-11-23,
+                        // when these were 1.0, 2.0 and 0.5).
                         let share = match t.liable_for[i] {
-                            None => 1.0,
-                            Some(l) if l == o => 2.0,
-                            Some(_) => 0.5,
+                            None => 0.5 + 1.0,
+                            Some(l) if l == o => 1.5 + 1.0,
+                            Some(_) => 1.0,
                         };
                         cost += t.states[i][0] * OPP_WIN_GIVEN_READY * t.pay[i] * share;
                     }
                     // What my win would cost o.
                     // (§8.3: the seat liable for me pays 3 shares of my self-draw;
-                    // a discard win is paid by its discarder.)
+                    // a discard win is paid by its discarder, 2 shares, §8.2.)
+                    let fed = fed_by[o] * mine.pay * mine.shares_disc;
                     cost += match mine.payer {
-                        Some(p) if p == o => 3.0 * sd_me * mine.pay_sd + fed_by[o] * mine.pay,
-                        Some(_) => fed_by[o] * mine.pay,
-                        None => sd_me * mine.pay_sd + fed_by[o] * mine.pay,
+                        Some(p) if p == o => 3.0 * sd_me * mine.pay_sd + fed,
+                        Some(_) => fed,
+                        None => sd_me * mine.pay_sd + fed,
                     };
                     // §13: a seat that throws dangerous tiles folds less.
                     let f = ((cost / FOLD_SCALE).min(FOLD_CAP) * t.risk_fold[o]).min(1.0);
@@ -1721,8 +1734,9 @@ pub const LABEL_FOLD_ACCEPT_SHARE: f64 = 0.5;
 /// at most this share of the safest best-for-hand discard's...
 pub const LABEL_SAFER_SHARE: f64 = 0.5;
 /// ...and lower by at least this many points (2 percentage points of deal-in at
-/// `Danger::estimate`'s 8 points per deal-in).
-pub const LABEL_SAFER_POINTS: f64 = 0.16;
+/// `Danger::estimate`'s 16 points per deal-in, 2 shares of 8, rules §8.2; 0.16
+/// when the discarder paid 1 share, until 2026-11-23).
+pub const LABEL_SAFER_POINTS: f64 = 0.32;
 
 /// The label of one discard (§12's redefinition of §7). [`Label::mode`] is what the
 /// log writes as the mode; a [`Label::Mistake`] is written as push and counted

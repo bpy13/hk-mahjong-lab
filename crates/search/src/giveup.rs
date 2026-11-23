@@ -16,7 +16,8 @@
 //!
 //! `V` is what staying ready is worth over the rest of the hand, in points,
 //! summed over the rounds left: (chance I draw a winning tile × 3 shares of the
-//! self-drawn points + chance an opponent throws one × 1 share − the chance my
+//! self-drawn points + chance an opponent throws one × 2 shares (rules §8.2;
+//! 1 share until 2026-11-23) − the chance my
 //! later discard deals in × the points it would pay), each round weighted by the
 //! chance the hand is still going. The chances per round come from [`Figures`],
 //! measured from 40,000 deals of four `stage` bots (`examples/giveup_log.rs`,
@@ -50,7 +51,7 @@ use crate::danger;
 use crate::danger::Danger;
 use crate::view::SeatView;
 use mahjong_analysis::faan_shanten;
-use mahjong_hk::{Event, State};
+use mahjong_hk::{Event, State, DISCARD_SHARES};
 use mahjong_tiles::Tile;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -262,7 +263,8 @@ pub struct Outs {
     /// Points per share of a self-drawn win (+1 faan for 自摸), averaged over the
     /// live tiles.
     pub own_points: f64,
-    /// Points per share of a win on a discard.
+    /// Points per share of a win on a discard (the discarder pays 2 shares,
+    /// rules §8.2).
     pub discard_points: f64,
 }
 
@@ -308,7 +310,9 @@ pub fn push_value(
         let own = (fig.own[b] * share).min(1.0);
         let theirs = (fig.theirs[b] * share).min(1.0 - own);
         let q = fig.later_deal_in[b];
-        v += alive * (own * 3.0 * outs.own_points + theirs * outs.discard_points - q * pay);
+        v += alive
+            * (own * 3.0 * outs.own_points + theirs * DISCARD_SHARES as f64 * outs.discard_points
+                - q * pay);
         alive *= (1.0 - own - theirs - fig.other_ends[b] - q).max(0.0);
     }
     v * scale
@@ -337,18 +341,15 @@ pub struct Verdict {
     pub value: f64,
 }
 
-/// Points one deal-in costs, averaged over the opponents by their threat.
+/// Points one deal-in costs, averaged over the opponents by their threat: the
+/// discarder's 2 shares (rules §8.2).
 fn pay_per_deal_in(danger: &Danger, me: usize) -> f64 {
     let (mut w, mut p) = (0.0, 0.0);
     for o in (0..4).filter(|&o| o != me) {
         w += danger.threat(o);
         p += danger.threat(o) * danger.points_if_win(o);
     }
-    if w > 0.0 {
-        p / w
-    } else {
-        8.0
-    }
+    DISCARD_SHARES as f64 * if w > 0.0 { p / w } else { 8.0 }
 }
 
 fn after(view: &SeatView, t: Tile) -> SeatView {

@@ -13,8 +13,9 @@ use Action::*;
 const DEALER_R: &str = "R 9m 11m 33m 5m 7m 9s E SS 4p 8p";
 
 #[test]
-fn discard_win_discarder_pays_one_share_8_2() {
-    // Seat 2 waits on R or N; R gives 混一色 3 + 中 1 + 門前清 1 = 5 faan = 24.
+fn discard_win_discarder_pays_two_shares_8_2() {
+    // Seat 2 waits on R or N; R gives 混一色 3 + 中 1 + 門前清 1 = 5 faan = 24 a
+    // share; the discarder pays 2 shares, 48 (§8.2, ADR 0005).
     let mut s = deal(
         no_flowers(),
         [
@@ -37,7 +38,8 @@ fn discard_win_discarder_pays_one_share_8_2() {
         .unwrap_or_else(|| panic!("{s:?} {:?}", s.current_player()));
     assert_eq!(r.wins.len(), 1);
     assert_eq!(r.wins[0].score.faan, 5);
-    assert_eq!(r.deltas, [0, -24, 24, 0]);
+    assert_eq!(r.wins[0].paid_by, [0, 48, 0, 0]);
+    assert_eq!(r.deltas, [0, -48, 48, 0]);
 }
 
 #[test]
@@ -144,6 +146,7 @@ fn double_win(rules: mahjong_hk::RuleSet) -> mahjong_hk::State {
         ],
     );
     // Seat 1: 清一色 7 + 平糊 1 + 門前清 1 = 9 → 96. Seat 2: 中 + 發 + 門前清 = 3 → 8.
+    // The discarder pays each 2 shares (§8.2): 192 and 16.
     play(&mut s, &[(3, Discard(t("5p"))), (1, Win), (2, Win)]);
     s
 }
@@ -153,7 +156,7 @@ fn several_winners_all_win_4_1_3() {
     let s = double_win(no_flowers());
     let r = s.result().unwrap();
     assert_eq!(r.wins.iter().map(|w| w.seat).collect::<Vec<_>>(), [1, 2]);
-    assert_eq!(r.deltas, [0, 96, 8, -104]);
+    assert_eq!(r.deltas, [0, 192, 16, -208]);
 }
 
 #[test]
@@ -162,7 +165,7 @@ fn head_bump_variant_4_1_3() {
         multiple_winners: MultipleWinners::HeadBump,
         ..no_flowers()
     });
-    assert_eq!(s.result().unwrap().deltas, [0, 96, 0, -96]);
+    assert_eq!(s.result().unwrap().deltas, [0, 192, 0, -192]);
 }
 
 #[test]
@@ -181,7 +184,8 @@ fn earthly_hand_on_the_dealers_first_discard_7_4() {
     play(&mut s, &[(0, Discard(t("5p"))), (1, Win)]);
     let w = &s.result().unwrap().wins[0];
     assert!(w.score.has(Pattern::Earthly));
-    assert_eq!(s.result().unwrap().deltas, [-128, 128, 0, 0]);
+    // A limit hand on the dealer's discard: 2 shares of 128 (§8.2).
+    assert_eq!(s.result().unwrap().deltas, [-256, 256, 0, 0]);
 }
 
 #[test]
@@ -233,7 +237,9 @@ fn double_kong_win_7_1_row_8() {
     );
     let w = &s.result().unwrap().wins[0];
     assert!(w.score.has(Pattern::DoubleKong) && !w.score.has(Pattern::SelfDrawn));
-    assert_eq!(w.score.faan, 9); // 槓上槓 8 + 門前清 1
+    assert_eq!(w.score.faan, 10); // 槓上槓 10 (ADR 0005) + 門前清 1, capped at 10
+                                  // Paid like any self-draw: 128 from each of the three others.
+    assert_eq!(s.result().unwrap().deltas, [384, -128, -128, -128]);
 }
 
 #[test]
@@ -277,7 +283,10 @@ fn robbing_an_added_kong_5_2() {
     play(&mut s, &[(3, Win)]);
     let w = &s.result().unwrap().wins[0];
     assert!(w.score.has(Pattern::RobbingKong));
-    assert_eq!(s.result().unwrap().deltas, [0, -8, 0, 8]);
+    // §8.2 (ADR 0005): the kong's maker, seat 1, pays the whole self-draw, 3
+    // shares of 8.
+    assert_eq!(w.paid_by, [0, 24, 0, 0]);
+    assert_eq!(s.result().unwrap().deltas, [0, -24, 0, 24]);
     // The kong is undone: seat 1 is left with the pung.
     assert_eq!(s.melds(1)[0].kind, mahjong_hk::MeldKind::Pung);
 }
@@ -302,7 +311,8 @@ fn only_thirteen_orphans_robs_a_concealed_kong_5_1() {
     play(&mut s, &[(1, Win)]);
     let w = &s.result().unwrap().wins[0];
     assert!(w.score.has(Pattern::ThirteenOrphans));
-    assert_eq!(s.result().unwrap().deltas, [-128, 128, 0, 0]);
+    // The concealed kong's maker pays 3 shares of the limit (§8.2, ADR 0005).
+    assert_eq!(s.result().unwrap().deltas, [-384, 384, 0, 0]);
 }
 
 #[test]
@@ -387,8 +397,8 @@ fn four_pungs_fed_by_seat_2(wall: &str) -> State {
 #[test]
 fn twelve_tile_liability_not_on_a_discard_win_8_3() {
     // §8.3.2 (ADR 0004, 十二張落地包自摸): seat 2 fed seat 1's fourth exposed meld,
-    // but seat 1 wins on seat 3's discard: seat 3 pays 1 share (對對糊 3 faan =
-    // 8), seat 2 pays nothing.
+    // but seat 1 wins on seat 3's discard: seat 3 pays 2 shares (對對糊 3 faan =
+    // 8 a share, §8.2), seat 2 pays nothing.
     let mut s = four_pungs_fed_by_seat_2("8p 8p 8p 1s 2s 3s 9m");
     play(&mut s, &[(2, Discard(t("1s"))), (3, Discard(t("9m")))]);
     assert!(s.legal_actions_vec().contains(&Win), "{s:?}");
@@ -396,8 +406,8 @@ fn twelve_tile_liability_not_on_a_discard_win_8_3() {
     let r = s.result().unwrap();
     assert_eq!(r.wins[0].score.faan, 3);
     assert_eq!(r.wins[0].liable, None);
-    assert_eq!(r.wins[0].paid_by, [0, 0, 0, 8]);
-    assert_eq!(r.deltas, [0, 8, 0, -8]);
+    assert_eq!(r.wins[0].paid_by, [0, 0, 0, 16]);
+    assert_eq!(r.deltas, [0, 16, 0, -16]);
 
     // The same hand, seat 1 self-drawing the 9m: seat 2 pays all 3 shares
     // (對對糊 3 + 自摸 1 = 4 faan = 16 × 3).
@@ -418,8 +428,9 @@ fn twelve_tile_liability_not_on_a_discard_win_8_3() {
 }
 
 #[test]
-fn twelve_tile_liable_discarder_pays_one_share_8_3() {
-    // §8.3.2: the liable seat 2 itself throws seat 1's winning 9m: 1 share (8).
+fn twelve_tile_liable_discarder_pays_two_shares_8_3() {
+    // §8.3.2: the liable seat 2 itself throws seat 1's winning 9m: the
+    // discarder's 2 shares (16), nothing more.
     let mut s = four_pungs_fed_by_seat_2("8p 8p 8p 9m 2s 3s 1s");
     play(&mut s, &[(2, Discard(t("9m")))]);
     while s.current_player() != Some(1) {
@@ -429,8 +440,8 @@ fn twelve_tile_liable_discarder_pays_one_share_8_3() {
     play(&mut s, &[(1, Win)]);
     let r = s.result().unwrap();
     assert_eq!(r.wins[0].liable, None);
-    assert_eq!(r.wins[0].paid_by, [0, 0, 8, 0]);
-    assert_eq!(r.deltas, [0, 8, -8, 0]);
+    assert_eq!(r.wins[0].paid_by, [0, 0, 16, 0]);
+    assert_eq!(r.deltas, [0, 16, -16, 0]);
 }
 
 #[test]
@@ -495,9 +506,9 @@ fn seven_flowers_in_the_deal_wins_at_once_7_5_32() {
 }
 
 #[test]
-fn all_eight_flowers_pays_8_faan_7_5_31() {
+fn all_eight_flowers_pays_10_faan_7_5_31() {
     // §3.3, #31 大花糊: all eight bonus tiles are set aside together in the deal:
-    // 8 faan (64 points) from each other seat. Not a limit hand any more.
+    // 10 faan (128 points) from each other seat (ADR 0005; 8 until 2026-11-23).
     let hands = [
         "9s 111m 222m 333m 444m 9m",
         "F1 F2 F3 F4 S1 S2 S3 S4 5s 6s 7s 8s E",
@@ -508,9 +519,9 @@ fn all_eight_flowers_pays_8_faan_7_5_31() {
     let r = s.result().expect("ended in the deal");
     let w = &r.wins[0];
     assert_eq!(w.seat, 1);
-    assert_eq!(w.score.patterns, vec![(Pattern::EightImmortals, 8)]);
-    assert_eq!((w.score.faan, w.score.limit), (8, false));
-    assert_eq!(r.deltas, [-64, 192, -64, -64]);
+    assert_eq!(w.score.patterns, vec![(Pattern::EightImmortals, 10)]);
+    assert_eq!((w.score.faan, w.score.limit), (10, false));
+    assert_eq!(r.deltas, [-128, 384, -128, -128]);
 }
 
 #[test]

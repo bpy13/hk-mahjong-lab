@@ -202,7 +202,7 @@ Where a row says *replaces* another, only the larger of the two is counted.
 | 5 | 一台花 Full set | 2 | Holding all four flowers, or all four seasons. Replaces the seat-flower faan from that set; both sets give 4 |
 | 6 | 海底撈月 Last tile | 1 | Self-drawn win on the last tile of the wall. 自摸 also counts |
 | 7 | 槓上開花 Kong replacement | 1 | Win on a kong's replacement tile. 自摸 also counts, so the two give 2 together |
-| 8 | 槓上槓 Double kong | 8 | Win on the replacement tile of a second kong declared in the same turn. 8 in total: replaces #7 and #1 |
+| 8 | 槓上槓 Double kong | 10 | Win on the replacement tile of a second kong declared in the same turn. 10 in total, the cap: replaces #7 and #1. (8 until 2026-11-23; Brian, ADR 0005) |
 | 9 | 搶槓 Robbing the kong | 1 | Win on the tile someone else adds to a pung (§5.2), or on a concealed kong's tile with thirteen orphans (§5.1) |
 
 ### 7.2 Meld patterns
@@ -247,7 +247,7 @@ Patterns 29 and 30 require a complete hand.
 
 | # | Pattern | Faan | Condition |
 |---|---|---|---|
-| 31 | 大花糊 (八仙過海) All eight flowers | 8 | A player holds all 8 bonus tiles |
+| 31 | 大花糊 (八仙過海) All eight flowers | 10 | A player holds all 8 bonus tiles. (8 until 2026-11-23; Brian, ADR 0005) |
 | 32 | 花糊 Seven flowers | 3 | A player holds 7 bonus tiles |
 
 1. The holder wins at once, when the seventh bonus tile is placed (§5.3), or when
@@ -257,7 +257,7 @@ Patterns 29 and 30 require a complete hand.
 2. The hand's own tiles add nothing, and no other pattern (#3–#5 included) is
    added. Only when flowers are in play.
 3. It is paid like a self-drawn win: each of the three others pays 1 share of the
-   points of 3 (#32) or 8 (#31) faan (§8.2). The 12-tile liability (§8.3) does
+   points of 3 (#32) or 10 (#31) faan (§8.2). The 12-tile liability (§8.3) does
    not apply.
 4. There is no robbing flower win: a player holding seven bonus tiles does not win
    when another player draws the eighth. (Until 2026-11-20 this table had 八仙過海
@@ -290,13 +290,21 @@ half of the previous doubling. (Variant `payout = full_spicy` 全辣 keeps doubl
 
 | Win | Payment |
 |---|---|
-| On a discard (including robbing a kong, §5.2) | The discarder pays the winner **1 share**. The other two pay nothing |
+| On a discard | The discarder pays the winner **2 shares**. The other two pay nothing |
+| Robbing a kong (§5.1–§5.2) | The player who made the kong pays the whole self-draw, **3 shares**. The other two pay nothing |
 | Self-drawn | Each of the three opponents pays the winner 1 share |
-| Several winners on one discard (§4.1.3) | The discarder pays each winner 1 share of that winner's points |
+| Several winners on one discard (§4.1.3) | The discarder pays each winner 2 shares of that winner's points (3 each when a kong is robbed) |
 | Flower win (#31, #32, §7.5) | Each of the three opponents pays the winner 1 share, with no liability (§8.3) |
 | Exhaustive draw (§9) | Nobody pays |
 
 Kongs carry no separate payment. Every hand is zero-sum.
+
+A win on a discard thus costs the discarder twice what each opponent pays on a
+self-draw: at 3 faan, 16 from the discarder, against 8 from each of three on a
+self-draw (the Hong Kong Mahjong Association's table, 香港麻雀總例). Until 2026-11-23
+the discarder paid 1 share, and the maker of a robbed kong 1 share as a discarder;
+Brian settled both on 2026-11-23 (ADR 0005: "出銃 pays double is correct"; "搶槓 is
+paid as a full 自摸 by the player who made the kong").
 
 ### 8.3 Liability: the 12-tile rule 十二張落地
 
@@ -305,9 +313,9 @@ Kongs carry no separate payment. Every hand is zero-sum.
    that player. (Concealed kongs do not count toward the four.)
 2. If that player then wins by **self-draw** (not by a flower win, §7.5), the
    liable player pays **3 shares** and nobody else pays (十二張落地包自摸). If that
-   player wins on a **discard** (or by robbing a kong), the discarder pays 1 share as
-   in §8.2 and the liable player pays nothing, also when the liable player is the
-   discarder (1 share). (Until 2026-11-23 this point charged the liable player
+   player wins on a **discard** (or by robbing a kong), the discarder (or the kong's
+   maker) pays as in §8.2, 2 shares (3 for a robbed kong), and the liable player pays
+   nothing more, also when the liable player is the discarder (2 shares). (Until 2026-11-23 this point charged the liable player
    3 shares on a discard win too; the draft of 17 Oct cited no source. Sources:
    zh.wikipedia 香港麻雀胡牌列表 and 包牌, zh-yue.wikipedia 香港蔴雀食糊牌型,
    en.wikipedia Hong Kong mahjong scoring rules; ADR 0004.)

@@ -40,7 +40,7 @@ pub enum Pattern {
     FourKongs = 28,
     Heavenly = 29,
     Earthly = 30,
-    /// 大花糊 (八仙過海), all eight bonus tiles, 8 faan (§7.5).
+    /// 大花糊 (八仙過海), all eight bonus tiles, 10 faan (§7.5; 8 until 2026-11-23, ADR 0005).
     EightImmortals = 31,
     /// 花糊, seven bonus tiles, 3 faan (§7.5). Row 32 was 七搶一 until
     /// 2026-11-20; its English key "Seven rob one" is kept (see [`Pattern::english`]).
@@ -251,7 +251,7 @@ impl Score {
 
     /// The flower win (§7.5) of a seat holding the bonus tiles `bonus` (bit
     /// mask as in [`WinContext::bonus`]): 花糊 (#32, 3 faan) with seven, 大花糊
-    /// (#31, 8 faan) with all eight, `None` with fewer or without flowers. The
+    /// (#31, 10 faan) with all eight, `None` with fewer or without flowers. The
     /// hand's own tiles and the other bonus-tile patterns add nothing, and it
     /// needs no minimum (§6).
     pub fn flower_win(bonus: u8, rules: &RuleSet) -> Option<Score> {
@@ -259,7 +259,7 @@ impl Score {
             return None;
         }
         let pattern = match bonus.count_ones() {
-            8 => (Pattern::EightImmortals, 8),
+            8 => (Pattern::EightImmortals, 10),
             7 => (Pattern::SevenFlowers, 3),
             _ => return None,
         };
@@ -468,7 +468,8 @@ fn score_decomposition(
     let mut p: Vec<(Pattern, u8)> = Vec::new();
     // Situational (§7.1).
     if ctx.kong_chain >= 2 {
-        p.push((Pattern::DoubleKong, 8));
+        // §7.1 #8: 10 faan, the cap (8 until 2026-11-23, ADR 0005).
+        p.push((Pattern::DoubleKong, 10));
     } else {
         if ctx.self_drawn {
             p.push((Pattern::SelfDrawn, 1));

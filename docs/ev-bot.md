@@ -9,9 +9,11 @@ implements as written. Decision B15 (bot-stream `docs/decisions.md`, verbatim):
 > deliberately deal into a small-faan hand to stop a large-faan self-draw.
 
 Every term below names the code or table it comes from. Payment numbers follow
-`docs/rules/hk.md` §8 (half-spicy, 1 share on a discard win, 3 shares on a self-draw,
+`docs/rules/hk.md` §8 (half-spicy, 2 shares from the discarder on a discard win since
+2026-11-23 (ADR 0005; 1 share before), 3 from a robbed kong's maker, 3 shares on a self-draw,
 3 shares from the liable player under the 12-tile rule, on a self-draw only since
-2026-11-23, ADR 0004). Anything not settled here is in
+2026-11-23, ADR 0004). The worked examples of §5 and their tests were made when the
+discarder paid 1 share; their deal-in figures are now twice as large (see the note in §5). Anything not settled here is in
 §9 "Open questions" with the default the builder uses.
 
 ## 1. Notation and sources
@@ -75,14 +77,15 @@ Derived from the belief:
 
 | Case | My shares paid |
 |---|---|
-| `o` wins on my discard, nobody liable for `o` | `L_disc(o) = 1` |
+| `o` wins on my discard, nobody liable for `o` | `L_disc(o) = 2` (rules §8.2) |
 | `o` self-draws, nobody liable for `o` | `L_sd(o) = 1` |
 | `o` wins on another opponent's discard, nobody liable for `o` | `L_other(o) = 0` |
-| `liable_for(o) == me` | `L_sd = 3` (I pay all three shares of its self-draw); `L_disc = 1`, `L_other = 0` (a discard win is paid by the discarder) |
-| `liable_for(o)` is another seat | `L_sd = 0` (the liable player pays all three shares of a self-draw); `L_disc = 1`, `L_other = 0` |
+| `liable_for(o) == me` | `L_sd = 3` (I pay all three shares of its self-draw); `L_disc = 2`, `L_other = 0` (a discard win is paid by the discarder) |
+| `liable_for(o)` is another seat | `L_sd = 0` (the liable player pays all three shares of a self-draw); `L_disc = 2`, `L_other = 0` |
 
-My own shares when I win: `3` for a self-draw and `1` for a discard win, whether or not a
+My own shares when I win: `3` for a self-draw and `2` for a discard win, whether or not a
 seat is liable for me (it pays the 3 shares of my self-draw instead of the three opponents).
+(`L_disc` and the discard-win share were 1 until the payment rule of ADR 0005, 2026-11-23.)
 
 (Until 2026-11-23 the rules charged the liable player 3 shares on a discard win too, and
 this table had `L_disc = L_sd = L_other = 3` and `0`, and `Shares(me) = 3` with a liable
@@ -97,7 +100,7 @@ cont(a) = Π_o (1 − P_o(t(a)))                         (nobody wins on my disc
 
 Offence(a) = cont(a) × κ × P_win × Pay(me) × Shares(me)
   Pay(me)    = max(points(f_T), pts_T)                 (the guaranteed faan is a floor)
-  Shares(me) = 3 × P_sd + 1 × (1 − P_sd) × φ
+  Shares(me) = 3 × P_sd + 2 × (1 − P_sd) × φ
   φ = feed ratio, 1.0 unless s == 0 (see §3 A3)
 
 Defence(a) = DealInNow(a) + cont(a) × [ SelfDraw + OtherFeeds + Later(a) + Liab(a) ]
@@ -125,7 +128,7 @@ Term by term:
 
 - **Offence.** `P_win`, `P_sd`, `pts_T` from the table; `Pay(me)` floors the table's mean at
   the target's guaranteed faan so a cell averaged over several targets cannot undervalue a
-  7-faan plan. The 1-share discard win is weighted by `φ`, the belief's expected counts of my
+  7-faan plan. The 2-share discard win is weighted by `φ`, the belief's expected counts of my
   waits in opponents' hands (A3). Bonus-tile faan I already hold are in `Target::faan` when
   the analysis crate counts them; the table's mean covers the rest.
 - **DealInNow.** The sum over opponents, not `1 − Π`: under the default `multiple_winners`
@@ -223,6 +226,13 @@ Rules: defaults (`min_faan` 3, half-spicy, flowers on, 12-tile liability on). Ta
 marked *illustrative* are stand-ins until Task 9's fitted table exists; the tests of §6
 stub the belief and assert orderings and reason keys, not these exact decimals.
 
+Since the payment rule of 2026-11-23 (rules §8.2, ADR 0005) a deal-in costs the discarder
+2 shares and a discard win of mine brings 2. Examples 2 and 3 are redone under it, with B's
+hand lowered from 4 faan to 3 so that the deal-in still costs 15.2 (at 4 faan it would cost
+30.4 and the bot would keep the safe tile: dealing in to stop a big self-draw pays only
+when the deal-in is cheap). Example 1 is not redone: its deal-in figures are now twice as
+large and its `Shares(me)` counts 2 for a discard win.
+
 ### Example 1: an ordinary discard, nobody threatens (test position 1)
 
 Seat `me` = 0 (dealer), turn phase, just drew `3p`. `wall = 32`, so `n = 8`, `H = 8`,
@@ -284,60 +294,61 @@ Belief stub:
 | | `tenpai` | `wait` | `sd` | bucket → `Pay`, `Pay_sd` | `x` |
 |---|---|---|---|---|---|
 | A | 0.90 | 1.0 on `5s`, `6s`; 0 on every tile I hold | 0.30 | 8 → 64, 96 | 0.60 |
-| B | 0.95 | 1.0 on `2m`; 0 elsewhere | 0.05 | 4 → 16, 24 | 0.10 |
+| B | 0.95 | 1.0 on `2m`; 0 elsewhere | 0.05 | 3 → 8, 16 | 0.10 |
 | C | 0 | 0 | 0 | 3 → 8, 16 | 0 |
 
 `P2 = 0` for every seat and tile (so `Liab = 0`). Illustrative table for my hand after any
-discard: `s = 4`, `P_win = 0.03`, `P_sd = 0.30`, `pts_T = 16` → `Offence_base = 0.03 × 16 ×
-1.60 = 0.77`.
+discard: `s = 4`, `P_win = 0.03`, `P_sd = 0.30`, `pts_T = 16` → `Shares(me) = 3 × 0.30 + 2
+× 0.70 = 2.30`, `Offence_base = 0.03 × 16 × 2.30 = 1.10`.
 
 **Discard a safe tile (`Wh`; every tile but `2m` has `P_o = 0`)**:
 - `cont = 1`, `DealInNow = 0`
-- `SelfDraw = 0.30 × 96 × 1 + 0.05 × 24 × 1 + 0 = 28.8 + 1.2 = 30.0`
+- `SelfDraw = 0.30 × 96 × 1 + 0.05 × 16 × 1 + 0 = 28.8 + 0.8 = 29.6`
 - `OtherFeeds = 0` (nobody liable); `Later`: the 8 safest of the 13 remaining tiles all have
   `P_o = 0`, and `2m` is the 13th, so `Later = 0`; `Liab = 0`
-- `Defence = 30.0`; `Offence = 0.77`; **`EV = −29.23`**
+- `Defence = 29.6`; `Offence = 1.10`; **`EV = −28.50`**
 
 **Discard `2m` (B's wait)**:
 - `P_B(2m) = min(0.95 × 1.0, 0.95) = 0.95`; `P_A = P_C = 0`; `cont = 0.05`
-- `DealInNow = 0.95 × 16 × 1 = 15.2`
-- `SelfDraw = 30.0` as above, `Later = 0`, `OtherFeeds = 0`, `Liab = 0`
-- `Defence = 15.2 + 0.05 × 30.0 = 15.2 + 1.5 = 16.7`
-- `Offence = 0.05 × 0.77 = 0.04`; **`EV = −16.66`**
+- `DealInNow = 0.95 × 8 × 2 = 15.2` (the discarder's 2 shares)
+- `SelfDraw = 29.6` as above, `Later = 0`, `OtherFeeds = 0`, `Liab = 0`
+- `Defence = 15.2 + 0.05 × 29.6 = 15.2 + 1.48 = 16.68`
+- `Offence = 0.05 × 1.10 = 0.06`; **`EV = −16.62`**
 
 The bot discards `2m`: a near-certain 16-point loss ends the hand and removes the expected
-28.8-point loss to A's self-draw. Margin `−16.66 − (−29.23) = 12.6` points. Reason keys:
+28.8-point loss to A's self-draw. Margin `−16.62 − (−28.50) = 11.9` points. Reason keys:
 `reason.ev.stops_big_hand {seat: 2, p_self_draw: 0.30, points: 96}`,
-`reason.ev.deal_in_now {seat: 1, p: 0.95, points: 16, shares: 1}`,
-`reason.ev.margin {points: 12.6}`.
+`reason.ev.deal_in_now {seat: 1, p: 0.95, points: 8, shares: 2}`,
+`reason.ev.margin {points: 11.9}`. (Until 2026-11-23 B was at 4 faan, the deal-in cost
+`0.95 × 16 × 1 = 15.2` and the margin was 12.6.)
 
 The plan's illustration ("deal into an 8-point hand to stop a 128 × 3 self-draw") is the
 same arithmetic with B at bucket 3 (`Pay = 8`) and A at bucket 10 (`Pay_sd = 128`, A
 collects 128 from each of three seats; I pay one share, 128): safe tile `EV ≈ −0.30 × 128 =
-−38.4`; deal in `≈ −(0.95 × 8 + 0.05 × 38.4) = −9.5`.
+−38.4`; deal in `≈ −(0.95 × 8 × 2 + 0.05 × 38.4) = −17.1`.
 
 ### Example 3: the same table, but I am liable for B (test position 3)
 
 As example 2, except B's `EEE` is an exposed pung claimed from me, so B shows four exposed
 melds (`345m 567p 234s EEE`), holds the single `2m` (hidden), and `liable_for(1) == 0`
-(rules §8.3.1). B's self-draw now costs me 3 shares; B's win on my discard still costs 1
-share and its win on another seat's discard nothing (rules §8.3.2 as amended 2026-11-23,
-ADR 0004): `L_sd(B) = 3`, `L_disc(B) = 1`, `L_other(B) = 0`.
+(rules §8.3.1). B's self-draw now costs me 3 shares; B's win on my discard still costs the
+discarder's 2 shares and its win on another seat's discard nothing (rules §8.3.2 as amended
+2026-11-23, ADR 0004; §8.2, ADR 0005): `L_sd(B) = 3`, `L_disc(B) = 2`, `L_other(B) = 0`.
 
 **Discard `Wh`**:
-- `SelfDraw = 0.30 × 96 × 1 + 0.05 × 24 × 3 = 28.8 + 3.6 = 32.4`
+- `SelfDraw = 0.30 × 96 × 1 + 0.05 × 16 × 3 = 28.8 + 2.4 = 31.2`
 - `OtherFeeds = 0`; `Later = 0`
-- `Defence = 32.4`; `Offence = 0.77`; **`EV = −31.63`**
+- `Defence = 31.2`; `Offence = 1.10`; **`EV = −30.10`**
 
 **Discard `2m`**:
-- `DealInNow = 0.95 × 16 × 1 = 15.2`
-- `Defence = 15.2 + 0.05 × 32.4 = 15.2 + 1.62 = 16.82`
-- `Offence = 0.04`; **`EV = −16.78`**
+- `DealInNow = 0.95 × 8 × 2 = 15.2`
+- `Defence = 15.2 + 0.05 × 31.2 = 15.2 + 1.56 = 16.76`
+- `Offence = 0.06`; **`EV = −16.70`**
 
-The bot deals in, as in example 2 (margin 14.85 in favour of `2m`): being liable for B makes
+The bot deals in, as in example 2 (margin 13.4 in favour of `2m`): being liable for B makes
 B's self-draw dearer, which is one more reason to end the hand now. Reason keys:
 `reason.ev.stops_big_hand {seat: 2, …}`, `reason.ev.deal_in_now {seat: 1, p: 0.95,
-points: 16, shares: 1}`, `reason.ev.liability {seat: 1}`, `reason.ev.margin`.
+points: 8, shares: 2}`, `reason.ev.liability {seat: 1}`, `reason.ev.margin`.
 
 (Under the rule before 2026-11-23, every win by B cost me 3 shares, `DealInNow(2m)` was
 `45.6`, `OtherFeeds` `4.8`, and the bot kept `Wh` by 11.0 points.)
@@ -352,9 +363,9 @@ balance; `turn = 0`, `phase = turn`, `last_drawn` as stated, `liable` as stated.
 
 | # | Position | Expected answer | Assertions |
 |---|---|---|---|
-| 1 | §5 example 1 | `Discard(3p)` (or `9p`: whichever `rank_discards` puts first) | the choice equals `Bot::by_name("value")`'s choice on the same state; every candidate's `deal_in_now` sums to ≤ 0.2 points; the top reason key is `reason.ev.offence`; `reason.ev.margin` present |
+| 1 | §5 example 1 | `Discard(3p)` (or `9p`: whichever `rank_discards` puts first) | the choice equals `Bot::by_name("value")`'s choice on the same state; every candidate's `deal_in_now` sums to ≤ 0.4 points (0.2 while the discarder paid 1 share); the top reason key is `reason.ev.offence`; `reason.ev.margin` present |
 | 2 | §5 example 2 | `Discard(2m)` | `explain` ranks `2m` first with `ev(2m) − ev(second) ≥ 8`; keys contain `reason.ev.stops_big_hand {seat: 2, …}` and `reason.ev.deal_in_now {seat: 1, …}` |
-| 3 | §5 example 3 | `Discard(2m)` without the floor (since 2026-11-23; before: not `2m`) | as row 2, and keys contain `reason.ev.liability {seat: 1}`; with or without the floor `2m`'s `deal_in_now` is `15.2` (1 share) |
+| 3 | §5 example 3 | `Discard(2m)` without the floor (since 2026-11-23; before: not `2m`) | as row 2, and keys contain `reason.ev.liability {seat: 1}`; with or without the floor `2m`'s `deal_in_now` is `15.2` (2 shares of 8, rules §8.2) |
 
 Timing: 1,000 calls of `choose` on position 2, one thread, `< 5 ms` each on average (AC5).
 

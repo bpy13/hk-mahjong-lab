@@ -418,7 +418,8 @@ mod tests {
         assert_eq!(d.points_if_win(2), 128.0);
         let others = d.points_if_win(1) + d.points_if_win(3);
         assert!(others >= 16.0);
-        assert_eq!(d.expected_loss(t("9s")), 128.0 + others);
+        // The discarder pays each winner 2 shares (rules §8.2).
+        assert_eq!(d.expected_loss(t("9s")), 2.0 * (128.0 + others));
         assert!(d.is_exact(2) && d.split(t("9s")).is_some());
         check_switch_off_is_unchanged(&s);
     }

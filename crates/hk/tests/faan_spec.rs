@@ -116,13 +116,14 @@ fn rows_7_8_kong_replacement() {
     let s = score("234p 567p 888s 99s", &["ckong 1111m"], ctx);
     assert!(s.has(Pattern::SelfDrawn) && s.has(Pattern::KongReplacement));
     assert_eq!(s.faan, 1 + 1 + 1); // with 門前清
-                                   // #8 is 8 in total and replaces #7 and #1.
+                                   // #8 is 10 in total (the cap; ADR 0005) and replaces #7 and #1.
     let ctx = WinContext {
         kong_chain: 2,
         ..tsumo(1, "9s")
     };
     let s = score("567p 888s 99s", &["ckong 1111m", "ckong 2222p"], ctx);
-    assert_eq!(patterns(&s), [(8, 8), (2, 1), (13, 0)]); // no hand pattern: chicken
+    assert_eq!(patterns(&s), [(8, 10), (2, 1), (13, 0)]); // no hand pattern: chicken
+    assert_eq!(s.faan, 10);
 }
 
 #[test]
@@ -252,6 +253,35 @@ fn rows_21_to_28_limit_hands() {
 fn row_27_claimed_pung_is_exposed() {
     // Winning on a discard that completes a pung: that pung is exposed (§7.4 #27).
     let s = score("222m 555p 888s EEE 99p", &[], ron(1, "2m"));
+    assert!(!s.has(Pattern::FourConcealedPungs) && s.has(Pattern::AllPungs));
+}
+
+/// The three rule points Brian kept on 2026-11-23 against the Association's
+/// rulebook (ADR 0005, points 2, 3 and 4): one check each, with flowers in play.
+#[test]
+fn kept_rules_adr_0005_6_and_rows_2_27() {
+    let r = RuleSet::default();
+    // Point 2 (§6): 平糊 + 門前清 = 2 faan and South's seat flower F2 = 3 faan in
+    // all, but only 2 count toward the minimum: not a win.
+    let ctx = WinContext {
+        bonus: 0b0000_0010,
+        ..ron(1, "2m")
+    };
+    let s = score_with("234m 567m 345p 678s 99s", &[], ctx, &r);
+    assert_eq!((s.faan, s.qualifying), (3, 2));
+    assert!(!s.meets_minimum(&r));
+    // Point 3 (#2): 門前清 counts with flowers in play (the winner holds two), and a
+    // concealed kong does not break it.
+    let ctx = WinContext {
+        bonus: 0b0001_0001,
+        ..ron(1, "5m")
+    };
+    let s = score_with("567m 345p 678s 99s", &["ckong 1111m"], ctx, &r);
+    assert!(s.has(Pattern::Concealed), "{:?}", s.patterns);
+    // Point 4 (#27): 坎坎糊 with a concealed kong, not with an exposed one.
+    let s = score_with("555p 888s EEE 99p", &["ckong 2222m"], tsumo(1, "9p"), &r);
+    assert!(s.limit && s.has(Pattern::FourConcealedPungs));
+    let s = score_with("555p 888s EEE 99p", &["kong 2222m"], tsumo(1, "9p"), &r);
     assert!(!s.has(Pattern::FourConcealedPungs) && s.has(Pattern::AllPungs));
 }
 

@@ -278,7 +278,7 @@ def score_split(concealed, melds, pair, groups, ctx, rules, specials):
 
     p: list[tuple[int, int]] = []
     if ctx.kong_chain >= 2:
-        p.append((8, 8))
+        p.append((8, 10))  # §7.1 #8: 10 faan (ADR 0005)
     else:
         if ctx.self_drawn:
             p.append((1, 1))
@@ -377,12 +377,12 @@ class RefGame:
 
     def _flower_win(self, seat: int) -> bool:
         """§7.5: seven bonus tiles win 花糊 (#32, 3 faan) at once, all eight 大花糊
-        (#31, 8 faan); paid by all three others, never under liability (§8.2).
+        (#31, 10 faan); paid by all three others, never under liability (§8.2).
         Nobody wins on another seat's bonus tile."""
         n = len(self.bonus[seat])
         if n < 7:
             return False
-        number, faan = (31, 8) if n == 8 else (32, 3)
+        number, faan = (31, 10) if n == 8 else (32, 3)
         faan = min(faan, self.rules.faan_cap)
         self._finish([(seat, (faan, faan, False, [(number, faan)]), True, None, None)], flower=True)
         return True
@@ -474,7 +474,9 @@ class RefGame:
             elif self_drawn:
                 paid = [0 if p == seat else share for p in range(4)]
             else:
-                paid[source] = share
+                # §8.2 (ADR 0005): the discarder pays 2 shares; the maker of a
+                # robbed kong pays the whole self-draw, 3.
+                paid[source] = (3 if self.phase == "rob" else 2) * share
             for p in range(4):
                 deltas[p] -= paid[p]
                 deltas[seat] += paid[p]

@@ -336,15 +336,20 @@ fn win_or_pass(wall: usize, opp: f64) -> (State, RaceDecision) {
     (state, d)
 }
 
-/// (a) A 3-plus-faan discard win with a bigger wait still live, many tiles left and
-/// every opponent far from winning: passed. (c) The passed tile is then locked.
+/// (a) A 5-faan discard win with an 8-faan wait still live, many tiles left and
+/// every opponent far from winning. Until 2026-11-23 the bot passed it (win 24
+/// against a pass worth more); since the discarder pays 2 shares (rules §8.2,
+/// ADR 0005) the win is worth 48 and the pass about 34 (its self-draw part is
+/// unchanged), so the bot takes it. The pass still values the bigger wait above
+/// half the win. (c) A passed tile is then locked (the pass applied by hand).
 #[test]
-fn passes_a_small_win_when_far_ahead_and_the_wall_is_deep() {
+fn takes_a_5_faan_discard_win_at_2_shares_even_when_far_ahead() {
     let (mut s, d) = win_or_pass(60, 0.02);
     assert!(s.legal_actions_vec().contains(&Action::Win));
-    assert_eq!(d.action, Action::Pass);
+    assert_eq!(d.action, Action::Win);
     let w = d.win_choice.expect("a win was legal");
-    assert!(w.pass > w.win, "{w:?}");
+    assert_eq!(w.win, 48.0, "{w:?}");
+    assert!(w.pass > 0.5 * w.win && w.pass < w.win, "{w:?}");
     s.apply(Action::Pass);
     // Everyone else passes too, ending the window.
     while s.in_claim() {

@@ -97,14 +97,15 @@ fn worse_for_the_hand_and_not_safer_is_a_mistake() {
     // The 5m is the most dangerous tile.
     let five_deadly = |u: Tile| if u == t("5m") { 10.0 } else { 1.0 };
     assert_eq!(discard_label(&v, t("5m"), five_deadly), Label::Mistake);
-    // Safer, but not clearly: 0.1 points against the East's 0.2 is half, yet less
-    // than the 0.16-point margin lower.
-    let slightly = |u: Tile| if u == t("5m") { 0.1 } else { 0.2 };
+    // Safer, but not clearly: 0.2 points against the East's 0.4 is half, yet less
+    // than the 0.32-point margin lower (0.16 and these figures halved while a
+    // deal-in cost the discarder 1 share, until 2026-11-23).
+    let slightly = |u: Tile| if u == t("5m") { 0.2 } else { 0.4 };
     assert_eq!(discard_label(&v, t("5m"), slightly), Label::Mistake);
     // A mistake carries no defensive intent.
     assert_eq!(Label::Mistake.mode(), Mode::Push);
-    // The safer side of the same margin: 0.0 against 0.2 is a fold.
-    let clearly = |u: Tile| if u == t("5m") { 0.0 } else { 0.2 };
+    // The safer side of the same margin: 0.0 against 0.4 is a fold.
+    let clearly = |u: Tile| if u == t("5m") { 0.0 } else { 0.4 };
     assert_eq!(discard_label(&v, t("5m"), clearly), Label::Fold);
 }
 

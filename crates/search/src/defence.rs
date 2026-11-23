@@ -11,15 +11,16 @@
 //!
 //! ```text
 //! EV(t) = P(I self-draw | after t) × 3 × my self-drawn points
-//!       + P(I win off a discard | after t) × my discard points
-//!       − Σ_o deal-in_o(t) × Pay(o)
+//!       + P(I win off a discard | after t) × 2 × my discard points
+//!       − Σ_o deal-in_o(t) × Pay(o) × 2
 //!       − Σ_o P(o self-draws | after t) × o's self-drawn points × my share
 //!       − Σ_o P(t gives o its fourth exposed meld) × P(o self-draws | after t) × o's self-drawn points × 2
 //! ```
 //!
 //! * `deal-in_o(t)` is the model's `dealin` head read **before** the discard (the
-//!   chance `o` wins on `t` now); `Pay(o)` its `faan` head's expected points and
-//!   one share whoever is liable (§8.3 covers self-draws only; [`Danger::expected_loss`]),
+//!   chance `o` wins on `t` now); `Pay(o)` its `faan` head's expected points a
+//!   share, and the discarder pays 2 shares whoever is liable (rules §8.2, 1 until
+//!   2026-11-23; §8.3 covers self-draws only; [`Danger::expected_loss`]),
 //!   times the loss factor refitted on this reading for stage 3 discards
 //!   ([`crate::giveup::danger_of`], [`crate::giveup::READ_LOSS_FACTOR`]: the model's
 //!   deal-in chance is 6.6 times too low on the safest tiles and 0.6 times on the
@@ -50,7 +51,7 @@ use crate::ev::FIRST_FAAN_BUCKET;
 use crate::giveup;
 use crate::view::SeatView;
 use mahjong_games::Game;
-use mahjong_hk::{Action, State};
+use mahjong_hk::{Action, State, DISCARD_SHARES};
 use mahjong_tiles::Tile;
 
 /// Points within which the stage bot's own pick is kept.
@@ -152,7 +153,8 @@ pub fn evaluate(
             continue;
         }
         let w = model.run_for(&next, me).winner?;
-        let win = w[0] * 3.0 * own_pts + w[1] * disc_pts;
+        // A discard win brings 2 shares from the discarder (rules §8.2).
+        let win = w[0] * 3.0 * own_pts + w[1] * DISCARD_SHARES as f64 * disc_pts;
         let (mut self_draw, mut liability) = (0.0, 0.0);
         let mut their_win = [0.0; 3];
         for r in 1..4 {

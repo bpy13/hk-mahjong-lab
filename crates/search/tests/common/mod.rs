@@ -192,7 +192,9 @@ pub fn position_1() -> (State, Beliefs) {
 }
 
 /// §5 examples 2 and 3: A (seat 2) threatens a 96-point self-draw, B (seat 1)
-/// waits on 2m for a cheap hand. With `liable`, B's fourth meld (`EEE`) was
+/// waits on 2m for a cheap hand (3 faan, 8 points a share; 4 faan until the
+/// discarder paid 2 shares, rules §8.2 since 2026-11-23, so that the deal-in
+/// still costs 15.2). With `liable`, B's fourth meld (`EEE`) was
 /// claimed from me and I am liable for B.
 pub fn position_2(liable: bool) -> (State, Beliefs) {
     let mut melds: [Vec<Meld>; 4] = Default::default();
@@ -239,7 +241,7 @@ pub fn position_2(liable: bool) -> (State, Beliefs) {
     let beliefs = Beliefs {
         seats: [
             SeatBelief::quiet(),
-            seat(0.95, 1.0, &["2m"], 0.05, 4),
+            seat(0.95, 1.0, &["2m"], 0.05, 3),
             a,
             seat(0.0, 0.0, &[], 0.0, 3),
         ],

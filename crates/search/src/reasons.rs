@@ -212,7 +212,8 @@ pub const RISK_MIN_POINTS: f64 = 0.5;
 /// alternatives, `p` the deal-in chance of `chosen`. `None` when that delta is
 /// below [`RISK_MIN_POINTS`] (the move risks nothing a safer discard would
 /// avoid). Use a [`Danger`] built by [`Danger::from_belief`] to get payments
-/// in points; one built by [`Danger::estimate`] counts every win as 8 points.
+/// in points; one built by [`Danger::estimate`] counts every win as 16 points
+/// (the discarder's 2 shares of 8, rules §8.2).
 pub fn expected_loss(danger: &Danger, chosen: Tile, alternatives: &[Tile]) -> Option<Reason> {
     let mine = danger.expected_loss(chosen);
     let safest = alternatives

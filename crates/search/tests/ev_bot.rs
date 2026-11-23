@@ -51,7 +51,8 @@ fn print(d: &EvDecision) {
 fn check_position_1(d: &EvDecision) {
     for (_, x) in &d.candidates {
         assert!(
-            x.deal_in_total() <= 0.2,
+            // 0.2 when the discarder paid 1 share (rules §8.2 since 2026-11-23: 2).
+            x.deal_in_total() <= 0.4,
             "{:?}: {}",
             x.action,
             x.deal_in_total()
@@ -95,7 +96,7 @@ fn check_position_2(d: &EvDecision, min_margin: f64) {
     assert!(margin >= min_margin, "margin {margin:.2} < {min_margin}");
     assert_eq!(arg(d, "reason.ev.stops_big_hand", "seat"), Some(2.0));
     assert_eq!(arg(d, "reason.ev.deal_in_now", "seat"), Some(1.0));
-    assert_eq!(arg(d, "reason.ev.deal_in_now", "shares"), Some(1.0));
+    assert_eq!(arg(d, "reason.ev.deal_in_now", "shares"), Some(2.0));
     assert!(keys(d).contains(&"reason.ev.margin"));
 }
 
@@ -118,7 +119,8 @@ fn position_2_deals_into_the_small_hand_to_stop_the_big_self_draw() {
 /// `docs/ev-bot.md` §5 example 3 under rules §8.3 as amended 2026-11-23 (ADR
 /// 0004): being liable for B makes only B's self-draw cost 3 shares; B's win on
 /// my `2m` costs 1 share, so liability no longer keeps `2m` back. Without the
-/// floor the bot deals in, as in position 2.
+/// floor the bot deals in, as in position 2. Since 2026-11-23 a deal-in costs
+/// the discarder 2 shares (rules §8.2) and B's stub is 3 faan (8 points).
 #[test]
 fn position_3_liability_does_not_protect_the_deal_in() {
     let (state, beliefs) = position_2(true);
@@ -132,14 +134,14 @@ fn position_3_liability_does_not_protect_the_deal_in() {
     print(&with_floor);
     for d in [&d, &with_floor] {
         let x = &d.candidates.iter().find(|c| c.0 == deal_in).unwrap().1;
-        // 0.95 × 16 × 1 share, not × 3.
+        // 0.95 × 8 × 2 shares (the discarder's, rules §8.2), not × 3.
         assert!(
             (x.deal_in_total() - 15.2).abs() < 1e-9,
             "{}",
             x.deal_in_total()
         );
-        // B's self-draw at 3 shares: 0.05 × 24 × 3 = 3.6, beside A's 28.8.
-        assert!((x.self_draw[1] - 3.6).abs() < 1e-9, "{}", x.self_draw[1]);
+        // B's self-draw at 3 shares: 0.05 × 16 × 3 = 2.4, beside A's 28.8.
+        assert!((x.self_draw[1] - 2.4).abs() < 1e-9, "{}", x.self_draw[1]);
         assert_eq!(x.other_feeds[1], 0.0);
         assert_eq!(ev_of(d, deal_in), x.ev);
     }

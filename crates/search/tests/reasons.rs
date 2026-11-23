@@ -131,9 +131,9 @@ fn position_2_gives_stops_big_hand_and_deal_in_now() {
     assert!(close(stops.p_self_draw, 0.30));
     assert!(close(stops.points, 96.0), "Pay_sd(A) = points(9)");
     let deal = &find(&r, ReasonKey::EvDealInNow).unwrap().args;
-    assert_eq!((deal.seat, deal.shares), (Some(1), Some(1)));
+    assert_eq!((deal.seat, deal.shares), (Some(1), Some(2)));
     assert!(close(deal.p, 0.95));
-    assert!(close(deal.points, 16.0), "Pay(B) = points(4)");
+    assert!(close(deal.points, 8.0), "Pay(B) = points(3)");
     let margin = find(&r, ReasonKey::EvMargin).unwrap().args.points.unwrap();
     assert!(margin >= 8.0, "margin {margin}");
 
@@ -154,7 +154,8 @@ fn position_2_gives_stops_big_hand_and_deal_in_now() {
 /// §6 row 3 under rules §8.3 as amended 2026-11-23 (ADR 0004): liable for B,
 /// only B's self-draw costs 3 shares, so (without the floor) the bot deals into
 /// B's `2m` as in row 2 and adds `reason.ev.liability {seat: 1}`; with or
-/// without the floor, dealing in to B pays 1 share.
+/// without the floor, dealing in to B pays the discarder's 2 shares (rules
+/// §8.2 since 2026-11-23).
 #[test]
 fn position_3_gives_liability_and_deals_in() {
     let d = decide(bot_without_floor, position_2(true));
@@ -183,7 +184,7 @@ fn position_3_gives_liability_and_deals_in() {
             .find(|(a, _)| *a == Action::Discard(t("2m")))
             .unwrap();
         let deal = find(&deal_in.reasons(), ReasonKey::EvDealInNow).map(|x| x.args);
-        assert_eq!(deal.and_then(|a| a.shares), Some(1));
+        assert_eq!(deal.and_then(|a| a.shares), Some(2));
     }
 }
 
@@ -270,23 +271,32 @@ fn plan_target_takes_the_head_argmax_with_its_probability() {
 
 #[test]
 fn expected_loss_names_the_extra_risk_in_points() {
-    // Position 2: B (seat 1) waits on 2m for 4 faan (16 points), tenpai 0.95.
+    // Position 2: B (seat 1) waits on 2m for 3 faan (8 points a share), tenpai
+    // 0.95; the discarder pays 2 shares (rules §8.2).
     let (state, beliefs) = position_2(false);
     let danger = Danger::from_beliefs(&state, 0, &beliefs);
     let hand: Vec<_> = SeatView::of(&state, 0).concealed.kinds().collect();
     let r = expected_loss(&danger, t("2m"), &hand).expect("2m is risky");
     assert_eq!(r.key_str(), "reason.risk.expected_loss");
-    assert!(close(r.args.points, 0.95 * 16.0), "{:?}", r.args.points);
+    assert!(
+        close(r.args.points, 0.95 * 8.0 * 2.0),
+        "{:?}",
+        r.args.points
+    );
     assert!(close(r.args.p, 0.95));
     // A safe tile risks nothing beyond the safest alternative.
     assert!(expected_loss(&danger, t("Wh"), &hand).is_none());
 
-    // Liable for B: B's win on my discard still costs 1 share (rules §8.3
-    // covers self-draws only).
+    // Liable for B: B's win on my discard still costs the discarder's 2 shares
+    // (rules §8.3 covers self-draws only).
     let (state, beliefs) = position_2(true);
     let danger = Danger::from_beliefs(&state, 0, &beliefs);
     let r = expected_loss(&danger, t("2m"), &hand).unwrap();
-    assert!(close(r.args.points, 0.95 * 16.0), "{:?}", r.args.points);
+    assert!(
+        close(r.args.points, 0.95 * 8.0 * 2.0),
+        "{:?}",
+        r.args.points
+    );
 
     // From a delta computed elsewhere.
     assert!(expected_loss_delta(RISK_MIN_POINTS - 0.01, 0.1).is_none());

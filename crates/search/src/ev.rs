@@ -29,7 +29,7 @@ use crate::target_value::{lookup, tiles_left_bucket, TargetKey, TargetKind};
 use crate::view::SeatView;
 use mahjong_analysis::{faan_shanten, HandView, UNREACHABLE};
 use mahjong_games::Game;
-use mahjong_hk::{Action, Meld, MeldKind, RuleSet, State};
+use mahjong_hk::{Action, Meld, MeldKind, RuleSet, State, DISCARD_SHARES};
 use mahjong_tiles::{Tile, NUM_KINDS};
 use std::fmt;
 use std::sync::Arc;
@@ -453,11 +453,12 @@ impl Table {
             }
             // Share multipliers (§1): who pays when o wins. The 12-tile liability
             // covers only o's self-draw (rules §8.3): a discard win is paid by the
-            // discarder, 1 share, whoever is liable.
+            // discarder, 2 shares (rules §8.2), whoever is liable.
+            let disc = DISCARD_SHARES as f64;
             let (l_disc, l_sd, l_other) = match state.liable_for(o) {
-                None => (1.0, 1.0, 0.0),
-                Some(l) if l == me => (1.0, 3.0, 0.0),
-                Some(_) => (1.0, 0.0, 0.0),
+                None => (disc, 1.0, 0.0),
+                Some(l) if l == me => (disc, 3.0, 0.0),
+                Some(_) => (disc, 0.0, 0.0),
             };
             t.l_disc[o] = l_disc;
             t.l_sd[o] = l_sd;
@@ -566,8 +567,9 @@ impl Table {
         };
         // A seat liable for me pays the 3 shares of my self-draw that the three
         // opponents would pay anyway, and nothing on a discard win (rules §8.3),
-        // so liability does not change my shares.
-        let shares_me = 3.0 * p_sd + (1.0 - p_sd) * phi;
+        // so liability does not change my shares. A discard win brings the
+        // discarder's 2 shares (rules §8.2).
+        let shares_me = 3.0 * p_sd + (1.0 - p_sd) * phi * DISCARD_SHARES as f64;
 
         // The tile discarded now.
         let mut p_now = [0.0; 4];
@@ -891,7 +893,7 @@ fn reasons(
                 seat: seat(o),
                 p: Some(star.p_now[o]),
                 points: Some(table.pay[o]),
-                // L_disc(o) is always 1 (rules §8.3 covers self-draws only).
+                // L_disc(o) is always 2 (rules §8.2; §8.3 covers self-draws only).
                 shares: Some(table.l_disc[o] as u8),
                 ..ReasonArgs::default()
             },

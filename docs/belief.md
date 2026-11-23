@@ -179,7 +179,8 @@ from the counts, and a wait on a kind with no unseen copy set to 0. Tests:
 `Danger::from_belief(state, me, &belief)` (`danger.rs`; the old `Danger::estimate` is
 unchanged) gives `tile(t) = 1 − Π_o (1 − tenpai_o × wait_o(t))`, `threat(o) = tenpai_o`,
 and three new numbers: `expected_loss(t) = Σ_o P_o(t) × Pay(o) × shares(o)` in points
-(shares 1, 3 when I am liable for `o`, 0 when another seat is), `points_if_win(o) =
+(shares: the discarder's 2 since 2026-11-23, rules §8.2 and ADR 0005; until then 1, and
+until Task 27 of the same day 3 when I am liable for `o`, 0 when another seat is), `points_if_win(o) =
 Pay(o)` and `liability_tile(t)`: the seat with three exposed melds that could claim `t`
 as its fourth (a pung when two copies are unseen, a chow for my next seat). With
 `HeuristicBelief` it is the no-model fallback. `defensive:belief=models/belief.mjnn`

@@ -1082,8 +1082,8 @@ impl State {
             let share = self.rules.points(score.faan) as i32;
             let mut paid_by = [0i32; 4];
             // §8.3 covers only a self-drawn win with tiles (十二張落地包自摸): on a
-            // discard the discarder pays 1 share as in §8.2, and a flower win is
-            // always paid by all three others.
+            // discard the discarder pays 2 shares as in §8.2 (the maker of a robbed
+            // kong 3), and a flower win is always paid by all three others.
             let liable = if score.is_flower_win() || !self_drawn {
                 None
             } else {
@@ -1098,7 +1098,16 @@ impl State {
                         }
                     }
                 }
-                (None, false, Some(f)) => paid_by[f] = share,
+                // §8.2 (ADR 0005): the discarder pays 2 shares; a robbed kong's
+                // maker pays the whole self-draw, 3.
+                (None, false, Some(f)) => {
+                    let shares = if robbed {
+                        crate::rules::ROBBED_KONG_SHARES
+                    } else {
+                        crate::rules::DISCARD_SHARES
+                    };
+                    paid_by[f] = shares as i32 * share
+                }
                 (None, false, None) => unreachable!("a claimed win has a source"),
             }
             for p in 0..4 {

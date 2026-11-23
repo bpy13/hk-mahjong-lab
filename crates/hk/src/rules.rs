@@ -60,6 +60,15 @@ impl Default for RuleSet {
     }
 }
 
+/// Shares of the winner's points the discarder pays on a win on a discard
+/// (§8.2): 2, twice what each opponent pays on a self-draw (ADR 0005; 1 until
+/// 2026-11-23).
+pub const DISCARD_SHARES: u32 = 2;
+
+/// Shares the maker of a robbed kong pays the winner (§8.2): 3, the whole
+/// self-draw (ADR 0005; 1 until 2026-11-23).
+pub const ROBBED_KONG_SHARES: u32 = 3;
+
 const HALF_SPICY: [u32; 14] = [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384];
 
 impl RuleSet {
@@ -72,10 +81,16 @@ impl RuleSet {
         }
     }
 
-    /// The largest number of points one player can win or lose in a hand: three
-    /// shares of a limit hand.
+    /// The largest number of points one player can win or lose in a hand, in
+    /// shares of a limit hand: a discarder paying 2 shares to each of three
+    /// winners (§8.2, 6 shares), or 3 (a self-draw, a robbed kong, or the single
+    /// winner under `head_bump`).
     pub fn max_abs_score(&self) -> f64 {
-        3.0 * self.points(self.faan_cap) as f64
+        let shares = match self.multiple_winners {
+            MultipleWinners::All => 6.0,
+            MultipleWinners::HeadBump => 3.0,
+        };
+        shares * self.points(self.faan_cap) as f64
     }
 }
 
