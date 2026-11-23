@@ -37,7 +37,7 @@ false alarm from the true hands, and splits the points by kind.
   rule" beside the old ones. Task 31 then made a deal-in cost the discarder 2 shares (ADR 0005)
   and queued the match a third time: cpu job 313, output
   `runs/defence-false-alarms/match-40000-seed24-two-share-rule.txt` in the workers clone
-  (figures to follow, under "Under the two-share rule").
+  (cpu job 313, 3,004 s, exit 0; headline figures under "Under the two-share rule").
 * "From ready" is the faan-aware distance after the best discard (0 = ready with a legal win).
   Plain `stage` deals in in 18.20 % of its hands, 1.174 % of its discards (15.5 discards a hand).
 
@@ -79,6 +79,30 @@ new run the one-away hands carry the whole false-alarm loss of `safe1` (9,816 ha
 Per hand, false alarms are common: `safe1` raises one in 11.6 % of hands (0.75 % of discards),
 `safe5` in 41.6 % (2.6 %), `ev` in 50.8 % (3.2 %), `fold` in 7.1 % (0.45 %). True alarms are 2.3 %,
 3.3 %, 2.2 % and 1.0 % of hands.
+
+### Under the two-share rule (discarder pays 2 shares, Task 31, job 313)
+
+Same deals (seed 24), same bots and reading, binaries built from the engine after ADR 0005 (a
+discard win costs the discarder 2 shares and nobody else pays; the 12-tile liability stays
+self-draw only). A discard win now moves twice the points it did, so points a hand are on a larger
+scale than in the two tables above: compare signs and ranges, not sizes.
+
+| Bot | Paired, amended rule | Paired, two-share rule | Win, two-share | Deal-in, two-share | First changes true / false | True-alarm points | False-alarm points, amended → two-share | Mean false alarm, amended → two-share | Mean true alarm caught | "Liable for a win" false alarms |
+|---|---|---|---|---|---|---|---|---|---|---|
+| plain `stage` | — | — | — | 18.20 % | — | — | — | — | — | — |
+| `safe1` | +0.160 ± 0.067 | **+0.521 ± 0.094** | 23.93 % | 16.77 % | 16.9 % / 82.5 % | +0.6358 | −0.0846 → −0.1210 | −0.73 → −1.05 | +27.00 | 43 |
+| `safe5` | −0.354 ± 0.130 | **+0.428 ± 0.174** | 22.03 % | 13.51 % | 7.4 % / 92.1 % | +0.9927 | −0.7247 → −0.5704 | −1.74 → −1.37 | +29.66 | 111 |
+| `ev` | −2.310 ± 0.169 | **−2.916 ± 0.214** | 19.39 % | 15.93 % | 4.4 % / 94.0 % | +0.7722 | −2.5916 → −3.6632 | −5.12 → −7.24 | +32.40 | 107 |
+| `fold` | −0.675 ± 0.063 | **−1.199 ± 0.101** | 20.99 % | 17.05 % | 11.8 % / 87.8 % | +0.5915 | −0.8829 → −1.7840 | −12.51 → −18.56 | +45.68 | 20 |
+
+Verdict under the two-share rule: as expected, defence is worth more. `safe1` gains
+**+0.521 ± 0.094** a hand (5.5 times its range from zero; true alarms bring +0.64, false alarms cost
+−0.12, again almost all in one-away hands: 9,816 hands, −0.144 a hand, −2.35 each), and `safe5`
+now gains too (+0.428 ± 0.174, 2.5 times its range), though still less than `safe1` and with twice
+its range; `ev` and `fold` lose more, because their false alarms throw away wins whose value grew
+with the rule. `safe1` and `safe5` play exactly the same tiles as before (same win and deal-in
+rates: their picks do not read the payment), so the change in their gain is the rule's alone;
+`ev` and `fold` value payments and changed their play.
 
 ### What the split tables say
 
@@ -1548,7 +1572,8 @@ Plain game: previous (上家) won off opposite (對家) with 10 faan (bot +0). B
   points but not labelled.
 * One seed (24), one reading (`belief-order.mjnn`). The thresholds came from seed 23, so `safe1`'s
   gain is out of sample, but it is one match: +0.242 ± 0.074 under the old liability rule (3.3 times
-  its range from zero), +0.160 ± 0.067 under the amended rule (2.4 times).
+  its range from zero), +0.160 ± 0.067 under the amended rule (2.4 times), +0.521 ± 0.094 under the two-share rule
+  (5.5 times).
 * The ready-state outputs of the reading (far / one away / ready per opponent) were not used by any
   bot here.
 
@@ -1561,7 +1586,8 @@ and loses the wins (−4.81 a hand), and `fold` breaks ready hands (−12.50 eac
 (`safe1`, threshold 0.135) false alarms cost nothing on average under the old 12-tile rule and the bot
 **gains +0.242 ± 0.074 points a hand** over plain `stage`, the first defence bot to beat it; under
 the amended rule (self-draw only, the rule now in force) it **gains +0.160 ± 0.067**, its false
-alarms costing −0.085 a hand, all of it in one-away hands. Proposal (not built): keep
+alarms costing −0.085 a hand, all of it in one-away hands; under the two-share rule (ADR 0005, now in force) it **gains
++0.521 ± 0.094** and `safe5` gains +0.428 ± 0.174. Proposal (not built): keep
 `safe1`'s rule, and never change a one-away hand's pick on a reading below 0.135 (the 1 % threshold
 for one-away hands, the 5 % one only for hands three or more away, where its false alarms are level or gain), and leave `ev` and `fold` aside;
-then confirm on a fresh seed under the amended liability rule.
+then confirm on a fresh seed under the rules now in force.

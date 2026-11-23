@@ -147,3 +147,10 @@ workers clone; binary built from this engine in `C:\Users\brian\.cache\hk-mahjon
 `experiments/stage/false_alarms.ps1 -Name match-40000-seed24-two-share-rule`; about 0.7 CPU hours,
 as job 310 took 2,466 s). Output `runs/defence-false-alarms/match-40000-seed24-two-share-rule.txt`;
 its figures go beside the old two in `defence-false-alarms.md`, each named with its rule.
+
+Result (job 313, 3,004 s, exit 0), paired gain a hand over plain `stage`, amended rule → two-share
+rule: `safe1` +0.160 ± 0.067 → **+0.521 ± 0.094**, `safe5` −0.354 ± 0.130 → **+0.428 ± 0.174**,
+`ev` −2.310 ± 0.169 → −2.916 ± 0.214, `fold` −0.675 ± 0.063 → −1.199 ± 0.101. A deal-in costing
+double makes the reading's defence worth about three times as much for `safe1` and turns `safe5`
+from a loss into a gain; `ev` and `fold` lose more, as their false alarms now throw away larger wins.
+Full table: `defence-false-alarms.md`, "Under the two-share rule".
