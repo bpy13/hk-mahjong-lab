@@ -487,7 +487,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Done when: every numbered rule and table row of the rules file has a row in the check (the report states the counts); every "differs" and "sources disagree" row is in `docs/inbox.md` as one numbered question to Brian with the options and what each changes; Task 27's rule is listed as already decided.
   - Notes: web reading only; no paid calls.
 
-- [ ] **Task 29: self-play again, with the luck taken out of the reward** (fable: variance-reduction method open) (checkpoint) `[parallel-ok]`
+- [ ] **Task 29: self-play again, with the luck taken out of the reward** (fable: variance-reduction method open) (checkpoint) `[parallel-ok]` (taken: slot 2, 2026-11-23 15:05)
   - needs: Task 27, Task 31, Task 32
   - Why: Brian, 2026-11-23, after asking how Suphx and LuckyJ use reinforcement learning and why it works for them but not for us: "then try again? with the luck removal technique?". Both earlier runs (`docs/study-results/self-play-network.md`: the 10-hour run, -0.09 ± 0.22; the low-noise run, +0.15 ± 0.23) ended level with `stage`; `docs/study-results/2026-11-17-self-play-analysis.md` found the learning signal far smaller than the noise of each update. The reward was the hand's raw points. It needs Task 27 because the reward follows the payment rule: do not train under the old 12-tile rule.
   - What, part 1 (build, no long run): two ways of taking luck out, each behind a switch of the self-play trainer, default off.
