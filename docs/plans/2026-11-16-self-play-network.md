@@ -528,7 +528,7 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Done when: tests show each of the changes (points 9, 10, 13, 14, 15, 人糊, the pung exception) and the three kept rules (5, 7, 20); the oracle agrees with the engine on 10,000 random deals; a 2,000-deal `stage` match runs to its end with no illegal move; `cargo fmt --check`, `cargo clippy`, `cargo test --workspace` pass; the report names the networks affected.
   - Notes: all 20 rule points are settled (ADR 0005 to 0007); move the inbox question of Task 28 to Answered. Do not retrain anything; Task 29's run starts after this task on the new move set. Matches go through the job queue only. Tell the orchestrator when the engine change is on main.
 
-- [ ] **Task 33: the result JSON says which liability rule applied** `[parallel-ok]` (taken: slot 1, 2026-11-23 15:20)
+- [x] **Task 33: the result JSON says which liability rule applied** `[parallel-ok]` (done by slot 1, 2026-11-23: `WinRecord.liable_kind` (read-only addition in `crates/hk/src/state.rs`, no play change) and `"liable_kind"` in `result_to_json`; tests in `second_round.rs` and `shapes.rs`; fmt, clippy, cargo test pass)
   - Why: hk-games Task MJ1 must name 包大三元 on its result card. `result_to_json` in app-api gives each win `paid_by`,
     `liable` (seat or null) and `robbed`, but not the kind; the hk crate has `State::liability_kind(seat)`
     (TwelveTiles | BigDragons) and app-api does not expose it (hk-games worker, checked, 2026-11-23).

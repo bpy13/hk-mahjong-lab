@@ -200,11 +200,11 @@ Only what `seat` may see. Other hands appear only once the hand is over.
 { "wins": [ { "seat": 2, "score": { "faan": 4, "total": 4, "qualifying": 3, "limit": false,
                                     "patterns": [ { "key": "faan.half_flush", "faan": 3 }, { "key": "faan.seat_flower", "faan": 1 } ] },
               "points_per_share": 16, "self_drawn": false, "from": 1, "win_tile": "7p",
-              "paid_by": [0, 16, 0, 0], "liable": null, "robbed": false } ],
+              "paid_by": [0, 16, 0, 0], "liable": null, "liable_kind": null, "robbed": false } ],
   "deltas": [0, -16, 16, 0] }
 ```
 
-`wins` is empty after an exhaustive draw. `qualifying` is the faan without the bonus-tile
+`wins` is empty after an exhaustive draw. Each win's `liable_kind` is `"twelve_tiles"` (十二張落地) or `"big_dragons"` (包大三元) when `liable` is a seat, else `null`. `qualifying` is the faan without the bonus-tile
 patterns (what must reach `min_faan`). `deltas` sums to zero.
 
 ### Event

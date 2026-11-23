@@ -213,6 +213,8 @@ pub struct WinRecord {
     /// Set if a liable player paid for the whole table (§8.3): only on a
     /// self-drawn win, and not on a kong replacement under 包大三元.
     pub liable: Option<usize>,
+    /// Why `liable` is set (§8.3): `None` exactly when `liable` is `None`.
+    pub liable_kind: Option<Liability>,
     /// Won by robbing a kong (§5.1–§5.2).
     pub robbed: bool,
 }
@@ -1363,6 +1365,7 @@ impl State {
             } else {
                 self.liable[seat].map(usize::from)
             };
+            let liable_kind = liable.and_then(|_| self.liability_kind(seat));
             match (liable, self_drawn, from) {
                 (Some(l), _, _) => paid_by[l] = 3 * share,
                 (None, true, _) => {
@@ -1397,6 +1400,7 @@ impl State {
                 win_tile,
                 paid_by,
                 liable,
+                liable_kind,
                 robbed,
             });
         }

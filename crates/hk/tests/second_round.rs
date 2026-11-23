@@ -406,6 +406,7 @@ fn big_dragons_feeder_pays_the_whole_self_draw_8_3_4() {
     let r = s.result().unwrap();
     assert!(r.wins[0].score.has(Pattern::BigDragons));
     assert_eq!(r.wins[0].liable, Some(2));
+    assert_eq!(r.wins[0].liable_kind, Some(Liability::BigDragons));
     assert_eq!(r.deltas, [0, 384, -384, 0]);
 }
 
@@ -427,6 +428,7 @@ fn big_dragons_no_liability_on_a_kong_replacement_win_8_3_4() {
     let r = s.result().unwrap();
     assert!(r.wins[0].score.has(Pattern::KongReplacement));
     assert_eq!(r.wins[0].liable, None);
+    assert_eq!(r.wins[0].liable_kind, None);
     assert_eq!(r.deltas, [-128, 384, -128, -128]);
 }
 
@@ -443,6 +445,7 @@ fn a_later_liability_replaces_the_earlier_8_3() {
     play(&mut s, &[(1, SelfDrawnWin)]);
     let r = s.result().unwrap();
     assert_eq!(r.wins[0].liable, Some(3));
+    assert_eq!(r.wins[0].liable_kind, Some(Liability::TwelveTiles));
     assert_eq!(r.deltas, [0, 384, 0, -384]);
 }
 

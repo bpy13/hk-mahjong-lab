@@ -5,8 +5,8 @@
 
 use mahjong_games::Game;
 use mahjong_hk::{
-    Action, Event, HandResult, Meld, MeldKind, MultipleWinners, Pattern, Payout, RuleSet, Score,
-    State,
+    Action, Event, HandResult, Liability, Meld, MeldKind, MultipleWinners, Pattern, Payout,
+    RuleSet, Score, State,
 };
 use mahjong_tiles::{Suit, Tile, TileCounts, NUM_TILES_WITH_BONUS};
 use serde::{Deserialize, Serialize};
@@ -498,6 +498,14 @@ pub fn score_to_json(s: &Score) -> Value {
     })
 }
 
+/// The wire name of a liability rule (§8.3).
+fn liability_key(k: Liability) -> &'static str {
+    match k {
+        Liability::TwelveTiles => "twelve_tiles",
+        Liability::BigDragons => "big_dragons",
+    }
+}
+
 /// How the hand ended: `{wins: [...], deltas: [4]}`; `wins` is empty after an
 /// exhaustive draw.
 pub fn result_to_json(r: &HandResult, rules: &RuleSet) -> Value {
@@ -511,6 +519,7 @@ pub fn result_to_json(r: &HandResult, rules: &RuleSet) -> Value {
             "win_tile": w.win_tile.map(tile_id),
             "paid_by": w.paid_by,
             "liable": w.liable,
+            "liable_kind": w.liable_kind.map(liability_key),
             "robbed": w.robbed,
         })).collect::<Vec<_>>(),
         "deltas": r.deltas,
@@ -704,5 +713,34 @@ mod tests {
             chow.tiles,
             Some(vec!["3p".into(), "4p".into(), "5p".into()])
         );
+    }
+
+    #[test]
+    fn result_json_names_the_liability_rule() {
+        let rules = RuleSet::default();
+        let win = |liable, liable_kind| mahjong_hk::WinRecord {
+            seat: 1,
+            score: Score::limit(vec![Pattern::BigDragons], &rules),
+            self_drawn: true,
+            from: None,
+            win_tile: None,
+            paid_by: [0; 4],
+            liable,
+            liable_kind,
+            robbed: false,
+        };
+        let r = HandResult {
+            wins: vec![
+                win(Some(3), Some(Liability::TwelveTiles)),
+                win(Some(2), Some(Liability::BigDragons)),
+                win(None, None),
+            ],
+            deltas: [0; 4],
+        };
+        let v = result_to_json(&r, &rules);
+        let w = v["wins"].as_array().unwrap();
+        assert_eq!(w[0]["liable_kind"], "twelve_tiles");
+        assert_eq!(w[1]["liable_kind"], "big_dragons");
+        assert!(w[2]["liable"].is_null() && w[2]["liable_kind"].is_null());
     }
 }
