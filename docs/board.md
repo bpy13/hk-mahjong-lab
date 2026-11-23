@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 33 (liable_kind in result JSON), running since 2026-11-23 15:20
 - slot 2: Task 29 (part 2: table into the report, 24 h run queued), running since 2026-11-23 15:05
 
 ## Results
