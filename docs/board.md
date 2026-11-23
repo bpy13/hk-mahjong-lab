@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 2: Task 29 (part 2: table into the report, 24 h run queued), running since 2026-11-23 15:05
 
 ## Results
 - Task 32 (slot 1, 2026-11-23): ticked; the last rule points are in the rules file, engine and oracle (ADR 0006, 0007): 食換 banned after a pung or chow (a claim that would leave no legal discard is not offered), a seven-flower win may be passed (new phase `flower`, codes 34 take / 103 play on, still 134 codes), flower wins add 海底 and 槓上, 九子連環 by final shape on a self-draw, 包大三元 (none on a kong-replacement win; later liability replaces earlier), 人糊 #33 (10 faan; a claim ends the first go-round), the 12-tile pung exception; kept rules 5, 7, 20 tested; the deal passes on after a draw (rules file); oracle = engine on 10,000 random deals; cpu job 315 (2,000 `stage` deals) ran with no illegal move; all saved networks load and play, none needs retraining to run; report `docs/study-results/rule-points-second-round.md`; no paid API calls.
