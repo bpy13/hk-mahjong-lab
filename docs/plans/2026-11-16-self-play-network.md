@@ -528,6 +528,19 @@ watch session's plain work copy into this repository first, so the work has a hi
   - Done when: tests show each of the changes (points 9, 10, 13, 14, 15, 人糊, the pung exception) and the three kept rules (5, 7, 20); the oracle agrees with the engine on 10,000 random deals; a 2,000-deal `stage` match runs to its end with no illegal move; `cargo fmt --check`, `cargo clippy`, `cargo test --workspace` pass; the report names the networks affected.
   - Notes: all 20 rule points are settled (ADR 0005 to 0007); move the inbox question of Task 28 to Answered. Do not retrain anything; Task 29's run starts after this task on the new move set. Matches go through the job queue only. Tell the orchestrator when the engine change is on main.
 
+- [ ] **Task 33: the result JSON says which liability rule applied** `[parallel-ok]`
+  - Why: hk-games Task MJ1 must name 包大三元 on its result card. `result_to_json` in app-api gives each win `paid_by`,
+    `liable` (seat or null) and `robbed`, but not the kind; the hk crate has `State::liability_kind(seat)`
+    (TwelveTiles | BigDragons) and app-api does not expose it (hk-games worker, checked, 2026-11-23).
+  - What: each win in `result_to_json` gains `"liable_kind"`: `"twelve_tiles"`, `"big_dragons"`, or null when
+    `liable` is null. Additive only: no other field, code or move changes; the engine's play is untouched (Task 29's
+    24-hour run is going on this engine: do not change `crates/hk` behaviour, the action codes or the network code).
+  - Files: `crates/app-api/` (and a read-only accessor in `crates/hk/` only if one is missing), their tests, the
+    app-api notes in the docs if they list the result fields.
+  - Done when: tests show the field for a 12-tile self-draw, a 包大三元 win and a win with no liable seat;
+    `cargo fmt --check`, `cargo clippy` and `cargo test` pass; pushed to main. Tell the orchestrator the commit, so
+    hk-games can move its pin.
+
 ## Shared files and safety
 - Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
   additive method `HkVecEnv.observe_history()` to `crates/pybind/src/rl.rs` and owns it; Task 4
