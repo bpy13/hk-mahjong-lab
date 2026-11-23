@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1: Task 33 (liable_kind in result JSON), running since 2026-11-23 15:20
 
 ## Results
 - Task 29 part 2 (slot 2, 2026-11-23): task waiting on gpu job 316 `hk-luckless` (24 GPU h, setting `both`, hourly copies) and cpu job 317 `hk-luckless-final` (after 316, 0.8 CPU h). Job 312's table is in the report with the verdict: the luck-removal parts cut no noise (the critic explains nothing of the paired reward, R² −0.006 with the hidden view, −0.002 without); the per-decision row's 0.05 is an artefact of a flat critic (only the hand's last decision keeps credit; it would bias the gradient), so it is not run; the honest gain is unpaired play (0.47 of Task 10's noise, five times the decisions an hour) at the cost of the pool and the paired hourly figure, the candidate for a next run. So the run is Task 10's setting played six times longer on the new rules (orchestrator's call). Engine rebuilt from main after Task 32 and frozen; `test_luck.py` 6 pass; no paid API calls.
