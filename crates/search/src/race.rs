@@ -942,6 +942,14 @@ impl RaceBot {
             .iter()
             .copied()
             .find(|a| matches!(a, Action::Win | Action::SelfDrawnWin));
+        // The flower choice (rules §7.5.1): always take 花糊.
+        if let (Some(w), true) = (win, state.in_flower()) {
+            return RaceDecision {
+                action: w,
+                candidates: Vec::new(),
+                win_choice: None,
+            };
+        }
         if let (Some(w), false) = (win, self.config.pass_win) {
             return RaceDecision {
                 action: w,

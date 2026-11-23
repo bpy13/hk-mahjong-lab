@@ -100,7 +100,7 @@ fn meta_lists_variants_levels_and_keys() {
     assert_eq!(m["tiles"]["5p"], "tile.5_dots");
     assert_eq!(m["tiles"].as_object().unwrap().len(), 42);
     let faan = m["faan"].as_array().unwrap();
-    assert_eq!(faan.len(), 32);
+    assert_eq!(faan.len(), 33);
     assert_eq!(faan[16]["key"], "faan.full_flush");
     assert_eq!(faan[16]["number"], 17);
     assert!(m["actions"]

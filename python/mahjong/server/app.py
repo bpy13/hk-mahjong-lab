@@ -56,6 +56,9 @@ def view(s: Session) -> dict[str, Any]:
     obs = s.state.observation(s.human)
     legal = obs["legal"]
     result = s.state.result()
+    # The flower choice (rules §7.5.1) reuses codes 34 and 103.
+    flower = s.state.phase() == "flower"
+    flower_labels = {34: "食花糊", 103: "補花"}
     out: dict[str, Any] = {
         "id": s.id,
         "seed": s.seed,
@@ -66,7 +69,9 @@ def view(s: Session) -> dict[str, Any]:
         "benchmark_index": s.benchmark_index,
         "rules": s.rules.kwargs(),
         "observation": obs,
-        "legal": [{"action": a, "label": action_chinese(a)} for a in legal],
+        "legal": [
+            {"action": a, "label": flower_labels[a] if flower else action_chinese(a)} for a in legal
+        ],
         "bot_to_act": not s.state.is_terminal() and not s.human_to_act(),
         "events": s.state.events()[-12:],
         "result": result,

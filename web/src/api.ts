@@ -10,7 +10,7 @@ export interface Meld {
 
 export interface Observation {
   seat: number
-  phase: 'turn' | 'claim' | 'rob' | 'over'
+  phase: 'turn' | 'claim' | 'rob' | 'flower' | 'over'
   current_player: number | null
   turn: number
   wall_remaining: number

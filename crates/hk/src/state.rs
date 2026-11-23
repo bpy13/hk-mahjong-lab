@@ -9,6 +9,9 @@
 //!   skipped. Declarations stay hidden until all are in (§4.1.1).
 //! * **Rob**: after a kong is declared, seats that could win on its tile declare
 //!   whether to rob it (§5.1–§5.2).
+//! * **Flower**: a seat that has just set aside its seventh bonus tile declares
+//!   花糊 ([`Action::SelfDrawnWin`]) or replaces the tile and plays on
+//!   ([`Action::Pass`]), §7.5.1.
 //!
 //! Tile draws (and bonus-tile replacements) happen inside [`State::apply`].
 
@@ -32,13 +35,14 @@ pub const DEALER: usize = 0;
 pub enum Action {
     /// Turn: discard a tile (§4.3).
     Discard(Tile),
-    /// Turn: declare a self-drawn win (§4.2).
+    /// Turn: declare a self-drawn win (§4.2). Flower: declare 花糊 (§7.5.1).
     SelfDrawnWin,
     /// Turn: declare a concealed kong of the tile (§5.1).
     ConcealedKong(Tile),
     /// Turn: add the tile to an exposed pung (§5.2).
     AddedKong(Tile),
-    /// Claim or rob: decline.
+    /// Claim or rob: decline. Flower: give up 花糊, replace the seventh bonus
+    /// tile and play on (§7.5.1).
     Pass,
     /// Claim or rob: win on the discard, or rob the kong.
     Win,
@@ -65,6 +69,9 @@ impl Action {
     /// | 69–102 | `AddedKong(tile)` |
     /// | 103, 104, 105, 106 | `Pass`, `Win`, `Pung`, `ClaimKong` |
     /// | 107–133 | `Chow(lowest tile)` (suited tiles only) |
+    ///
+    /// In the flower phase (§7.5.1) only 34 (take 花糊) and 103 (play on) are
+    /// legal: the codes are reused, so the space stays 134 (2026-11-23).
     pub fn code(self) -> u16 {
         let i = |t: Tile| t.index() as u16;
         match self {
@@ -204,7 +211,7 @@ pub struct WinRecord {
     /// Who paid how much for this win (positive = paid).
     pub paid_by: [i32; 4],
     /// Set if a liable player paid for the whole table (§8.3): only on a
-    /// self-drawn win.
+    /// self-drawn win, and not on a kong replacement under 包大三元.
     pub liable: Option<usize>,
     /// Won by robbing a kong (§5.1–§5.2).
     pub robbed: bool,
@@ -233,8 +240,32 @@ enum Phase {
     Turn,
     Claim,
     Rob,
+    /// A seat holding its seventh bonus tile chooses 花糊 or play on (§7.5.1).
+    Flower,
     Over,
 }
+
+/// Why a seat is liable for another (§8.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Liability {
+    /// 十二張落地: it fed the fourth exposed meld (§8.3.1).
+    TwelveTiles,
+    /// 包大三元: it fed the third dragon pung (§8.3.4). A win on a kong's
+    /// replacement tile carries none.
+    BigDragons,
+}
+
+/// Where the deal's flower replacement stands (§3.3), while it is paused for a
+/// flower choice: `seat` has set aside its bonus tiles and still owes `left`
+/// replacement draws; the seats after it have not set theirs aside yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DealCursor {
+    seat: u8,
+    left: u8,
+}
+
+/// Where each seat's tiles of the deal start in the wall (§3.2).
+const DEAL_START: [usize; 5] = [0, 14, 27, 40, 53];
 
 /// The tile being claimed or robbed, and the declarations so far.
 #[derive(Clone, Copy, Debug)]
@@ -277,8 +308,15 @@ pub struct State {
     /// Number of discards so far (#30 needs the first one).
     discards: u16,
     window: Option<Window>,
-    /// `liable[p]` is the seat liable for `p` under the 12-tile rule (§8.3).
+    /// `liable[p]` is the seat liable for `p` (§8.3).
     liable: [Option<u8>; 4],
+    /// Bit `p` set: `liable[p]` comes from 包大三元, not the 12-tile rule.
+    dragon_liable: u8,
+    /// The deal's flower replacement, while unfinished (§3.3).
+    deal: Option<DealCursor>,
+    /// In the flower phase: the seventh bonus tile came from a draw (its
+    /// replacement is still owed by that draw), not the deal's set-aside.
+    flower_mid_draw: bool,
     /// The passed-win lock (§4.4): bit `k` of `passed_wins[p]` is set when `p`
     /// passed a win on tile kind `k` since `p`'s turn last started. Private to `p`.
     passed_wins: [u64; 4],
@@ -292,6 +330,27 @@ fn bit(t: Tile) -> u8 {
 /// The bit of a playing tile kind in a passed-win mask.
 fn kind_bit(t: Tile) -> u64 {
     1 << t.index()
+}
+
+/// The tile kinds banned from the discard right after claiming `claimed` into
+/// a meld of `kind` starting at `low` (§4.1.4 食換), as a kind mask: the
+/// claimed kind; after a chow also the kind that re-forms it with the two
+/// tiles from the hand (claim 4 with 5-6: 4 and 7; with 3-5: 4 only).
+fn claim_ban(claimed: Tile, kind: MeldKind, low: Tile) -> u64 {
+    let mut ban = kind_bit(claimed);
+    if kind == MeldKind::Chow {
+        let other_end = if claimed == low {
+            low.offset(3)
+        } else if Some(claimed) == low.offset(2) {
+            low.offset(-1)
+        } else {
+            None
+        };
+        if let Some(t) = other_end {
+            ban |= kind_bit(t);
+        }
+    }
+    ban
 }
 
 /// The tiles of a passed-win mask, in index order.
@@ -352,6 +411,9 @@ impl State {
             discards: 0,
             window: None,
             liable: [None; 4],
+            dragon_liable: 0,
+            deal: Some(DealCursor { seat: 0, left: 0 }),
+            flower_mid_draw: false,
             passed_wins: [0; 4],
             result: None,
         };
@@ -372,23 +434,60 @@ impl State {
         }
         // §3.3: flower replacement in seat order, from the back. Each player sets
         // aside all their bonus tiles at once (so all eight can arrive together,
-        // #31), then draws the replacements.
-        for (seat, d) in dealt.iter().enumerate() {
-            let set_aside: Vec<Tile> = d.iter().copied().filter(|t| t.is_bonus()).collect();
-            for &t in &set_aside {
-                s.record_bonus(seat, t);
-            }
-            if s.flower_win(seat) {
-                return s;
-            }
-            for _ in &set_aside {
-                if !s.draw(seat, true) {
-                    return s;
+        // #31), then draws the replacements. A seventh bonus tile pauses it for
+        // the flower choice (§7.5.1).
+        if !s.set_aside(0) {
+            s.run_deal();
+        }
+        s
+    }
+
+    /// The deal's set-aside for `seat` (§3.3): its dealt bonus tiles go face up
+    /// and it owes as many replacements. Returns `true` if a flower win ended
+    /// the hand or a flower choice paused the deal.
+    fn set_aside(&mut self, seat: usize) -> bool {
+        let dealt: Vec<Tile> = self.wall[DEAL_START[seat]..DEAL_START[seat + 1]]
+            .iter()
+            .copied()
+            .filter(|t| t.is_bonus())
+            .collect();
+        for &t in &dealt {
+            self.record_bonus(seat, t);
+        }
+        self.deal = Some(DealCursor {
+            seat: seat as u8,
+            left: dealt.len() as u8,
+        });
+        self.flower_check(seat, false)
+    }
+
+    /// Runs the deal's flower replacement on from [`State::deal`] until it ends
+    /// (the dealer's first turn), the hand ends, or a flower choice pauses it.
+    fn run_deal(&mut self) {
+        while let Some(c) = self.deal {
+            if c.left > 0 {
+                self.deal = Some(DealCursor {
+                    left: c.left - 1,
+                    ..c
+                });
+                if !self.draw(c.seat as usize, true) {
+                    return;
                 }
+                continue;
+            }
+            let next = c.seat as usize + 1;
+            if next == 4 {
+                break;
+            }
+            if self.set_aside(next) {
+                return;
             }
         }
-        s.last_drawn = None;
-        s
+        self.deal = None;
+        self.last_drawn = None;
+        self.phase = Phase::Turn;
+        self.current = DEALER as u8;
+        self.turn = DEALER as u8;
     }
 
     /// Builds a mid-hand state from a position, without a wall (see
@@ -442,9 +541,23 @@ impl State {
             discards: p.river.len() as u16,
             window: None,
             liable: p.liable.map(|l| l.map(|x| x as u8)),
+            dragon_liable: 0,
+            deal: None,
+            flower_mid_draw: false,
             passed_wins: checked.passed_wins,
             result: None,
         };
+        // A position names the liable seat only: it is 包大三元 when the seat
+        // shows three dragon pungs and fewer than four exposed melds.
+        for seat in 0..4 {
+            let dragons = s.melds[seat]
+                .iter()
+                .filter(|m| m.is_pung_like() && m.tile.is_dragon())
+                .count();
+            if s.liable[seat].is_some() && dragons == 3 && s.melds[seat].exposed_count() < 4 {
+                s.dragon_liable |= 1 << seat;
+            }
+        }
         let window = match p.phase {
             PositionPhase::Turn => None,
             PositionPhase::Claim { tile, from } => Some((Phase::Claim, tile, from, false)),
@@ -526,14 +639,37 @@ impl State {
         self.phase == Phase::Claim
     }
 
-    /// The decision phase: `"turn"`, `"claim"`, `"rob"` or `"over"`.
+    /// The decision phase: `"turn"`, `"claim"`, `"rob"`, `"flower"` or `"over"`.
     pub fn phase_name(&self) -> &'static str {
         match self.phase {
             Phase::Turn => "turn",
             Phase::Claim => "claim",
             Phase::Rob => "rob",
+            Phase::Flower => "flower",
             Phase::Over => "over",
         }
+    }
+
+    /// Whether the current decision is the flower choice (§7.5.1): the player
+    /// to move holds seven bonus tiles and may take 花糊
+    /// ([`Action::SelfDrawnWin`]) or play on ([`Action::Pass`]).
+    pub fn in_flower(&self) -> bool {
+        self.phase == Phase::Flower
+    }
+
+    /// The score of the flower win the player to move may take now (§7.5), if
+    /// in the flower phase.
+    pub fn flower_score(&self) -> Option<Score> {
+        if self.phase != Phase::Flower {
+            return None;
+        }
+        let seat = self.current as usize;
+        Score::flower_win_in(
+            self.bonus[seat],
+            self.flower_mid_draw && self.front == self.back,
+            self.kong_chain,
+            &self.rules,
+        )
     }
 
     /// Whether the current decision is whether to rob a kong.
@@ -559,6 +695,46 @@ impl State {
     /// Who is liable for whom (§8.3). Public.
     pub fn liable_for(&self, seat: usize) -> Option<usize> {
         self.liable[seat].map(usize::from)
+    }
+
+    /// Why [`State::liable_for`] `seat` is set, if it is (§8.3). Public.
+    pub fn liability_kind(&self, seat: usize) -> Option<Liability> {
+        self.liable[seat]?;
+        Some(if self.dragon_liable & (1 << seat) != 0 {
+            Liability::BigDragons
+        } else {
+            Liability::TwelveTiles
+        })
+    }
+
+    /// The tile kinds the player to move may not discard now (§4.1.4 食換), as
+    /// a mask (bit = tile index): right after claiming a pung, the claimed
+    /// kind; after a chow, the claimed kind and the kind that would re-form the
+    /// same chow with the two tiles from the hand. Empty in any other case, and
+    /// if the ban would leave no legal discard (never so in play: such a claim
+    /// is not offered).
+    pub fn discard_ban(&self) -> u64 {
+        if self.phase != Phase::Turn || self.drew {
+            return 0;
+        }
+        let n = self.events.len();
+        let Some(&Event::Claim { seat, meld, .. }) = self.events.last() else {
+            return 0;
+        };
+        if seat != self.current || meld.kind == MeldKind::Kong {
+            return 0;
+        }
+        let claimed = self.events[..n - 1].iter().rev().find_map(|e| match *e {
+            Event::Discard { tile, .. } => Some(tile),
+            _ => None,
+        });
+        let Some(claimed) = claimed else { return 0 };
+        let ban = claim_ban(claimed, meld.kind, meld.tile);
+        let hand = &self.hands[seat as usize];
+        if hand.kinds().all(|t| ban & kind_bit(t) != 0) {
+            return 0;
+        }
+        ban
     }
 
     /// The tiles `seat` may not win on from another player because it passed a
@@ -657,6 +833,13 @@ impl State {
                 && self.phase == Phase::Claim
                 && self.discards == 1
                 && self.window.is_some_and(|w| w.from as usize == DEALER),
+            // #33 人糊: the seat's first turn (with no claim, seat `s` moves first
+            // after `s` discards) and no discard claimed yet. Concealed kongs do
+            // not end the first go-round (as for 地糊, #30).
+            human: self_drawn
+                && seat != DEALER
+                && self.discards as usize == seat
+                && !self.events.iter().any(|e| matches!(e, Event::Claim { .. })),
         }
     }
 
@@ -694,6 +877,7 @@ impl State {
             robbing_kong: rob,
             heavenly: false,
             earthly,
+            human: false,
         };
         score_win(&c, &self.melds[seat], &ctx, &self.rules).filter(|s| s.meets_minimum(&self.rules))
     }
@@ -763,7 +947,18 @@ impl State {
             return;
         }
         let have = self.hands[seat][w.tile];
-        if have >= 2 {
+        // §4.1.4: a pung or chow is offered only if some tile left in the hand
+        // may be discarded under the 食換 ban.
+        let leaves_a_discard = |used: &[Tile], kind: MeldKind, low: Tile| {
+            let mut rest = self.hands[seat];
+            for &t in used {
+                rest.remove(t);
+            }
+            let ban = claim_ban(w.tile, kind, low);
+            let any = rest.kinds().any(|t| ban & kind_bit(t) == 0);
+            any
+        };
+        if have >= 2 && leaves_a_discard(&[w.tile, w.tile], MeldKind::Pung, w.tile) {
             out.push(Action::Pung);
         }
         if have >= 3 {
@@ -777,7 +972,11 @@ impl State {
                         .iter()
                         .all(|&t| t == w.tile || self.hands[seat][t] > 0)
                     {
-                        out.push(Action::Chow(tiles[0]));
+                        let used: Vec<Tile> =
+                            tiles.iter().copied().filter(|&t| t != w.tile).collect();
+                        if leaves_a_discard(&used, MeldKind::Chow, tiles[0]) {
+                            out.push(Action::Chow(tiles[0]));
+                        }
                     }
                 }
             }
@@ -792,11 +991,12 @@ impl State {
 
     // ----- Transitions. -----
 
-    /// Places a bonus tile for `seat` (§5.3) and checks the flower wins (#31,
-    /// #32). Returns `true` if that ended the hand.
+    /// Places a drawn bonus tile for `seat` (§5.3) and checks the flower wins
+    /// (#31, #32). Returns `true` if that ended the hand or paused it for the
+    /// flower choice.
     fn place_bonus(&mut self, seat: usize, tile: Tile) -> bool {
         self.record_bonus(seat, tile);
-        self.flower_win(seat)
+        self.flower_check(seat, true)
     }
 
     fn record_bonus(&mut self, seat: usize, tile: Tile) {
@@ -807,14 +1007,40 @@ impl State {
         });
     }
 
-    /// A flower win (§7.4): a seat holding seven bonus tiles wins 花糊 (#32) at
-    /// once, all eight 大花糊 (#31). Paid like a self-drawn win by all three
-    /// others (§8.2). Nobody else wins on another seat's bonus tile. Returns
-    /// `true` if the hand ended.
-    fn flower_win(&mut self, seat: usize) -> bool {
-        let Some(score) = Score::flower_win(self.bonus[seat], &self.rules) else {
+    /// The flower wins (§7.5): a seat holding all eight bonus tiles wins 大花糊
+    /// (#31) at once; a seat that has just placed its seventh chooses between
+    /// 花糊 (#32) and playing on (the flower phase, §7.5.1). `mid_draw`: the
+    /// tile came from a draw (else from the deal's set-aside). Nobody else wins
+    /// on another seat's bonus tile. Returns `true` if the hand ended or paused.
+    fn flower_check(&mut self, seat: usize, mid_draw: bool) -> bool {
+        if !self.rules.flowers {
             return false;
-        };
+        }
+        match self.bonus[seat].count_ones() {
+            8 => {
+                let score = Score::flower_win_in(
+                    self.bonus[seat],
+                    mid_draw && self.front == self.back,
+                    self.kong_chain,
+                    &self.rules,
+                )
+                .expect("eight bonus tiles");
+                self.finish_flower_win(seat, score);
+                true
+            }
+            7 => {
+                self.phase = Phase::Flower;
+                self.current = seat as u8;
+                self.window = None;
+                self.flower_mid_draw = mid_draw;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A flower win, paid like a self-drawn win by all three others (§8.2).
+    fn finish_flower_win(&mut self, seat: usize, score: Score) {
         self.finish(vec![NewWin {
             seat,
             score,
@@ -822,7 +1048,28 @@ impl State {
             from: None,
             win_tile: None,
         }]);
-        true
+    }
+
+    /// The flower choice (§7.5.1): take 花糊, or replace the seventh bonus tile
+    /// and carry on with the draw or the deal it interrupted.
+    fn apply_flower(&mut self, action: Action) {
+        let seat = self.current as usize;
+        match action {
+            Action::SelfDrawnWin => {
+                let score = self.flower_score().expect("seven bonus tiles");
+                self.finish_flower_win(seat, score);
+            }
+            Action::Pass => {
+                self.phase = Phase::Turn;
+                if self.flower_mid_draw && !self.draw(seat, true) {
+                    return;
+                }
+                if self.deal.is_some() {
+                    self.run_deal();
+                }
+            }
+            _ => panic!("{action} is not a flower choice"),
+        }
     }
 
     /// Draws a playing tile for `seat`, replacing bonus tiles. Returns `false` if
@@ -861,6 +1108,7 @@ impl State {
 
     fn exhaustive_draw(&mut self) {
         self.events.push(Event::ExhaustiveDraw);
+        self.deal = None;
         self.phase = Phase::Over;
         self.window = None;
         self.result = Some(HandResult {
@@ -1043,8 +1291,31 @@ impl State {
         };
         // §4.4: the claimer's turn starts, which ends its passed-win lock.
         self.passed_wins[seat] = 0;
+        // §8.3: a later liability replaces an earlier one.
         if self.rules.twelve_tile_liability && self.exposed_melds_after_claim(seat) == 4 {
+            // §8.3.3: none when the fourth set is a pung of a tile the claimer
+            // itself discarded earlier in the hand.
+            let own_tile = action == Action::Pung
+                && self.events.iter().any(|e| {
+                    matches!(*e, Event::Discard { seat: p, tile: t, .. }
+                        if p as usize == seat && t == tile)
+                });
+            if !own_tile {
+                self.liable[seat] = Some(from as u8);
+                self.dragon_liable &= !(1 << seat);
+            }
+        }
+        // §8.3.4 包大三元: feeding the third dragon pung (or kong).
+        if matches!(action, Action::Pung | Action::ClaimKong)
+            && tile.is_dragon()
+            && self.melds[seat]
+                .iter()
+                .filter(|m| m.is_pung_like() && m.tile.is_dragon())
+                .count()
+                == 2
+        {
             self.liable[seat] = Some(from as u8);
+            self.dragon_liable |= 1 << seat;
         }
         self.melds[seat].push(meld);
         self.events.push(Event::Claim {
@@ -1069,6 +1340,7 @@ impl State {
     /// Ends the hand with the given wins and settles payment (§8).
     fn finish(&mut self, wins: Vec<NewWin>) {
         let robbed = self.phase == Phase::Rob;
+        self.deal = None;
         let mut deltas = [0i32; 4];
         let mut records = Vec::new();
         for NewWin {
@@ -1084,7 +1356,9 @@ impl State {
             // §8.3 covers only a self-drawn win with tiles (十二張落地包自摸): on a
             // discard the discarder pays 2 shares as in §8.2 (the maker of a robbed
             // kong 3), and a flower win is always paid by all three others.
-            let liable = if score.is_flower_win() || !self_drawn {
+            // §8.3.4: 包大三元 does not cover a win on a kong's replacement tile.
+            let kong_win = self.kong_chain > 0 && self.dragon_liable & (1 << seat) != 0;
+            let liable = if score.is_flower_win() || !self_drawn || kong_win {
                 None
             } else {
                 self.liable[seat].map(usize::from)
@@ -1386,10 +1660,19 @@ impl Game for State {
                         }
                     }
                 }
-                out.extend(hand.kinds().map(Action::Discard));
+                let ban = self.discard_ban();
+                out.extend(
+                    hand.kinds()
+                        .filter(|&t| ban & kind_bit(t) == 0)
+                        .map(Action::Discard),
+                );
             }
             Phase::Claim | Phase::Rob => {
                 self.window_options(seat, out);
+                out.push(Action::Pass);
+            }
+            Phase::Flower => {
+                out.push(Action::SelfDrawnWin);
                 out.push(Action::Pass);
             }
         }
@@ -1403,6 +1686,7 @@ impl Game for State {
         match self.phase {
             Phase::Turn => self.apply_turn(action),
             Phase::Claim | Phase::Rob => self.apply_declaration(action),
+            Phase::Flower => self.apply_flower(action),
             Phase::Over => panic!("the hand is over"),
         }
     }

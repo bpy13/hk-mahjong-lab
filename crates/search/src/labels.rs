@@ -255,6 +255,8 @@ fn outcome(result: &HandResult, seat: usize) -> ([i32; 4], u8, u8, u32) {
                 .patterns
                 .iter()
                 .filter_map(|(p, _)| Pattern::ALL.iter().position(|q| q == p))
+                // 32 bits: row 33 (人糊, a limit hand) has no bit.
+                .filter(|&i| i < 32)
                 .fold(0u32, |acc, i| acc | 1 << i);
             (deltas, if w.self_drawn { 2 } else { 1 }, w.score.faan, bits)
         }

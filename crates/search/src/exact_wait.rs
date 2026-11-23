@@ -189,6 +189,7 @@ pub fn exact_wait(state: &State, me: usize, o: usize) -> Option<ExactWait> {
         robbing_kong: false,
         heavenly: false,
         earthly: false,
+        human: false,
     };
     let mut total = 0.0f64;
     let mut hands = 0usize;

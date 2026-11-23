@@ -47,25 +47,38 @@ fn output_hash(net: &Mlp, states: &[State]) -> u64 {
     hash
 }
 
-/// `(file, hash of the outputs)`, recorded at commit 18b1b09 (before Task 3) with
-/// the files of the main checkout's `models/` on 2026-11-16 (`belief.mjnn` was
-/// already here and kept). Debug and release agree.
+/// `(file, hash of the outputs)`, first recorded at commit 18b1b09 (before Task
+/// 3) with the files of the main checkout's `models/` on 2026-11-16.
+///
+/// 2026-11-23 (plan 2026-11-16 Task 32): recorded again on purpose. The rules
+/// changed which moves are legal (the 食換 ban after a claim, §4.1.4; the flower
+/// choice, §7.5.1) and 人糊 (#33) ends some hands, so random legal play reaches
+/// other positions. The encoders and network code did not change in that task.
+/// The files not kept in this checkout were read from the standalone
+/// `repo\hk-mahjong-lab\models\`; the newer ones (`belief-order*`,
+/// `stage-imitation*`) are added.
 const GOLDEN: &[(&str, u64)] = &[
-    ("belief-v2.mjnn", 135666235059543213),
-    ("belief.mjnn", 15002789305761949555),
-    ("cnn-distill-fp32.mjnn", 12406418968358885966),
-    ("cnn-distill-v2-fp32.mjnn", 7581823408504652425),
-    ("cnn-distill-v2.mjnn", 8509921048145687795),
-    ("cnn-distill.mjnn", 16199717062268701523),
-    ("cnn-ppo.mjnn", 2368955780929135675),
-    ("cnn-test-fp32.mjnn", 3843490569965124928),
-    ("cnn-test.mjnn", 1193252509238167656),
-    ("distill.mjnn", 8860315183837135040),
-    ("dmc.mjnn", 6225219863490870678),
-    ("dmc0.mjnn", 13817480079443775240),
-    ("ppo.mjnn", 1955907386064093650),
-    ("ppo0.mjnn", 6653140515121474166),
-    ("race-belief.mjnn", 3511677253258093659),
+    ("belief-order-reg.mjnn", 5067023546923881921),
+    ("belief-order.mjnn", 1314433444243534169),
+    ("belief-v2.mjnn", 12947365755819123908),
+    ("belief.mjnn", 15834856924182770216),
+    ("cnn-distill-fp32.mjnn", 14720371192874532388),
+    ("cnn-distill-v2-fp32.mjnn", 8980125196881684588),
+    ("cnn-distill-v2.mjnn", 9573007323899507942),
+    ("cnn-distill.mjnn", 7011650531028678589),
+    ("cnn-ppo.mjnn", 490894805378347328),
+    ("cnn-test-fp32.mjnn", 14832671212717586367),
+    ("cnn-test.mjnn", 9751140746710265002),
+    ("distill.mjnn", 18067365240658524269),
+    ("dmc.mjnn", 1903802436992702992),
+    ("dmc0.mjnn", 16214124082308366771),
+    ("ppo.mjnn", 7578930600296541684),
+    ("ppo0.mjnn", 2832328489306107864),
+    ("race-belief.mjnn", 245013708503341248),
+    ("stage-imitation-fp32.mjnn", 13820460691784066295),
+    ("stage-imitation-gate0-fp32.mjnn", 11623025917313762764),
+    ("stage-imitation-gate0.mjnn", 6432698534209856701),
+    ("stage-imitation.mjnn", 343048139103821153),
 ];
 
 #[test]
@@ -105,5 +118,46 @@ fn record() {
             Ok(net) => println!("    (\"{f}\", {}),", output_hash(&net, &states)),
             Err(e) => println!("    // {f}: does not load: {e}"),
         }
+    }
+}
+
+/// Plan 2026-11-16 Task 32: every network in `models/` still loads and plays a
+/// duplicate match under the new move set (食換 ban, flower choice) with no
+/// illegal move (the tournament checks every move). A policy network plays as
+/// `net:path=...`; a belief network as the reading of `stage-safe:t=1`.
+#[test]
+fn every_model_file_plays_a_match_with_no_illegal_move() {
+    use mahjong_search::agent::Agent;
+    use mahjong_search::tournament::duplicate;
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        eprintln!("no models/ folder, skipped");
+        return;
+    };
+    let mut files: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_string_lossy().into_owned())
+        .filter(|p| p.ends_with(".mjnn"))
+        .collect();
+    files.sort();
+    let stage = Agent::parse("stage").unwrap();
+    for path in &files {
+        let net = Mlp::load(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let policy = net
+            .output("policy")
+            .is_some_and(|r| r.len() == mahjong_hk::NUM_ACTION_CODES);
+        let spec = if policy {
+            format!("net:path={path}")
+        } else {
+            format!("stage-safe:t=1,belief={path}")
+        };
+        let agent = Agent::parse(&spec).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let agents = [agent, stage.clone(), stage.clone(), stage.clone()];
+        let r = duplicate(&agents, 6, RuleSet::default(), 32);
+        assert_eq!(r.agents[0].hands, 24, "{path}");
+        eprintln!(
+            "{path}: {:+.2} a hand over 24 hands",
+            r.agents[0].points / 24.0
+        );
     }
 }

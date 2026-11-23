@@ -45,11 +45,14 @@ pub enum Pattern {
     /// 花糊, seven bonus tiles, 3 faan (§7.5). Row 32 was 七搶一 until
     /// 2026-11-20; its English key "Seven rob one" is kept (see [`Pattern::english`]).
     SevenFlowers = 32,
+    /// 人糊, a non-dealer self-draws a win in the first go-round: a limit hand
+    /// (§7.4; added 2026-11-23, ADR 0007).
+    HumanHand = 33,
 }
 
 impl Pattern {
     /// All patterns, in table order.
-    pub const ALL: [Pattern; 32] = [
+    pub const ALL: [Pattern; 33] = [
         Pattern::SelfDrawn,
         Pattern::Concealed,
         Pattern::NoFlowers,
@@ -82,6 +85,7 @@ impl Pattern {
         Pattern::Earthly,
         Pattern::EightImmortals,
         Pattern::SevenFlowers,
+        Pattern::HumanHand,
     ];
 
     /// The row number in the faan table.
@@ -89,14 +93,14 @@ impl Pattern {
         self as u8
     }
 
-    /// The pattern with row number `n` (1–32).
+    /// The pattern with row number `n` (1–33).
     pub fn from_number(n: u8) -> Option<Pattern> {
         Pattern::ALL.get((n as usize).checked_sub(1)?).copied()
     }
 
-    /// A limit hand (§7.4), scoring the cap.
+    /// A limit hand (§7.4), scoring the cap: #21–#30 and #33 人糊.
     pub fn is_limit(self) -> bool {
-        (21..=30).contains(&self.number())
+        (21..=30).contains(&self.number()) || self == Pattern::HumanHand
     }
 
     /// A flower win (§7.5): #31 大花糊 or #32 花糊, won at once on the bonus
@@ -149,6 +153,7 @@ impl Pattern {
             "地糊",
             "大花糊",
             "花糊",
+            "人糊",
         ][self as usize - 1]
     }
 
@@ -191,6 +196,7 @@ impl Pattern {
             // The rule is 大花糊 "All eight flowers" and 花糊 "Seven flowers".
             "Eight immortals",
             "Seven rob one",
+            "Hand of man",
         ][self as usize - 1]
     }
 }
@@ -218,6 +224,9 @@ pub struct WinContext {
     pub heavenly: bool,
     /// Non-dealer won on the dealer's first discard (#30).
     pub earthly: bool,
+    /// Non-dealer self-drew in the first go-round (#33): on its first turn,
+    /// before any discard was claimed.
+    pub human: bool,
 }
 
 /// The scored value of a winning hand.
@@ -253,8 +262,22 @@ impl Score {
     /// mask as in [`WinContext::bonus`]): 花糊 (#32, 3 faan) with seven, 大花糊
     /// (#31, 10 faan) with all eight, `None` with fewer or without flowers. The
     /// hand's own tiles and the other bonus-tile patterns add nothing, and it
-    /// needs no minimum (§6).
+    /// needs no minimum (§6). See [`Score::flower_win_in`] for the patterns of
+    /// the moment it is won in.
     pub fn flower_win(bonus: u8, rules: &RuleSet) -> Option<Score> {
+        Score::flower_win_in(bonus, false, 0, rules)
+    }
+
+    /// [`Score::flower_win`] won at a given moment (§7.5.2, ADR 0006 point 10):
+    /// the bonus tile was the last tile of the wall (`last_tile`, #6 海底撈月
+    /// +1), or was drawn as the replacement of the `kong_chain`-th kong of the
+    /// turn (1: #7 槓上 +1; 2 or more: #8 槓上槓, 10). No 自摸 is added.
+    pub fn flower_win_in(
+        bonus: u8,
+        last_tile: bool,
+        kong_chain: u8,
+        rules: &RuleSet,
+    ) -> Option<Score> {
         if !rules.flowers {
             return None;
         }
@@ -263,7 +286,16 @@ impl Score {
             7 => (Pattern::SevenFlowers, 3),
             _ => return None,
         };
-        let mut score = Score::from_patterns(vec![pattern], rules);
+        let mut patterns = vec![pattern];
+        match kong_chain {
+            0 => {}
+            1 => patterns.push((Pattern::KongReplacement, 1)),
+            _ => patterns.push((Pattern::DoubleKong, 10)),
+        }
+        if last_tile {
+            patterns.push((Pattern::LastTile, 1));
+        }
+        let mut score = Score::from_patterns(patterns, rules);
         score.qualifying = score.faan;
         Some(score)
     }
@@ -349,6 +381,9 @@ pub fn score_win(
     }
     if ctx.earthly {
         special.push(Pattern::Earthly);
+    }
+    if ctx.human {
+        special.push(Pattern::HumanHand);
     }
     if melds.is_empty() && is_thirteen_orphans(concealed) {
         special.push(Pattern::ThirteenOrphans);
@@ -452,7 +487,7 @@ fn score_decomposition(
     if !honours && only_terminals_honours {
         limits.push(Pattern::AllTerminals);
     }
-    if melds.is_empty() && is_nine_gates(concealed, ctx.win_tile) {
+    if melds.is_empty() && is_nine_gates(concealed, ctx.win_tile, ctx.self_drawn) {
         limits.push(Pattern::NineGates);
     }
     if concealed_pungs == 4 {
@@ -529,17 +564,26 @@ fn score_decomposition(
     Score::from_patterns(p, rules)
 }
 
-/// Nine gates (#26): one suit, and the 13 tiles before the winning tile are
-/// exactly `1112345678999`.
-fn is_nine_gates(concealed: &TileCounts, win_tile: Option<Tile>) -> bool {
+/// Nine gates (#26), one suit: on a discard the 13 tiles before the winning
+/// tile are exactly `1112345678999` (the nine-sided wait); on a self-draw the
+/// final 14 tiles alone are enough: `1112345678999` plus any tile of the suit
+/// (HKMA 6.11, ADR 0006 point 15).
+fn is_nine_gates(concealed: &TileCounts, win_tile: Option<Tile>, self_drawn: bool) -> bool {
     let Some(w) = win_tile else { return false };
     let Some(suit) = w.suit() else { return false };
+    const GATES: [u8; 9] = [3, 1, 1, 1, 1, 1, 1, 1, 3];
+    if self_drawn {
+        let c = concealed.suit_counts(suit);
+        return concealed.total() == 14
+            && c.iter().map(|&n| n as usize).sum::<usize>() == 14
+            && c.iter().zip(GATES).all(|(&n, g)| n >= g);
+    }
     let mut before = *concealed;
     if before[w] == 0 {
         return false;
     }
     before.remove(w);
-    before.suit_counts(suit) == [3, 1, 1, 1, 1, 1, 1, 1, 3] && before.total() == 13
+    before.suit_counts(suit) == GATES && before.total() == 13
 }
 
 #[cfg(test)]
@@ -590,7 +634,31 @@ mod tests {
 
     #[test]
     fn nine_gates_needs_the_exact_13() {
-        assert!(is_nine_gates(&counts("11123455678999m"), Some(t("5m"))));
-        assert!(!is_nine_gates(&counts("11123455678999m"), Some(t("1m"))));
+        assert!(is_nine_gates(
+            &counts("11123455678999m"),
+            Some(t("5m")),
+            false
+        ));
+        assert!(!is_nine_gates(
+            &counts("11123455678999m"),
+            Some(t("1m")),
+            false
+        ));
+        // §7.4 #26 (ADR 0006 point 15): on a self-draw the final shape is enough.
+        assert!(is_nine_gates(
+            &counts("11123455678999m"),
+            Some(t("1m")),
+            true
+        ));
+        assert!(is_nine_gates(
+            &counts("11123456789999m"),
+            Some(t("1m")),
+            true
+        ));
+        assert!(!is_nine_gates(
+            &counts("11223456789999m"),
+            Some(t("1m")),
+            true
+        ));
     }
 }

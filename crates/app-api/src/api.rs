@@ -709,9 +709,11 @@ fn compare(
 fn apply_with_events(g: &mut GameEntry, action: Action) -> Vec<Value> {
     let player = g.state.current_player().expect("checked by the caller");
     let before = g.state.events().len();
+    // A pass in the flower phase (rules §7.5.1) is not a window declaration.
+    let flower = g.state.in_flower();
     g.apply(action);
     let mut events = Vec::new();
-    if is_declaration(action) {
+    if is_declaration(action) && !flower {
         // The engine logs no event for a declaration; the acting seat sees its own.
         events.push(
             json!({ "type": "event.declared", "player": player, "action": action_to_json(action) }),

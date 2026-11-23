@@ -5,7 +5,7 @@
 use mahjong_hk::Pattern;
 
 /// Every faan-table row (§7) with its English key, in table order.
-const EXPECTED: [(u8, &str); 32] = [
+const EXPECTED: [(u8, &str); 33] = [
     (1, "Self-drawn"),
     (2, "Concealed hand"),
     (3, "No flowers"),
@@ -38,6 +38,7 @@ const EXPECTED: [(u8, &str); 32] = [
     (30, "Earthly hand"),
     (31, "Eight immortals"),
     (32, "Seven rob one"),
+    (33, "Hand of man"),
 ];
 
 #[test]

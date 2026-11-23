@@ -164,7 +164,8 @@ impl PyState {
         self.inner.current_player()
     }
 
-    /// `"turn"`, `"claim"`, `"rob"` or `"over"`.
+    /// `"turn"`, `"claim"`, `"rob"`, `"flower"` (the seven-flower choice:
+    /// 34 takes 花糊, 103 plays on, rules §7.5.1) or `"over"`.
     fn phase(&self) -> &'static str {
         self.inner.phase_name()
     }
@@ -470,6 +471,7 @@ fn score_hand<'py>(
         robbing_kong,
         heavenly,
         earthly,
+        human: false,
     };
     score_win(&counts, &ms, &ctx, &rules)
         .map(|s| score_dict(py, &s))

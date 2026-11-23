@@ -44,7 +44,9 @@ fn discard_win_discarder_pays_two_shares_8_2() {
 
 #[test]
 fn self_drawn_win_everyone_pays_8_2() {
-    // Seat 2 draws R: 自摸 + 門前清 + 混一色 + 中 = 6 faan = 32 from each opponent.
+    // Seat 2 draws R on its first turn with nothing claimed: 人糊 (#33, ADR
+    // 0007), a limit hand (without it 自摸 + 門前清 + 混一色 + 中 = 6), so 128
+    // from each opponent.
     let mut s = deal(
         no_flowers(),
         [
@@ -60,7 +62,8 @@ fn self_drawn_win_everyone_pays_8_2() {
     assert_eq!(s.current_player(), Some(2));
     assert!(s.legal_actions_vec().contains(&SelfDrawnWin));
     play(&mut s, &[(2, SelfDrawnWin)]);
-    assert_eq!(s.result().unwrap().deltas, [-32, -32, 96, -32]);
+    assert!(s.result().unwrap().wins[0].score.has(Pattern::HumanHand));
+    assert_eq!(s.result().unwrap().deltas, [-128, -128, 384, -128]);
 }
 
 #[test]
@@ -467,9 +470,10 @@ fn initial_flower_replacement_3_3() {
 const SIX_FLOWERS: &str = "F1 F2 F3 F4 S1 S2 5s 6s 7s 8s E E W";
 
 #[test]
-fn seven_flowers_wins_at_once_paid_by_all_7_5_32() {
-    // §7.5 #32 花糊, §8.2: seat 1 draws its seventh bonus tile in play and wins
-    // at once, 3 faan (8 points) from each other seat.
+fn seven_flowers_wins_when_declared_paid_by_all_7_5_32() {
+    // §7.5 #32 花糊, §8.2: seat 1 draws its seventh bonus tile in play and
+    // declares the win (§7.5.1: it may also play on), 3 faan (8 points) from
+    // each other seat.
     let hands = [
         "9s 111m 222m 333m 444m 9m",
         SIX_FLOWERS,
@@ -479,7 +483,10 @@ fn seven_flowers_wins_at_once_paid_by_all_7_5_32() {
     let mut s = deal(RuleSet::default(), hands, "S3", "1s 2s 3s 4s 5m 6m");
     assert_eq!(s.bonus(1), 0b0011_1111);
     play(&mut s, &[(0, Discard(t("9m")))]);
-    let r = s.result().expect("the seventh flower ends the hand");
+    assert!(s.in_flower() && s.phase_name() == "flower");
+    assert_eq!(s.legal_actions_vec(), vec![SelfDrawnWin, Pass]);
+    play(&mut s, &[(1, SelfDrawnWin)]);
+    let r = s.result().expect("the declared flower win ends the hand");
     assert_eq!(r.wins.len(), 1);
     let w = &r.wins[0];
     assert_eq!(w.seat, 1);
@@ -490,15 +497,18 @@ fn seven_flowers_wins_at_once_paid_by_all_7_5_32() {
 }
 
 #[test]
-fn seven_flowers_in_the_deal_wins_at_once_7_5_32() {
-    // §3.3, #32: seven bonus tiles set aside in the deal end the hand there.
+fn seven_flowers_in_the_deal_win_when_declared_7_5_32() {
+    // §3.3, #32: seven bonus tiles set aside in the deal open the flower choice
+    // there; declaring it ends the hand.
     let hands = [
         "9s 111m 222m 333m 444m 9m",
         "F1 F2 F3 F4 S1 S2 S3 5s 6s 7s 8s E E",
         "123p 456p 789p RR NN",
         "9s 9s W W G G Wh Wh 1p 2p 3p 6s 6s",
     ];
-    let s = deal(RuleSet::default(), hands, "", "1s 2s 3s 4s 5m 6m 7m");
+    let mut s = deal(RuleSet::default(), hands, "", "1s 2s 3s 4s 5m 6m 7m");
+    assert!(s.in_flower());
+    play(&mut s, &[(1, SelfDrawnWin)]);
     let r = s.result().expect("ended in the deal");
     assert_eq!(r.wins[0].seat, 1);
     assert!(r.wins[0].score.has(Pattern::SevenFlowers));
@@ -526,8 +536,8 @@ fn all_eight_flowers_pays_10_faan_7_5_31() {
 
 #[test]
 fn no_robbing_flower_win_7_5() {
-    // §7.5: the old 七搶一 is gone. Seat 1 holds seven bonus tiles (a position,
-    // since in play the seventh would have won at once); seat 2 declares a
+    // §7.5: the old 七搶一 is gone. Seat 1 holds seven bonus tiles (a position:
+    // it passed 花糊 when the seventh came, §7.5.1); seat 2 declares a
     // concealed kong and draws the eighth, S4, as its replacement. Nobody wins.
     let rules = RuleSet::default();
     let c = |s: &str| TileCounts::from_tiles(&parse_tiles(s).unwrap());

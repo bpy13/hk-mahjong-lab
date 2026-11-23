@@ -735,14 +735,18 @@ impl RouteBot {
     }
 
     /// The discard the bot throws from a 14-tile view, with the route it
-    /// follows. `explore` follows the second-best route.
+    /// follows. `explore` follows the second-best route. `ban` is the
+    /// [`State::discard_ban`] mask (rules §4.1.4 食換): those kinds are not
+    /// thrown.
     pub fn pick_discard(
         &self,
         view: &SeatView,
         wall_remaining: usize,
         explore: bool,
+        ban: u64,
     ) -> (Tile, Option<Scored>) {
-        let options = self.discard_routes(view, wall_remaining);
+        let mut options = self.discard_routes(view, wall_remaining);
+        options.retain(|(t, _)| ban & (1u64 << t.index()) == 0);
         if explore {
             // The best product each route reaches over all discards.
             let mut by_route: Vec<(Scored, Tile)> = Vec::new();
@@ -802,7 +806,7 @@ impl RouteBot {
         }
         // Draw only when exploring, so `ROUTE_EXPLORE=0` leaves the random stream alone.
         let explore = self.explore > 0.0 && rng.gen::<f64>() < self.explore;
-        let (tile, route) = self.pick_discard(&view, wall, explore);
+        let (tile, route) = self.pick_discard(&view, wall, explore, state.discard_ban());
         let now = {
             let mut h = view.concealed;
             h.remove(tile);

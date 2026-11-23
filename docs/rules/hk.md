@@ -52,7 +52,8 @@ Terms used below:
    replacements from the back. This repeats until no hand holds a bonus tile.
    The flower wins (§7.5) are checked after each player has set aside their
    bonus tiles, before they draw the replacements, so a hand dealt all eight wins
-   大花糊 (#31) at once.
+   大花糊 (#31) at once, and a hand dealt seven chooses there between 花糊 and
+   playing on (§7.5.1); after a pass it draws its replacements and the deal goes on.
 4. Bonus tiles are always placed face up beside the hand and are never part of it.
 5. With the `flowers = off` variant, the 8 bonus tiles are removed before the
    shuffle, and §3.3, §5.3 and the flower patterns of §7 do not apply.
@@ -95,6 +96,15 @@ Each of the other three players may declare at most one claim on the discard:
 4. After a pung or chow, the claimer **discards without drawing** and play continues
    from their seat. A player who skipped a turn because of a pung (or kong) on someone
    else's discard simply loses that turn.
+   **食換 is forbidden** (Brian, 2026-11-23, ADR 0006 point 13; HKMA 簡則 15): that
+   discard may not be the claimed tile's kind, nor, after a chow, the kind that
+   would re-form the same chow with the two tiles from the hand. Claim 4 with 5-6:
+   neither 4 nor 7; with 2-3: neither 4 nor 1; with 3-5: not 4. After a claimed
+   kong (a replacement draw follows) nothing is banned.
+   A pung or chow whose ban would leave no legal discard is **not offered**
+   (orchestrator's call, 2026-11-23; Brian may change it). Example: with three open
+   sets and `4p 5p 6p 7p` in hand, the chow of a discarded 4p with 5-6 would leave
+   4p and 7p, both banned, so it is not offered. A pung never runs into this.
 5. If nobody claims, the next player in seat order draws.
 6. A player who passes up a win may not win on that same tile again until their
    next turn starts: the passed-win rule 過水 (§4.4).
@@ -154,8 +164,9 @@ ends. A concealed kong can be robbed only for thirteen orphans (§5.1).
 
 A player who draws a bonus tile (including as a replacement) places it face up and
 draws a replacement from the back. They cannot discard bonus tiles, and nobody can
-claim them. A player whose seventh bonus tile this is wins at once (§7.5, #32);
-another player's bonus tile never gives anyone a win.
+claim them. A player whose seventh bonus tile this is may declare 花糊 (§7.5, #32)
+or replace it and play on (§7.5.1); the eighth wins 大花糊 (#31) at once. Another
+player's bonus tile never gives anyone a win.
 
 ### 5.4 Kong replacement wins
 
@@ -235,13 +246,14 @@ Where a row says *replaces* another, only the larger of the two is counted.
 | 23 | 字一色 All honours | `EEE SSS RRR GGG WW` | |
 | 24 | 清么九 All terminals | `111m 999m 111p 999s 99p` | |
 | 25 | 十三么 Thirteen orphans | `1m 9m 1p 9p 1s 9s E S W N Wh G R R` | §6.2 |
-| 26 | 九子連環 Nine gates | `1112345678999m` + any `m` | Fully concealed, one suit; complete with any further tile of the suit |
+| 26 | 九子連環 Nine gates | `1112345678999m` + any `m` | Fully concealed, one suit. On a discard the 13 tiles before the win must be `1112345678999` (the nine-sided wait); on a self-draw the final 14 tiles are enough, e.g. `1123456789999m` self-drawing `1m` (HKMA 6.11; Brian, 2026-11-23, ADR 0006 point 15) |
 | 27 | 坎坎糊 Four concealed pungs | `222m 555p 888s EEE 99p`, all concealed | Four concealed pungs or kongs. A pung completed by claiming the winning discard is exposed |
 | 28 | 十八羅漢 Four kongs | four kongs and a pair | |
 | 29 | 天糊 Heavenly hand | | The dealer's hand is complete after the initial deal (and flower replacement) |
-| 30 | 地糊 Earthly hand | | A non-dealer wins on the dealer's first discard |
+| 30 | 地糊 Earthly hand | | A non-dealer wins on the dealer's first discard. It still counts after the dealer's concealed kong (Brian, 2026-11-23, ADR 0007 point 20: "暗槓 cannot 搶") |
+| 33 | 人糊 Hand of man | | A non-dealer self-draws a win in the first go-round: on its own first turn, before any discard has been claimed (a claim ends the first go-round; concealed kongs do not, as for #30). Added 2026-11-23 (Brian, ADR 0007 point 19); 10 faan like #29 and #30 is the orchestrator's call (zh.wikipedia gives 13, "some rules 3") |
 
-Patterns 29 and 30 require a complete hand.
+Patterns 29, 30 and 33 require a complete hand.
 
 ### 7.5 Flower wins
 
@@ -250,15 +262,22 @@ Patterns 29 and 30 require a complete hand.
 | 31 | 大花糊 (八仙過海) All eight flowers | 10 | A player holds all 8 bonus tiles. (8 until 2026-11-23; Brian, ADR 0005) |
 | 32 | 花糊 Seven flowers | 3 | A player holds 7 bonus tiles |
 
-1. The holder wins at once, when the seventh bonus tile is placed (§5.3), or when
-   the deal's set-aside brings seven or eight (§3.3). They may not pass the win
-   and play on. In play the seventh always comes before the eighth, so #31 is won
-   only in the deal.
-2. The hand's own tiles add nothing, and no other pattern (#3–#5 included) is
-   added. Only when flowers are in play.
+1. A player holding all eight wins 大花糊 at once. A player who has just placed
+   the seventh (§5.3), or was dealt seven (§3.3), **chooses**: declare 花糊, or
+   replace the seventh and play on, giving that win up (HKMA 花糊牌例 3; Brian,
+   2026-11-23, ADR 0006 point 9). After a pass the eighth, if it comes, still wins
+   大花糊 at once. The engine asks this in a phase of its own, `flower`, with two
+   moves that reuse existing codes: 34 (self-drawn win) declares 花糊, 103 (pass)
+   plays on (orchestrator's call, 2026-11-23; the move space stays 134).
+2. The hand's own tiles add nothing, and the bonus-tile patterns (#3–#5) and 自摸
+   are not added. The moment adds (Brian, 2026-11-23, ADR 0006 point 10; HKMA
+   花糊牌例 2): #6 海底撈月 (+1) when the bonus tile was the last tile of the wall,
+   #7 槓上 (+1) when it came as a kong's replacement, #8 槓上槓 (10) after a second
+   kong in the turn. Example: the seventh flower as a kong's replacement, 花糊 3 +
+   槓上 1 = 4. Only when flowers are in play.
 3. It is paid like a self-drawn win: each of the three others pays 1 share of the
-   points of 3 (#32) or 10 (#31) faan (§8.2). The 12-tile liability (§8.3) does
-   not apply.
+   points of its faan (3 for #32, 10 for #31, more with point 2) (§8.2). No
+   liability (§8.3) applies.
 4. There is no robbing flower win: a player holding seven bonus tiles does not win
    when another player draws the eighth. (Until 2026-11-20 this table had 八仙過海
    as a limit hand and 七搶一 "seven rob one", a win paid by the player who drew
@@ -319,8 +338,24 @@ paid as a full 自摸 by the player who made the kong").
    3 shares on a discard win too; the draft of 17 Oct cited no source. Sources:
    zh.wikipedia 香港麻雀胡牌列表 and 包牌, zh-yue.wikipedia 香港蔴雀食糊牌型,
    en.wikipedia Hong Kong mahjong scoring rules; ADR 0004.)
-3. This is the only liability rule *(default; variant `twelve_tile_liability = off`)*.
-   Feeding the third dragon pung or the fourth wind pung does not create liability.
+3. **The pung exception** (Brian, 2026-11-23, ADR 0007 point 19: "12-tile
+   exception only for pung"): no 12-tile liability falls on the feeder when the
+   fourth exposed meld is a **pung** of a tile kind the fed player had itself
+   discarded earlier in the hand. A claimed kong as the fourth meld gets no
+   exception. The rule is off with the 12-tile rule *(variant
+   `twelve_tile_liability = off`)*.
+4. **包大三元** (Brian, 2026-11-23, ADR 0007 point 14; HKMA 簡則 14,
+   "供給第三副三元牌的一家包付自摸分數"): a player whose discard is claimed as
+   another player's **third dragon pung** (or kong) becomes liable for that player
+   in the same way: on that player's self-drawn win the liable player pays all 3
+   shares, and a discard win is paid as in §8.2. A win on a **kong's replacement
+   tile** carries no 包大三元 liability (HKMA "槓後自摸不用包"): all three pay. It
+   is not tied to the 12-tile variant.
+5. A later liability **replaces** an earlier one (HKMA "包後不包先"): if the
+   player's fourth exposed meld is fed after its third dragon pung, the 12-tile
+   liability of the new feeder replaces 包大三元 (and then holds on a kong's
+   replacement win, as the 12-tile rule always has). Feeding the fourth wind pung
+   creates no liability.
 
 ## 9. Exhaustive draw 流局
 
@@ -330,6 +365,7 @@ payment. No tiles are held back from the wall.
 ## 10. Matches (later)
 
 A match is four rounds (East, South, West, North prevailing wind). The dealer keeps
-the deal after winning the hand or after an exhaustive draw; otherwise the deal
-passes to the next seat. Phase 1 studies single hands; matches are added
+the deal after winning the hand; otherwise, an exhaustive draw included, the deal
+passes to the next seat (Brian, 2026-11-23, ADR 0007 point 18: "just pass on";
+HKMA. Until then the dealer kept the deal after an exhaustive draw). Phase 1 studies single hands; matches are added
 when the study needs them.

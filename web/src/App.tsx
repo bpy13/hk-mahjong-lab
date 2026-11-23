@@ -284,6 +284,7 @@ export default function App() {
                 {humanToAct && obs.phase === 'turn' && '輪到你：揀一隻牌打出'}
                 {humanToAct && obs.phase === 'claim' && claim && `${WINDS[claim[1]]}家打出${tileName(claim[0])}：要唔要？`}
                 {humanToAct && obs.phase === 'rob' && claim && `${WINDS[claim[1]]}家槓${tileName(claim[0])}：搶槓？`}
+                {humanToAct && obs.phase === 'flower' && '七隻花：食花糊，定係補花繼續打？'}
               </div>
               <div className="action-slot">
                 {humanToAct && <ActionBar legal={view.legal} selected={selected} onAct={act} busy={busy} />}

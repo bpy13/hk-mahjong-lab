@@ -147,7 +147,7 @@ struct Paired {
 }
 
 /// One winner of a finished hand: seat, target class of the winning hand (as in
-/// `labels::target_class`), faan paid, faan pattern bits (bit i = `Pattern::ALL[i]`).
+/// `labels::target_class`), faan paid, faan pattern bits (bit i = `Pattern::ALL[i]`, rows 1-32 only).
 type WinInfo = (u8, u8, u8, u32);
 
 /// The details of one finished hand (see `finished(detail=True)`).
@@ -210,6 +210,8 @@ fn win_infos(state: &State, r: &HandResult) -> Vec<WinInfo> {
                 .patterns
                 .iter()
                 .filter_map(|(p, _)| Pattern::ALL.iter().position(|q| q == p))
+                // 32 bits: row 33 (人糊, a limit hand) has no bit.
+                .filter(|&i| i < 32)
                 .fold(0u32, |acc, i| acc | 1 << i);
             (w.seat as u8, win_class(state, w), w.score.faan, bits)
         })

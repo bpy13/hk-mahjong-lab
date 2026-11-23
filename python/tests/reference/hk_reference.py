@@ -61,6 +61,17 @@ def chow(low: int) -> int:
     return 107 + low
 
 
+def chow_ban(claimed: int, low: int) -> set[int]:
+    """§4.1.4 食換 after chowing `claimed` into the chow from `low`: the claimed
+    kind, and the kind that re-forms the chow with the two hand tiles."""
+    ban = {claimed}
+    if claimed == low and low % 9 <= 5:
+        ban.add(low + 3)
+    elif claimed == low + 2 and low % 9 >= 1:
+        ban.add(low - 1)
+    return ban
+
+
 # ----- rules -----
 @dataclass(frozen=True)
 class Rules:
@@ -160,6 +171,7 @@ class Ctx:
     robbing: bool = False
     heavenly: bool = False
     earthly: bool = False
+    human: bool = False
 
 
 def flower_faan(bonus: frozenset[int], seat: int, rules: Rules) -> list[tuple[int, int]]:
@@ -209,7 +221,7 @@ def score(
     if sum(concealed) + 3 * len(melds) != 14:
         return None
     cap = rules.faan_cap
-    specials = [n for n, on in ((29, ctx.heavenly), (30, ctx.earthly)) if on]
+    specials = [n for n, on in ((29, ctx.heavenly), (30, ctx.earthly), (33, ctx.human)) if on]
     if not melds and thirteen_orphans(concealed):
         return (cap, cap, True, [(n, cap) for n in [*specials, 25]])
     best = None
@@ -260,15 +272,23 @@ def score_split(concealed, melds, pair, groups, ctx, rules, specials):
     if only_th and not has_honour:
         limits.append(24)
     if not melds and ctx.win_tile is not None and is_suited(ctx.win_tile):
-        before = list(concealed)
-        before[ctx.win_tile] -= 1
         s = suit_of(ctx.win_tile)
-        if (
-            before[ctx.win_tile] >= 0
-            and sum(before) == 13
-            and before[9 * s : 9 * s + 9] == [3, 1, 1, 1, 1, 1, 1, 1, 3]
-        ):
-            limits.append(26)
+        gates = [3, 1, 1, 1, 1, 1, 1, 1, 3]
+        if ctx.self_drawn:
+            # #26 on a self-draw: the final shape is enough (ADR 0006 point 15).
+            row = concealed[9 * s : 9 * s + 9]
+            covers = all(a >= b for a, b in zip(row, gates, strict=True))
+            if sum(row) == 14 == sum(concealed) and covers:
+                limits.append(26)
+        else:
+            before = list(concealed)
+            before[ctx.win_tile] -= 1
+            if (
+                before[ctx.win_tile] >= 0
+                and sum(before) == 13
+                and before[9 * s : 9 * s + 9] == gates
+            ):
+                limits.append(26)
     if hidden_pungs == 4:
         limits.append(27)
     if kongs == 4:
@@ -346,9 +366,21 @@ class RefGame:
         self.discards = 0
         self.window: Window | None = None
         self.liable: list[int | None] = [None] * 4
+        # §8.3.4: seats whose liability is 包大三元 rather than the 12-tile rule.
+        self.dragon_liable: set[int] = set()
+        # §4.1.4 食換: kinds the claimer may not discard this turn.
+        self.ban: set[int] = set()
+        # §7.5.1: while the flower choice is open, what to resume after a pass.
+        self.flower_resume: tuple | None = None
+        # §3.3: the deal's set-aside, seat by seat: (seat, replacements owed).
+        self.deal_seat = 0
+        self.deal_left = 0
+        self.dealing = True
         # §4.4: tiles each seat passed a win on since its turn last started.
         self.locked: list[set[int]] = [set() for _ in range(4)]
         self.result: dict | None = None
+        self.claimed_any = False
+        self.thrown: list[set[int]] = [set() for _ in range(4)]
         dealt = []
         for seat in range(4):
             n = 14 if seat == 0 else 13
@@ -360,32 +392,69 @@ class RefGame:
                     self.hands[seat][t] += 1
         # §3.3: each seat sets aside all its bonus tiles at once (so all eight
         # can arrive together, #31), then draws the replacements.
-        for seat in range(4):
-            set_aside = [t for t in dealt[seat] if t >= 34]
-            self.bonus[seat].update(set_aside)
-            if self._flower_win(seat):
-                return
-            for _ in set_aside:
-                if not self._draw(seat, from_back=True):
+        self.dealt = dealt
+        if not self._set_aside(0):
+            self._deal_on()
+
+    def _set_aside(self, seat: int) -> bool:
+        set_aside = [t for t in self.dealt[seat] if t >= 34]
+        self.bonus[seat].update(set_aside)
+        self.deal_seat, self.deal_left = seat, len(set_aside)
+        return self._flowers(seat, drawn=False)
+
+    def _deal_on(self) -> None:
+        while True:
+            if self.deal_left > 0:
+                self.deal_left -= 1
+                if not self._draw(self.deal_seat, from_back=True):
                     return
+                continue
+            if self.deal_seat == 3:
+                break
+            if self._set_aside(self.deal_seat + 1):
+                return
+        self.dealing = False
         self.last_drawn = None
+        self.phase = "turn"
+        self.current = self.turn = 0
 
     # -- draws and bonus tiles --
     def _place_bonus(self, seat: int, tile: int) -> bool:
         self.bonus[seat].add(tile)
-        return self._flower_win(seat)
+        return self._flowers(seat, drawn=True)
 
-    def _flower_win(self, seat: int) -> bool:
-        """§7.5: seven bonus tiles win 花糊 (#32, 3 faan) at once, all eight 大花糊
-        (#31, 10 faan); paid by all three others, never under liability (§8.2).
-        Nobody wins on another seat's bonus tile."""
+    def _flower_score(self, seat: int, drawn: bool):
+        """§7.5: 花糊 (#32, 3) with seven, 大花糊 (#31, 10) with eight, plus
+        海底 (#6) and 槓上 (#7, or #8 at 10) for the moment (§7.5.2)."""
         n = len(self.bonus[seat])
-        if n < 7:
+        p = [(31, 10) if n == 8 else (32, 3)]
+        if self.kong_chain == 1:
+            p.append((7, 1))
+        elif self.kong_chain >= 2:
+            p.append((8, 10))
+        if drawn and self.front == self.back:
+            p.append((6, 1))
+        total = sum(f for _, f in p)
+        faan = min(total, self.rules.faan_cap)
+        return (faan, total, False, p)
+
+    def _flowers(self, seat: int, drawn: bool) -> bool:
+        """§7.5: all eight bonus tiles win 大花糊 at once; the seventh opens the
+        choice of 花糊 or play on (§7.5.1). Nobody wins on another seat's bonus
+        tile. True if the hand ended or waits for the choice."""
+        if not self.rules.flowers:
             return False
-        number, faan = (31, 10) if n == 8 else (32, 3)
-        faan = min(faan, self.rules.faan_cap)
-        self._finish([(seat, (faan, faan, False, [(number, faan)]), True, None, None)], flower=True)
-        return True
+        n = len(self.bonus[seat])
+        if n == 8:
+            self._finish([(seat, self._flower_score(seat, drawn), True, None, None)], flower=True)
+            return True
+        if n == 7:
+            self.phase = "flower"
+            self.current = seat
+            self.window = None
+            self.flower_resume = (seat, drawn)
+            return True
+        return False
 
     def _draw(self, seat: int, from_back: bool) -> bool:
         while True:
@@ -435,6 +504,8 @@ class RefGame:
                 and w is not None
                 and w.source == 0
             ),
+            # #33 人糊: a non-dealer's self-draw on its first turn, nothing claimed yet.
+            human=self_drawn and seat != 0 and self.discards == seat and not self.claimed_any,
         )
 
     def _claim_win(self, seat: int, tile: int):
@@ -467,8 +538,11 @@ class RefGame:
         for seat, sc, self_drawn, source, _tile in wins:
             share = self.rules.points(sc[0])
             paid = [0, 0, 0, 0]
-            # §8.3: the liable seat covers a self-drawn win only (包自摸).
+            # §8.3: the liable seat covers a self-drawn win only (包自摸); 包大三元
+            # not a win on a kong's replacement tile (§8.3.4).
             liable = None if flower or not self_drawn else self.liable[seat]
+            if seat in self.dragon_liable and self.kong_chain > 0:
+                liable = None
             if liable is not None:
                 paid[liable] = 3 * share
             elif self_drawn:
@@ -503,7 +577,16 @@ class RefGame:
         if self.phase == "rob" or self.remaining() == 0:
             return out
         have = self.hands[seat][w.tile]
-        if have >= 2:
+        hand = self.hands[seat]
+
+        def can_discard_after(used: list[int], banned: set[int]) -> bool:
+            # §4.1.4: the claim is offered only if a legal discard remains.
+            rest = list(hand)
+            for x in used:
+                rest[x] -= 1
+            return any(rest[x] and x not in banned for x in range(34))
+
+        if have >= 2 and can_discard_after([w.tile] * 2, {w.tile}):
             out.append(PUNG)
         if have >= 3:
             out.append(CLAIM_KONG)
@@ -512,8 +595,10 @@ class RefGame:
             for low in (t - 2, t - 1, t):
                 if low < 0 or suit_of(low) != suit_of(t) or low % 9 > 6:
                     continue
-                if all(x == t or self.hands[seat][x] for x in (low, low + 1, low + 2)):
-                    out.append(chow(low))
+                if all(x == t or hand[x] for x in (low, low + 1, low + 2)):
+                    used = [x for x in (low, low + 1, low + 2) if x != t]
+                    if can_discard_after(used, chow_ban(t, low)):
+                        out.append(chow(low))
         return out
 
     def _order(self, source: int) -> list[int]:
@@ -589,9 +674,22 @@ class RefGame:
                     self.hands[seat][x] -= 1
             meld = Meld("chow", low, source=source)
         self.locked[seat].clear()  # §4.4: the claimer's turn starts
+        self.claimed_any = True
         exposed = sum(1 for m in self.melds[seat] if not m.concealed)
-        if self.rules.twelve_tile_liability and exposed + 1 == 4:
+        # §8.3.3: no 12-tile liability for a fourth set that is a pung of a tile
+        # the claimer discarded earlier. A later liability replaces an earlier.
+        own = action == PUNG and tile in self.thrown[seat]
+        if self.rules.twelve_tile_liability and exposed + 1 == 4 and not own:
             self.liable[seat] = source
+            self.dragon_liable.discard(seat)
+        dragons = sum(1 for m in self.melds[seat] if m.kind != "chow" and m.tile in DRAGONS)
+        if action in (PUNG, CLAIM_KONG) and tile in DRAGONS and dragons == 2:
+            self.liable[seat] = source  # §8.3.4 包大三元
+            self.dragon_liable.add(seat)
+        if action == PUNG:
+            self.ban = {tile}
+        elif action != CLAIM_KONG:
+            self.ban = chow_ban(tile, action - 107)
         self.melds[seat].append(meld)
         if action == CLAIM_KONG:
             self.kong_chain = 0
@@ -612,6 +710,7 @@ class RefGame:
         self.kong_chain = 0
         self.drew = True
         self.drew_last = False
+        self.ban = set()
         self.locked[seat].clear()  # §4.4: a new turn ends the lock
         self._draw(seat, from_back=False)
 
@@ -621,6 +720,7 @@ class RefGame:
         self.phase = "turn"
         self.window = None
         self.drew = True
+        self.ban = set()
         self._draw(seat, from_back=True)
 
     # -- interface --
@@ -631,6 +731,8 @@ class RefGame:
         if self.phase == "over":
             return []
         seat = self.current
+        if self.phase == "flower":
+            return [SELF_DRAWN_WIN, PASS]
         if self.phase in ("claim", "rob"):
             return [*self._options(seat), PASS]
         out = []
@@ -642,12 +744,25 @@ class RefGame:
             out += [
                 added_kong(m.tile) for m in self.melds[seat] if m.kind == "pung" and hand[m.tile]
             ]
-        out += [discard(t) for t in range(34) if hand[t]]
+        out += [discard(t) for t in range(34) if hand[t] and t not in self.ban]
         return out
 
     def apply(self, a: int) -> None:
         assert a in self.legal(), (a, self.legal())
         seat = self.current
+        if self.phase == "flower":
+            assert self.flower_resume is not None
+            who, drawn = self.flower_resume
+            self.flower_resume = None
+            if a == SELF_DRAWN_WIN:
+                self._finish([(who, self._flower_score(who, drawn), True, None, None)], flower=True)
+                return
+            self.phase = "turn"
+            if drawn and not self._draw(who, from_back=True):
+                return
+            if self.dealing:
+                self._deal_on()
+            return
         if self.phase in ("claim", "rob"):
             w = self.window
             assert w is not None
@@ -676,6 +791,8 @@ class RefGame:
                 self._kong_draw(seat)
         else:
             self.hands[seat][a] -= 1
+            self.thrown[seat].add(a)
+            self.ban = set()
             self.discards += 1
             self.dealer_first = False
             self.kong_chain = 0

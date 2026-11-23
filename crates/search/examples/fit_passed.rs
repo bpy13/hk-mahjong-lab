@@ -239,6 +239,7 @@ fn best_discard_points(state: &State, seat: usize) -> f64 {
             robbing_kong: false,
             heavenly: false,
             earthly: false,
+            human: false,
         };
         if let Some(s) = score_win(&c, state.melds(seat), &ctx, rules) {
             best = best.max(rules.points(s.faan.min(rules.faan_cap)) as f64);

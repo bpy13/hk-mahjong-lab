@@ -871,9 +871,14 @@ mod tests {
     /// `fast` bot's play, so the positions), and the hash now also covers
     /// [`encode_passed`]. Models trained before this read a slightly different
     /// input; they are retrained in Task 18.
+    ///
+    /// 2026-11-23 (plan 2026-11-16 Task 32): new hashes because the rules changed
+    /// the games, not the encoding: the 食換 ban (§4.1.4) removes some discards
+    /// after a claim, 人糊 (#33) ends some hands, and the liabilities of §8.3
+    /// moved. `features.rs` is untouched; the models stay valid.
     #[test]
     fn encoding_matches_the_golden_hash() {
-        assert_eq!(golden_hash(12, 7), (981, 1486345915991748437));
+        assert_eq!(golden_hash(12, 7), (905, 4470685425503166381));
     }
 
     /// The same on many more positions (release build: `cargo test --release -p
@@ -881,7 +886,7 @@ mod tests {
     #[test]
     #[ignore]
     fn encoding_matches_the_golden_hash_on_many_positions() {
-        assert_eq!(golden_hash(400, 11), (36235, 16421221364795889110));
+        assert_eq!(golden_hash(400, 11), (36406, 1854484412720879190));
     }
 
     /// Checks that the fast acceptance counts (planes 23 and 24) equal the plain

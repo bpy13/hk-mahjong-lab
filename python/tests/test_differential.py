@@ -10,6 +10,7 @@ from mahjong._core import HkState, score_hand
 
 from .reference.hk_reference import (
     CLAIM_KONG,
+    PASS,
     PUNG,
     SELF_DRAWN_WIN,
     WIN,
@@ -236,3 +237,51 @@ def test_engine_matches_reference_on_clumped_walls() -> None:
     # Several winners on one discard come up here; robbing a kong is too rare for
     # random play and is covered by crates/hk/tests/scenarios.rs.
     assert multi > 0
+
+
+# ----- the second-round rules (plan 2026-11-16 Task 32) -----
+
+
+def flower_wall(rng: random.Random) -> list[int]:
+    """Bonus tiles mostly in one seat's deal or at the back of the wall, so
+    seven-flower choices (§7.5.1), passes and eighth flowers come up often;
+    tiles of a kind clumped so pungs, kongs and liabilities come up too."""
+    wall = clumped_wall(rng, flowers=False)
+    seat = rng.randrange(4)
+    start = [0, 14, 27, 40][seat]
+    for b in rng.sample(range(34, 42), 8):
+        if rng.random() < 0.6:
+            wall.insert(start + rng.randrange(13), b)
+        else:
+            wall.insert(len(wall) - rng.randrange(12), b)
+    return wall
+
+
+def test_engine_matches_reference_on_flower_walls() -> None:
+    flower_choices = passes = banned = 0
+    for seed in range(1_500):
+        rng = random.Random(30_000 + seed)
+        rules = random_rules(rng)
+        rules = Rules(**{**rules.__dict__, "flowers": True})
+        wall = flower_wall(rng)
+        kwargs = {k: getattr(rules, k) for k in rules.__dataclass_fields__}
+        rust = HkState.from_wall(wall, **kwargs)
+        ref = RefGame(wall, rules)
+        while ref.current_player() is not None:
+            assert rust.current_player() == ref.current_player(), seed
+            assert rust.phase() == ref.phase, (seed, rust.phase(), ref.phase)
+            legal = sorted(rust.legal_actions())
+            assert legal == sorted(ref.legal()), (seed, legal, sorted(ref.legal()))
+            if ref.phase == "flower":
+                flower_choices += 1
+            held = {t for t in range(34) if ref.hands[ref.current][t]}
+            if ref.phase == "turn" and ref.ban & held:
+                banned += 1
+            a = eager(legal, rng)
+            passes += ref.phase == "flower" and a == PASS
+            rust.apply(a)
+            ref.apply(a)
+        result = rust.result()
+        assert result is not None and ref.result is not None
+        assert result["deltas"] == ref.result["deltas"], seed
+    assert flower_choices > 100 and passes > 10 and banned > 10, (flower_choices, passes, banned)

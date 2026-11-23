@@ -384,6 +384,7 @@ fn best_wait_score(state: &State, seat: usize, waits: &[bool; NUM_KINDS]) -> (u8
             robbing_kong: false,
             heavenly: false,
             earthly: false,
+            human: false,
         };
         if let Some(s) = score_win(&c, state.melds(seat), &ctx, rules) {
             let p = rules.points(s.faan).min(u16::MAX as u32) as u16;

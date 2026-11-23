@@ -132,6 +132,14 @@ pub fn tournament(agents: &[Agent; 4], config: &TournamentConfig) -> Tournament 
                 while let Some(p) = s.current_player() {
                     s.legal_actions(&mut legal);
                     let a = agents[seating[p] as usize].choose(&s, &legal, &mut rng);
+                    // Checked in release builds too: a match must never make an
+                    // illegal move (plan 2026-11-16 Task 32).
+                    assert!(
+                        legal.contains(&a),
+                        "illegal move {a} by agent {} on wall {d} (phase {}, legal {legal:?})",
+                        seating[p],
+                        s.phase_name()
+                    );
                     s.apply(a);
                 }
                 out.push(HandRecord {

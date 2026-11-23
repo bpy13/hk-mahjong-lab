@@ -1929,7 +1929,9 @@ mod tests {
         );
     }
 
-    const FINGERPRINT_BEFORE: u64 = 16_049_877_700_524_193_257;
+    /// Recorded again for plan 2026-11-16 Task 32 (2026-11-23): the rules
+    /// changed the games (the 食換 ban, 人糊, the liabilities), not the bot.
+    const FINGERPRINT_BEFORE: u64 = 7_442_724_299_137_420_849;
 
     #[test]
     fn neighbour_rule_three_suits() {

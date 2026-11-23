@@ -174,6 +174,7 @@ pub fn labels(state: &State, me: usize) -> Labels {
                 robbing_kong: false,
                 heavenly: false,
                 earthly: false,
+                human: false,
             };
             if let Some(score) = score_win(&full, melds, &ctx, rules) {
                 if score.meets_minimum(rules) {

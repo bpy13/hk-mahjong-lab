@@ -20,5 +20,5 @@ pub use meld::{Meld, MeldKind};
 pub use position::{PositionError, PositionPhase, PositionSpec};
 pub use rules::{MultipleWinners, Payout, RuleSet, DISCARD_SHARES, ROBBED_KONG_SHARES};
 pub use state::{
-    Action, Event, HandResult, RiverEntry, State, WinRecord, DEALER, NUM_ACTION_CODES,
+    Action, Event, HandResult, Liability, RiverEntry, State, WinRecord, DEALER, NUM_ACTION_CODES,
 };

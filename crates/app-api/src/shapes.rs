@@ -677,6 +677,7 @@ mod tests {
             "faan.earthly_hand",
             "faan.eight_immortals",
             "faan.seven_rob_one",
+            "faan.hand_of_man",
         ];
         let got: Vec<String> = Pattern::ALL.iter().map(|&p| pattern_key(p)).collect();
         assert_eq!(got, expected);

@@ -289,7 +289,20 @@ impl Brain {
                 }
             })
             .collect();
-        let candidates = self.discard_candidates(&view);
+        // Only legal discards: right after a claim the 食換 ban (rules §4.1.4)
+        // removes some of the hand's tiles.
+        let candidates: Vec<Tile> = {
+            let c: Vec<Tile> = self
+                .discard_candidates(&view)
+                .into_iter()
+                .filter(|t| discards.contains(t))
+                .collect();
+            if c.is_empty() {
+                discards.clone()
+            } else {
+                c
+            }
+        };
         let (mut best, key) = best_discard(&view, &candidates, self.metric);
         // Kongs: declare one if the hand is no further from its goal afterwards.
         for &a in legal {
@@ -439,7 +452,10 @@ impl Brain {
     }
 
     fn choose(&self, state: &State, legal: &[Action]) -> Action {
-        if state.in_claim() || state.in_rob() {
+        if state.in_flower() {
+            // The flower choice (rules §7.5.1): always take 花糊.
+            Action::SelfDrawnWin
+        } else if state.in_claim() || state.in_rob() {
             self.claim(state, legal)
         } else {
             self.turn(state, legal)
