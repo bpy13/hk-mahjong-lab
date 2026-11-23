@@ -229,4 +229,72 @@ give the noise of one hour's mean advantage (the per-hand std over the square ro
 seat-hands an hour gives) and that noise relative to Task 10's setting: the lower, the more an
 hour of training tells.
 
-TABLE-PLACEHOLDER
+**The short of it (gpu job 312, 2026-11-23 06:20 to 06:38, exit 0).** The luck-removal parts cut
+no noise. The oracle critic explains nothing of the paired reward (held-out R² −0.006 with the
+hidden view, −0.002 without), so subtracting it changes no advantage and the `both` setting is
+Task 10's setting (noise 0.99 of Task 10's). The per-decision row's 0.05 is an artefact of that
+flat critic, not luck taken out (below). The one honest gain in the table is the unpaired
+`oracle` row, 0.47 of Task 10's noise, which comes from playing the learner in all four seats
+(five times the decisions an hour), not from the critic; it would cost the opponent pool (the pool
+needs paired games) and the hourly learner-minus-start figure. So the 24-hour run below is, in
+effect, Task 10's setting played six times longer, on the rules of Tasks 27, 31 and 32, with a
+copy of the network every hour; the `oracle` setting is the candidate for a next run.
+
+| Setting | Advantage std per decision | Std of a hand's summed advantage | Raw points per hand | Critic R² | Hands / h | Learner seat-hands / h | Decisions / h | Noise of an hour's mean | vs Task 10's |
+|---|---|---|---|---|---|---|---|---|---|
+| neither | 1.206 | 24.287 | 40.1 |  | 216,650 | 866,598 | 16,962,077 | 0.00133 | 0.49 |
+| same-deal baseline | 1.069 | 22.092 | 38.6 |  | 169,039 | 169,039 | 3,320,953 | 0.00274 | 1.00 |
+| oracle critic | 1.166 | 23.249 |  | 0.064 | 218,015 | 872,059 | 17,068,966 | 0.00127 | 0.47 |
+| both | 1.072 | 22.096 |  | -0.006 | 170,950 | 170,950 | 3,358,481 | 0.00272 | 0.99 |
+| both, per-decision credit | 0.247 | 1.040 |  | -0.006 | 171,016 | 171,016 | 3,359,791 | 0.00013 | 0.05 |
+| oracle critic, no hidden view | 1.167 | 23.259 |  | 0.064 | 218,015 | 872,059 | 17,068,966 | 0.00127 | 0.47 |
+| both, no hidden view | 1.070 | 22.087 |  | -0.002 | 170,950 | 170,950 | 3,358,481 | 0.00272 | 0.99 |
+| both, per-decision credit, no hidden view | 0.240 | 1.040 |  | -0.002 | 171,016 | 171,016 | 3,359,791 | 0.00013 | 0.05 |
+
+Rows: `neither` and `oracle critic` are unpaired (the learner in all four seats, the raw hand
+result as reward, four seat-hands a hand); `same-deal baseline` is Task 10's setting; `both` adds
+the critic; the `no hidden view` rows fit the same critic head on the position alone. Timing
+under load from other jobs: the paired rollout 979 s for 50,037 hands, the unpaired 43 s for
+4,004; one update 0.0015–0.0060 s a hand. The critic fitted on 40,028 hands with the trunk frozen
+(5 epochs) and was scored on 10,008 held-out hands.
+
+**What the table says.**
+1. *The critic.* On the raw reward the hidden view explains 6.4 % of the variance; the position
+   alone explains the same 6.4 %, so the three concealed hands and the next 16 wall tiles add
+   nothing the position does not already say. On the paired reward (the learner's points minus
+   the start network's on the same deal) the critic explains nothing at all: pairing has already
+   removed what the hidden view could see. A critic that predicts a constant subtracts a constant
+   from every advantage, and PPO normalises the batch, so `both` is Task 10's setting.
+2. *Per-decision credit: what it credits.* The advantage of a decision is V(next own decision)
+   minus V(now), with the hand's reward in place of V after the last decision (the one-step
+   actor-critic estimator). The sum over a hand telescopes to reward − V(first decision): the
+   hand's advantage, counted once. In the paired setting every one of the hand's 19.6 decisions
+   carries the whole hand's advantage, so the "summed over a hand" column holds 19.6 copies of
+   it (22.1) against one copy (1.04): that ratio, 0.047, is the 0.05, and it is bookkeeping, not
+   less luck in the signal.
+3. *Per-decision credit: can it bias the gradient?* Yes, and here it does. With a flat critic the
+   advantage of every decision but the hand's last is V(next) − V(now) ≈ 0 plus the critic's
+   noise, and the last decision carries the whole paired reward. Check: 1.072 / √19.6 = 0.242,
+   the table's 0.247. The gradient would then train only the hand's last decision (the winning
+   claim or the deal-in), with the earlier ones credited with nothing: the estimator's bias is
+   the whole of the critic's error, and the critic has not learned anything here. The estimator
+   is unbiased only when the critic is the true value, which it is not. Not run.
+4. *Unpaired play.* The honest gain: 0.47–0.49 of Task 10's noise, from 4 learner seat-hands a
+   hand and a faster rollout (no second game a wall); the per-hand std is a little higher (24.3
+   against 22.1). It drops the pool and the paired hourly figure.
+
+**Verdict on the setting:** `both` (paired reward, oracle critic as baseline), which is Task 10's
+setting plus a critic that trains online with the trunk and can only help if it learns over the
+24 hours; per-decision credit is not run (point 3). Orchestrator's call, 2026-11-23, after this
+table; it was put to Brian the same day with the note that the 0.05 reported earlier was not a
+real gain. The `oracle` setting is the candidate for a next run if this one does not move.
+
+**The run (part 2).** Script `experiments/stage/luckless.ps1 -Setting both`, gpu lane, 24 hours of
+training across restarts, from `models/stage-imitation.pt` and Task 10's pool, with Task 10's
+other settings (pull 0.02 constant, 4,096 hands an update, one pass, learning rate 3e-5, stall
+rule off), a copy of the network every hour (`runs/luckless/hour-NN.pt` / `.mjnn`), and every
+hour the learner minus the frozen start on the same tiles with its 95 % range, entropy and
+distance from the start (`runs/luckless/hourly.txt`). The engine is the one on main after Task 32
+(two-share discard payment, 食換 ban, flower choice, ADR 0004–0007), built into this checkout and
+frozen with the package. Then the end network against three strict `stage` bots over 40,000
+deals (cpu lane, `-Final`). gpu job 316 `hk-luckless` (queued 2026-11-23 15:10, about 24 GPU h plus the hourly 2,000-deal results) and cpu job 317 `hk-luckless-final` (after 316, about 0.8 CPU h); check `runs\luckless\hourly.txt`, `progress.txt`, `stopped.txt`, then `runs\lucklessinals-stage-40000.txt` in checkout `hk-mahjong-lab-2`. Results: RESULT-PLACEHOLDER (the hourly table, the end network's paired gain, and one verdict line: above `stage`, level or below; whether the hourly paired difference was still rising at hour 24).
