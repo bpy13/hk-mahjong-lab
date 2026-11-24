@@ -1,6 +1,7 @@
 # Board
 
 ## Workers
+- slot 1, Task 29 (the oracle run: results into the report, inbox question; waits on cpu job 331 `hk-luckless-hourly`), running since 2026-11-25 07:45
 
 ## Results
 - Task 29 the oracle run (slot 1, 2026-11-23): task waiting on gpu job 318 `hk-luckless` (setting `oracle`, 24 GPU h, hourly copies, expected end about 2026-11-24 17:15), cpu job 319 `hk-luckless-final` (after it, 0.8 CPU h) and cpu job 320 `hk-luckless-hourly` (after it, about 2.8 CPU h: hours 4, 8, 12, 16, 20, 24 and the start vs three `stage` on the same 20,000 deals), all from checkout `hk-mahjong-lab-workers`. The `both` run (jobs 316, 317) was stopped at 1.3 h on Brian's word (orchestrator, 16:30); its folder is `runs\luckless-both-stopped` in `hk-mahjong-lab-2`. Trainer fixed for unpaired runs (hourly row without the paired figure, hourly copies and stopped.txt; a time-stopped run resumes only with more time; new test), `-Hourly` match mode, `--eval-walls 500`; engine rebuilt from main and frozen; 6-minute CPU smoke run exit 0 (11 updates, 2,819 hands, three hourly rows with n/a for the paired figure, copies hour-01 to -03, stopped.txt written); pytest (ppo_cnn, pool, luck: 27), ruff, mypy pass; no paid API calls.
