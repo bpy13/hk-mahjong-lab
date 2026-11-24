@@ -333,11 +333,101 @@ the package. What differs from Task 10's setting:
 Smoke run before queueing (`-DryRun -Setting oracle`, 6 minutes on 4 CPU threads, 256 hands an
 update): exit 0, 11 updates, 2,819 hands (24,000 hands an hour on 4 CPU threads), three 2-minute "hourly" rows with n/a for the paired figure and entropy and distance filled in, copies hour-01 to hour-03 (.pt and .mjnn), two results against `value` and the frozen start, and `stopped.txt` ("time: 0.1 h of training reached") at the end; a second start on the same folder ends at once.
 
-Jobs: gpu job 318 `hk-luckless` (queued 2026-11-23 16:44, started at once, 24 GPU h plus the hourly
-results; expected end about 2026-11-24 17:15), cpu job 319 `hk-luckless-final` (after it, about
-0.8 CPU h: `runs\luckless\final\vs-stage-40000.txt`) and cpu job 320 `hk-luckless-hourly`
-(after it, about 2.8 CPU h: `runs\luckless\hourly-match\*.txt`), all in checkout
-`hk-mahjong-lab-workers`; check `runs\luckless\hourly.txt`, `progress.txt`, `stopped.txt`.
-Results: RESULT-PLACEHOLDER (the hourly table, the hourly copies against the start, the end
-network's paired gain against three `stage`, and one verdict line: above `stage`, level or
-below; whether the gain over the start was still rising at hour 24).
+Jobs: gpu job 318 `hk-luckless` (queued 2026-11-23 16:44, started at once), then cpu job 319
+`hk-luckless-final` and cpu job 320 `hk-luckless-hourly` after it, all in checkout
+`hk-mahjong-lab-workers`. The run was paused three times on Brian's word and resumed from its last
+checkpoint each time (the trainer's `--resume`; the same `-Setting oracle`): jobs 321 to 323
+(2026-11-23 18:49, after "in game right now, pause mahjong for a while" / "mahjong still paused? if
+so please resume"), 325 to 327 (2026-11-24 01:22, cancelled 16:15 on "pause mahjong training") and
+329 to 331 (2026-11-25 01:48, "also mahjong is paused? please resume" / "Yes, resume", from
+ckpt-000919 at 18.86 h). Training ended 2026-11-25 07:19 (gpu job 329, exit 0, `stopped.txt`:
+"time: 24 h of training reached"): 24.01 h of training, 1,232 updates, 5,048,304 hands
+(20,193,216 learner seat-hands), 233,000 hands an hour over the whole run (200,000–250,000 by
+hour, under other jobs' load). One CUDA out-of-memory warning at 19:12 on 2026-11-23 (hour 1 of
+job 321, the allocator's retry message; the update went through and the log has no gap). The
+final match is cpu job 330 (exit 0, 1,020 s on 8 threads); the hourly-copy matches are cpu job
+331 (started 2026-11-25 07:36, about 2.8 CPU h).
+
+**Results (slot 1, 2026-11-25).**
+
+*Hourly table* (`runs\luckless\hourly.txt`; no paired figure in unpaired mode, so the third and
+fourth columns are the trainer's own `evaluate()` reading of that hour's network: 2,000 hands,
+500 walls × 4 seatings, the learner in one seat against three frozen start networks, and the same
+against three `value` bots, raw points a hand, each ± about 2.3; `log.json`):
+
+| Hour | Hands | vs frozen start (± 2.3) | vs three `value` (± 2.3) | Entropy | Distance from start |
+|---|---|---|---|---|---|
+| 1 | 241,774 | −0.20 | +3.28 | 0.196 | 0.088 |
+| 2 | 221,267 | −0.10 | +3.15 | 0.179 | 0.093 |
+| 3 | 225,363 | +1.32 | +4.57 | 0.170 | 0.090 |
+| 4 | 225,390 | +0.68 | +4.75 | 0.166 | 0.090 |
+| 5 | 249,954 | +1.06 | +3.55 | 0.164 | 0.091 |
+| 6 | 245,855 | +1.52 | +4.94 | 0.167 | 0.091 |
+| 7 | 204,892 | +2.68 | +3.71 | 0.165 | 0.090 |
+| 8 | 241,762 | +2.14 | +4.23 | 0.164 | 0.090 |
+| 9 | 241,759 | +2.18 | +4.22 | 0.168 | 0.091 |
+| 10 | 188,487 | +0.56 | +3.81 | 0.167 | 0.092 |
+| 11 | 163,898 | +2.12 | +4.08 | 0.165 | 0.093 |
+| 12 | 167,989 | +1.53 | +4.43 | 0.171 | 0.090 |
+| 13 | 172,113 | +1.68 | +3.82 | 0.172 | 0.094 |
+| 14 | 176,204 | +2.50 | +3.90 | 0.169 | 0.093 |
+| 15 | 176,191 | +1.78 | +4.32 | 0.169 | 0.092 |
+| 16 | 184,399 | +2.35 | +3.70 | 0.172 | 0.093 |
+| 17 | 188,476 | +1.95 | +4.29 | 0.173 | 0.097 |
+| 18 | 172,091 | +1.76 | +4.31 | 0.172 | 0.097 |
+| 19 | 204,872 | +1.52 | +3.93 | 0.174 | 0.098 |
+| 20 | 241,780 | +2.16 | +4.00 | 0.177 | 0.099 |
+| 21 | 237,664 | +0.43 | +4.36 | 0.178 | 0.099 |
+| 22 | 237,665 | +1.78 | +4.60 | 0.189 | 0.109 |
+| 23 | 208,984 | +2.26 | +4.46 | 0.190 | 0.107 |
+| 24 | 229,475 | +2.29 | +2.95 | 0.186 | 0.104 |
+
+Reading it: each row's ± 2.3 is too wide for one hour to mean anything, but 22 of the 24 readings
+against the frozen start are positive, and the means of six hours (± 0.9 each) are +0.71 (hours
+1–6), +1.87 (7–12), +2.00 (13–18) and +1.74 (19–24): the network moved above its start in the
+first six hours and then held about +2 a hand against it, with no clear rise after hour 7 at this
+noise. The 20,000-deal paired matches of the hourly copies (job 331, below) are the figure that
+decides. Entropy fell from 0.196 to 0.164 by hour 5 and rose again to 0.186–0.190 in hours 22–24;
+the distance from the start went from 0.088 to 0.104, so the pull at 0.02 held it near the start
+throughout. In its own four-seat self-play the learner's win rate went from 23.9 % (hour 1) to
+23.2 % (hour 24) and the draw rate from 6.0 % to 8.2 %: the network plays slower, more careful
+hands against itself as training goes on. The oracle critic's held-out R² on the raw reward rose
+from 0.08 to 0.11 over the run (the frozen-trunk measurement gave 0.064).
+
+*Hourly copies against the start* (`-Hourly`, cpu job 331: hours 4, 8, 12, 16, 20, 24 and the
+start, each plus three strict `stage` on the same 20,000 deals, seed 2, into
+`runs\luckless\hourly-match\<name>-vs-stage-20000.txt`): HOURLY-COPY-PLACEHOLDER (each copy's
+points a hand, its gain over the start on the same deals, and whether it was still rising at
+hour 24).
+
+*End network against three strict `stage` bots, 40,000 deals* (cpu job 330, `-Final`, seats
+rotated, seed 1, `runs\luckless\final\vs-stage-40000.txt`; the two-share payment rule of Tasks 31
+and 32, so the points scale is larger than in Task 7's and Task 10's tables above, which were
+played under the old rule):
+
+| Bot | Points a hand | 95 % range | Win | Deal-in | Avg faan |
+|---|---|---|---|---|---|
+| End network (`runs\luckless\final.mjnn`, hour 24) | **+1.21** | ± 0.27 | 24.8 % | 16.6 % | 5.0 |
+| `stage` (seat 2) | −0.35 | ± 0.28 | 23.5 % | 19.0 % | 5.1 |
+| `stage` (seat 3) | −0.34 | ± 0.28 | 23.5 % | 18.6 % | 5.1 |
+| `stage` (seat 4) | −0.52 | ± 0.28 | 23.4 % | 18.9 % | 5.1 |
+
+Draws 6.1 %. The gain comes from both sides of the table: the network wins 1.3 points more often
+than a `stage` seat (24.8 % against 23.4–23.5 %) and deals in 2.0–2.4 points less often (16.6 %
+against 18.6–19.0 %), at the same average faan. For scale, under the same rule the best
+hand-made defence bot, `stage-safe:t=1`, gains +0.52 ± 0.09 a hand over plain `stage` (Task 31,
+`defence-false-alarms.md`); the network's gain is more than twice that. The earlier self-play
+networks were level (Task 7, −0.09 ± 0.22; Task 10, +0.15 ± 0.23, old rule).
+
+**Verdict: above `stage`.** +1.21 ± 0.27 points a hand over 40,000 deals, the range well clear of
+0: the first self-play network to beat the three-stage bot. Whether the gain over the start was
+still rising at hour 24: by the trainer's own 2,000-hand readings it was in place by hour 7 and
+flat after, within ± 0.9 per six hours; the paired 20,000-deal matches of the hourly copies (job
+331) settle it. What made the difference against the two level runs: six times the training
+(24 h), four learner seat-hands a hand with no second game a wall (the 0.47 noise of part 1's
+table), the critic explaining a tenth of the raw reward, and the new payment rule, where a
+deal-in costs double and careful play is worth more; this run cannot say which of these counts
+most. Nothing is a default and no network is in the app: `final.mjnn` and `final.pt` and the
+hourly copies are in `runs\luckless` of checkout `hk-mahjong-lab-workers` (not in git). What next
+is Brian's question in `docs/inbox.md` (another 24 h of `oracle` from hour 24, 24 h of `both`,
+stop and take it, each with its hours).
