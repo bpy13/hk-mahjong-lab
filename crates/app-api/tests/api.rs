@@ -989,6 +989,69 @@ fn the_selfplay_level_plays_a_hand_with_the_network_set() {
     hand_over(&events);
 }
 
+// -- hint and review against the network (hk-games D139) ---------------------------
+
+#[test]
+fn hint_net_and_grade_net_need_the_network() {
+    let (_cpu, mut api) = shared();
+    let id = mid_hand(&mut api, 9, 10);
+    let seat = ok(&api.legal_actions(&id))["seat"].as_u64().unwrap() as usize;
+    assert_eq!(error_code(&api.hint_net(&id, seat)), "error.no_net");
+    let pos = ok(&api.snapshot(&id));
+    let first = ok(&api.legal_actions(&id))["actions"][0].clone();
+    assert_eq!(
+        error_code(&api.grade_net(&pos.to_string(), &first.to_string(), 0)),
+        "error.no_net"
+    );
+}
+
+#[test]
+fn hint_net_and_grade_net_follow_the_network() {
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/cnn-test.mjnn");
+    let Ok(bytes) = std::fs::read(p) else {
+        eprintln!("models/cnn-test.mjnn missing: skipped");
+        return;
+    };
+    let (_cpu, mut api) = shared();
+    ok(&api.set_net(&bytes));
+    // Find a decision with a real choice.
+    let mut found = 0;
+    for seed in 20..60 {
+        let id = mid_hand(&mut api, seed, 12);
+        let legal = ok(&api.legal_actions(&id));
+        let actions = legal["actions"].as_array().unwrap().clone();
+        if actions.len() < 2 {
+            continue;
+        }
+        let seat = legal["seat"].as_u64().unwrap() as usize;
+        let mut net_move = ok(&api.bot_action(&id, "selfplay", 0));
+        net_move.as_object_mut().unwrap().remove("budget_used_ms");
+        net_move.as_object_mut().unwrap().remove("api");
+
+        let h = ok(&api.hint_net(&id, seat));
+        assert_eq!(h["by"], "net");
+        assert_eq!(h["moves"].as_array().unwrap().len(), 1);
+        assert_eq!(h["moves"][0]["action"], net_move);
+        assert_eq!(h["baseline"], net_move);
+        assert!(h["moves"][0]["score"].is_null());
+        assert!(h["progress"].is_object() && h["danger"].is_object());
+
+        let pos = ok(&api.snapshot(&id)).to_string();
+        let g = ok(&api.grade_net(&pos, &net_move.to_string(), 300));
+        assert_eq!(g["grade"], "best");
+        assert_eq!(g["best"], net_move);
+        let other = actions.iter().find(|a| **a != net_move).unwrap();
+        let g = ok(&api.grade_net(&pos, &other.to_string(), 300));
+        assert_eq!(g["best"], net_move, "the best move is the network's");
+        assert_ne!(g["grade"], "best");
+        found += 1;
+        if found == 3 {
+            break;
+        }
+    }
+    assert_eq!(found, 3, "three positions with a choice");
+}
+
 /// `cargo test -p mahjong-app-api --release -- --ignored --nocapture belief_timing`.
 #[test]
 #[ignore]

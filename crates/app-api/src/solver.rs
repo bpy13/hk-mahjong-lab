@@ -75,7 +75,8 @@ pub fn single_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
 
 /// PIMC for the player to move: the engine's shortlist (every special action,
 /// the best `candidates` discards and the heuristic baseline) plus `extra`
-/// (the move actually played, so a review can score it on the same samples),
+/// (the move actually played, and in a grade against the network the network's
+/// move, so they are scored on the same samples),
 /// up to `samples` determinizations within `time_limit`. With `belief` the
 /// determinizations come from the belief model, else from best-of-K.
 pub fn analysis(
@@ -84,12 +85,12 @@ pub fn analysis(
     candidates: usize,
     time_limit: Option<Duration>,
     seed: u64,
-    extra: Option<Action>,
+    extra: &[Action],
     belief: Option<&Arc<BeliefModel>>,
 ) -> Analysis {
     let seat = state.current_player().expect("the hand is not over");
     let (mut list, baseline) = shortlist(state, candidates.max(1));
-    if let Some(a) = extra {
+    for &a in extra {
         if !list.contains(&a) {
             list.push(a);
         }

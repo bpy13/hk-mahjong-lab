@@ -51,8 +51,10 @@ numbers. Native Rust uses `mahjong_app_api::Api` with the same methods.
 | `bot_action(game_id, level, budget_ms)` | level from `bot_levels` | `Action` plus `budget_used_ms` (not applied: call `apply` with it) |
 | `hint(game_id, seat, budget_ms)` | seat must be to move | `Hint` with the study extras |
 | `hint_with_samples(game_id, seat, budget_ms, samples)` | as `hint` | `Hint` with an explicit sample count (measurements, drills) |
+| `hint_net(game_id, seat)` | as `hint` | `Hint` with one move, the `set_net` network's, and `by: "net"`; no search (`score`, `win_rate` null, `samples` 0), the move's position reasons and the usual study extras (hk-games D139); `error.no_net` until `set_net` |
 | `review(game_id, seat, budget_ms)` | — | `{items: [ReviewItem], seat, budget_used_ms}` |
 | `grade(position, action, budget_ms)` | `Position`, `Action` | `Grade` |
+| `grade_net(position, action, budget_ms)` | as `grade` | `Grade` whose `best` is the `set_net` network's move: `best` grade exactly when `action` is that move; the loss is the search's points between the two (hk-games D139, the game review); `error.no_net` until `set_net` |
 | `snapshot(game_id)` | — | `Position` |
 | `restore(position)` | `Position` | `{game_id}` |
 | `drop_game(game_id)` | — | `{}` |
@@ -407,7 +409,7 @@ guessed. Shanten counts exchanges to a ready hand; "faan path" means the faan-aw
 | `error.unknown_game` | no game with that `game_id` |
 | `error.unknown_variant` | an unknown rule key or value, or `min_faan` above `faan_cap` |
 | `error.unknown_level` | a bot level not in `bot_levels` |
-| `error.no_net` | `bot_action` at `selfplay` before `set_net` |
+| `error.no_net` | `bot_action` at `selfplay`, `hint_net` or `grade_net` before `set_net` |
 | `error.bad_net` | `set_net` bytes that are not a policy network |
 | `error.bad_belief` | `set_belief` bytes that are not a belief model |
 | `error.bad_tile` | a malformed tile id |

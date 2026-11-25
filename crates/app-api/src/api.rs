@@ -464,7 +464,7 @@ impl Api {
                 candidates,
                 search_budget(budget_ms),
                 g.decision_seed(level_index),
-                None,
+                &[],
                 self.belief.as_ref(),
             )
             .choose(EXPERT_Z)
@@ -488,6 +488,54 @@ impl Api {
         samples: usize,
     ) -> String {
         respond(self.hint_inner(game_id, seat, budget_ms, samples))
+    }
+
+    /// The policy network given to `set_net`, or `error.no_net`.
+    fn net(&self) -> ApiResult<&NetPolicy> {
+        self.net
+            .as_ref()
+            .ok_or_else(|| ApiError::new("error.no_net", "this call needs set_net first"))
+    }
+
+    /// `Hint` (§5) whose one move is the self-play network's (hk-games D139): no search,
+    /// so `score` and `win_rate` are null and the reasons are the position's facts about
+    /// that move. The study extras are the same as [`Api::hint`]'s. Needs `set_net`.
+    pub fn hint_net(&self, game_id: &str, seat: usize) -> String {
+        respond(self.hint_net_inner(game_id, seat))
+    }
+
+    fn hint_net_inner(&self, game_id: &str, seat: usize) -> ApiResult<Value> {
+        check_seat(seat)?;
+        let net = self.net()?;
+        let g = self.game(game_id)?;
+        must_be_to_move(&g.state, seat)?;
+        let start = Instant::now();
+        let legal = g.state.legal_actions_vec();
+        let study = Study::of(&g.state, seat);
+        let best = net.choose(&g.state, &legal, &mut g.rng(0xA1));
+        let reasons = if legal.len() == 1 {
+            vec![Reason::new("reason.forced")]
+        } else {
+            position_reasons(&g.state, &study, best, &legal)
+        };
+        Ok(json!({
+            "seat": seat,
+            "phase": g.state.phase_name(),
+            "moves": [{
+                "action": action_to_json(best),
+                "score": Value::Null,
+                "win_rate": Value::Null,
+                "numbers": {},
+                "reasons": reasons,
+            }],
+            "baseline": action_to_json(best),
+            "samples": 0,
+            "by": "net",
+            "progress": study.progress_json(),
+            "danger": study.danger_json(),
+            "discards": study.discards_json(),
+            "budget_used_ms": elapsed_ms(start),
+        }))
     }
 
     fn hint_inner(
@@ -520,7 +568,7 @@ impl Api {
                 HINT_CANDIDATES,
                 search_budget(budget_ms),
                 g.decision_seed(0xA1),
-                None,
+                &[],
                 self.belief.as_ref(),
             );
             let moves = a
@@ -597,7 +645,7 @@ impl Api {
                 REVIEW_CANDIDATES,
                 item_limit,
                 g.seed.wrapping_add(*turn as u64),
-                Some(*played),
+                &[*played],
                 self.belief.as_ref(),
             );
             if a.samples > 0 {
@@ -622,7 +670,18 @@ impl Api {
     /// `Grade` (§6): how `action` compares with the solver's best move in
     /// `position`, for the player to act there.
     pub fn grade(&self, position: &str, action: &str, budget_ms: u32) -> String {
-        respond(grade_inner(position, action, budget_ms))
+        respond(grade_inner(position, action, budget_ms, None))
+    }
+
+    /// [`Api::grade`] against the self-play network (hk-games D139, the game review): `best`
+    /// is the network's move, so `grade` is `best` exactly when `action` is that move. The
+    /// loss is still the search's points between the two moves, played on the same samples,
+    /// so the grade buckets mean what they mean elsewhere. Needs `set_net`.
+    pub fn grade_net(&self, position: &str, action: &str, budget_ms: u32) -> String {
+        respond(
+            self.net()
+                .and_then(|net| grade_inner(position, action, budget_ms, Some(net))),
+        )
     }
 
     /// `Position`: the whole hidden state, enough to `restore` an identical hand.
@@ -841,7 +900,14 @@ fn entry_from_position(position: &str) -> ApiResult<GameEntry> {
     Ok(entry)
 }
 
-fn grade_inner(position: &str, action: &str, budget_ms: u32) -> ApiResult<Value> {
+/// The grade of `action` at `position`. With `net`, the network's move is the best move
+/// (put first in the analysis), else the search's own first choice.
+fn grade_inner(
+    position: &str,
+    action: &str,
+    budget_ms: u32,
+    net: Option<&NetPolicy>,
+) -> ApiResult<Value> {
     let g = entry_from_position(position)?;
     let a: ActionJson = parse_json("action", action)?;
     let seat = g
@@ -862,15 +928,27 @@ fn grade_inner(position: &str, action: &str, budget_ms: u32) -> ApiResult<Value>
             "budget_used_ms": elapsed_ms(start),
         }));
     }
-    let a = analysis(
+    let net_best = net.map(|n| n.choose(&g.state, &legal, &mut g.rng(0xA1)));
+    let extra: Vec<Action> = std::iter::once(played).chain(net_best).collect();
+    let mut a = analysis(
         &g.state,
         HINT_SAMPLES,
         HINT_CANDIDATES,
         search_budget(budget_ms),
         g.decision_seed(0xA1),
-        Some(played),
+        &extra,
         None,
     );
+    if let Some(n) = net_best {
+        // The network's move becomes the one every other move is measured against.
+        let i = a
+            .moves
+            .iter()
+            .position(|m| m.action == n)
+            .expect("the network's move is a candidate");
+        let m = a.moves.remove(i);
+        a.moves.insert(0, m);
+    }
     let study = Study::of(&g.state, seat);
     let (mut item, best) = compare(&g.state, &study, &legal, &a, played);
     item["seat"] = json!(seat);

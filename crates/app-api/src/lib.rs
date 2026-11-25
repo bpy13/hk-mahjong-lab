@@ -113,6 +113,21 @@ pub mod python {
         ) -> String {
             py.detach(|| self.inner.grade(position, action, budget_ms))
         }
+        /// The hint whose move is the `set_net` network's (no search).
+        pub fn hint_net(&self, game_id: &str, seat: usize) -> String {
+            self.inner.hint_net(game_id, seat)
+        }
+
+        /// `grade` with the `set_net` network's move as the best move.
+        pub fn grade_net(
+            &self,
+            py: Python<'_>,
+            position: &str,
+            action: &str,
+            budget_ms: u32,
+        ) -> String {
+            py.detach(|| self.inner.grade_net(position, action, budget_ms))
+        }
 
         pub fn snapshot(&self, game_id: &str) -> String {
             self.inner.snapshot(game_id)
@@ -235,6 +250,15 @@ pub mod wasm {
 
         pub fn grade(&self, position: &str, action: &str, budget_ms: u32) -> String {
             self.inner.grade(position, action, budget_ms)
+        }
+        /// The hint whose move is the `set_net` network's (no search).
+        pub fn hint_net(&self, game_id: &str, seat: usize) -> String {
+            self.inner.hint_net(game_id, seat)
+        }
+
+        /// `grade` with the `set_net` network's move as the best move.
+        pub fn grade_net(&self, position: &str, action: &str, budget_ms: u32) -> String {
+            self.inner.grade_net(position, action, budget_ms)
         }
 
         pub fn snapshot(&self, game_id: &str) -> String {

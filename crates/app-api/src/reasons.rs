@@ -395,7 +395,18 @@ pub fn solver_reasons(this: &ActionStats, analysis: &Analysis) -> Vec<Reason> {
     } else {
         Some(best)
     };
-    if let Some(other) = other {
+    // A grade against the network puts the network's move first even when the search
+    // scores another move higher (hk-games D139). Where the search clearly disagrees
+    // with that order, no points sentence fits, so none is given.
+    let disagrees = other.is_some_and(|other| {
+        let (ahead, behind) = if this.action == best.action {
+            (this, other)
+        } else {
+            (best, this)
+        };
+        behind.mean - ahead.mean > SIGNIFICANCE * pair_se(this, other)
+    });
+    if let Some(other) = other.filter(|_| !disagrees) {
         let gap = (best.mean - other.mean.min(this.mean)).max(0.0);
         let se = pair_se(this, other);
         let key = if gap <= SIGNIFICANCE * se {
