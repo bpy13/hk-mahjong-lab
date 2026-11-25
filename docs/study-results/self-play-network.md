@@ -396,9 +396,34 @@ from 0.08 to 0.11 over the run (the frozen-trunk measurement gave 0.064).
 
 *Hourly copies against the start* (`-Hourly`, cpu job 331: hours 4, 8, 12, 16, 20, 24 and the
 start, each plus three strict `stage` on the same 20,000 deals, seed 2, into
-`runs\luckless\hourly-match\<name>-vs-stage-20000.txt`): HOURLY-COPY-PLACEHOLDER (each copy's
-points a hand, its gain over the start on the same deals, and whether it was still rising at
-hour 24).
+`runs\luckless\hourly-match\<name>-vs-stage-20000.txt`; job 331 exit 0, 07:36 to 08:35, about
+8.4 minutes a match on the CPU lane). Each row is one match: the copy in seat 1 plus three
+`stage`; the gain is the copy's points minus the start's points on the same deals (the two
+matches share the walls but not the play, so the gain's range is at most ± 0.56, the
+independent-samples bound, and smaller in truth):
+
+| Copy | Points a hand | 95 % range | Gain over the start | Win | Deal-in | `stage` seats |
+|---|---|---|---|---|---|---|
+| Start (`teacher.mjnn`, the imitation network) | −0.40 | ± 0.39 | — | 23.6 % | 18.6 % | +0.13, +0.19, +0.08 |
+| Hour 4 | +0.67 | ± 0.40 | +1.07 | 24.5 % | 17.9 % | −0.32, +0.09, −0.44 |
+| Hour 8 | +0.77 | ± 0.40 | +1.17 | 24.4 % | 17.6 % | −0.38, +0.06, −0.44 |
+| Hour 12 | +0.47 | ± 0.39 | +0.87 | 24.5 % | 17.7 % | −0.04, −0.01, −0.42 |
+| Hour 16 | +0.82 | ± 0.40 | +1.22 | 24.6 % | 17.4 % | −0.45, −0.05, −0.32 |
+| Hour 20 | +1.00 | ± 0.39 | +1.40 | 24.6 % | 16.9 % | −0.35, −0.18, −0.47 |
+| Hour 24 (= `final.mjnn`) | +1.19 | ± 0.39 | +1.59 | 24.8 % | 16.7 % | −0.51, −0.34, −0.35 |
+
+Draws 5.5–6.1 %, average faan 5.1 in every seat. The hour-24 copy's +1.19 ± 0.39 on seed 2 agrees
+with the 40,000-deal final match on seed 1 below (+1.21 ± 0.27). Reading it: the start network is
+a little below `stage` (−0.40, the same level as Task 4b's imitation start); by hour 4 the copy
+is already +1.07 over it, two thirds of the final gain, so most of the gain came in the first
+four hours, as the trainer's own readings said. After that the copies rise slowly: a straight
+line through the six copies climbs 0.026 points a hand per hour (95 % range 0.002 to 0.050,
+from each match's ± 0.40), about +0.6 a hand per 24 hours, and the last two copies are the
+highest; the deal-in rate falls almost every step, 17.9 % at hour 4 to 16.7 % at hour 24, while
+the win rate barely moves (24.4–24.8 %), so the later hours bought defence, not offence. The
+hour-12 dip (+0.47) is within one match's range of its neighbours. **Still rising at hour 24:
+yes, slowly** (the slope's range just excludes 0; a further 24 hours at this rate would be worth
+about +0.6 a hand, if the rise holds).
 
 *End network against three strict `stage` bots, 40,000 deals* (cpu job 330, `-Final`, seats
 rotated, seed 1, `runs\luckless\final\vs-stage-40000.txt`; the two-share payment rule of Tasks 31
@@ -421,9 +446,12 @@ networks were level (Task 7, −0.09 ± 0.22; Task 10, +0.15 ± 0.23, old rule).
 
 **Verdict: above `stage`.** +1.21 ± 0.27 points a hand over 40,000 deals, the range well clear of
 0: the first self-play network to beat the three-stage bot. Whether the gain over the start was
-still rising at hour 24: by the trainer's own 2,000-hand readings it was in place by hour 7 and
-flat after, within ± 0.9 per six hours; the paired 20,000-deal matches of the hourly copies (job
-331) settle it. What made the difference against the two level runs: six times the training
+still rising at hour 24: yes, slowly. The 20,000-deal matches of the hourly copies (job 331, table
+above) put two thirds of the gain in the first four hours (+1.07 over the start at hour 4) and
+then a climb of about 0.026 a hand per hour (95 % range 0.002 to 0.050) to +1.59 at hour 24, the
+deal-in rate falling from 17.9 % to 16.7 % on the way; the trainer's own 2,000-hand readings
+(± 0.9 per six hours) were too coarse to see it.
+What made the difference against the two level runs: six times the training
 (24 h), four learner seat-hands a hand with no second game a wall (the 0.47 noise of part 1's
 table), the critic explaining a tenth of the raw reward, and the new payment rule, where a
 deal-in costs double and careful play is worth more; this run cannot say which of these counts
