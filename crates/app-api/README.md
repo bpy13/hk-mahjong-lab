@@ -56,6 +56,8 @@ numbers. Native Rust uses `mahjong_app_api::Api` with the same methods.
 | `snapshot(game_id)` | — | `Position` |
 | `restore(position)` | `Position` | `{game_id}` |
 | `drop_game(game_id)` | — | `{}` |
+| `set_belief(bytes)` | a belief `.mjnn` | `{belief: true}`; hint, review and the expert deal their guesses with it |
+| `set_net(bytes)` | a policy `.mjnn` | `{net: true}`; the `selfplay` level plays it |
 
 Two shapes differ from the contract's table because every response must be an object with
 `api`: `legal_actions` wraps the list in `{actions}` and `review` wraps it in `{items}`.
@@ -110,7 +112,7 @@ winds, dragons), repeats kept.
                 "payout": ["half_spicy", "full_spicy"], "multiple_winners": ["all", "head_bump"],
                 "twelve_tile_liability": ["on", "off"], "prevailing_wind": ["east", "south", "west", "north"],
                 "passed_win_lock": ["on", "off"] },
-  "bot_levels": ["random", "easy", "medium", "hard", "expert"],
+  "bot_levels": ["random", "easy", "medium", "hard", "expert", "selfplay"],
   "has_hint": true, "has_review": true, "has_grade": true,
   "tiles": { "1m": "tile.1_characters", "...": "..." },
   "faan": [ { "key": "faan.self_drawn", "number": 1, "limit": false }, "..." ],
@@ -353,6 +355,7 @@ otherwise an upper bound). The numbers are estimates under the rollout bot's pla
 | `medium` | `defensive` | hands that meet the minimum; folds to the safest tile when far from ready against a threat (the lab UI's 中級) |
 | `hard` | `value` | hands that meet the minimum, never folds (the strongest rule-based bot in `docs/study-results/phase1-solver.md`) |
 | `expert` | `pimc:samples=96,candidates=4` | the PIMC solver as the lab UI's 高級 bot: it leaves the `value` baseline only when a candidate beats it by 2 standard errors; stops early at the budget |
+| `selfplay` | `net:` with the network given to `set_net` | the legal move the network scores highest (a legal win always); not graded against the others; `error.no_net` until `set_net` (hk-games D135 plays the Task 29 self-play network) |
 
 The rule-based bots take well under a millisecond per decision. Levels are ordered by points
 per hand against the `value` field (`docs/study-results/phase1-solver.md`): random −13.1,
@@ -404,6 +407,9 @@ guessed. Shanten counts exchanges to a ready hand; "faan path" means the faan-aw
 | `error.unknown_game` | no game with that `game_id` |
 | `error.unknown_variant` | an unknown rule key or value, or `min_faan` above `faan_cap` |
 | `error.unknown_level` | a bot level not in `bot_levels` |
+| `error.no_net` | `bot_action` at `selfplay` before `set_net` |
+| `error.bad_net` | `set_net` bytes that are not a policy network |
+| `error.bad_belief` | `set_belief` bytes that are not a belief model |
 | `error.bad_tile` | a malformed tile id |
 | `error.bad_action` | an unknown `type`, a missing tile, or an invalid `code` |
 | `error.illegal_action` | a well-formed action the rules do not allow now (tile not in hand, claim outside a window, a win that is not complete or is below the minimum) |

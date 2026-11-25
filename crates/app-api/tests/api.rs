@@ -92,7 +92,8 @@ fn meta_lists_variants_levels_and_keys() {
     assert_eq!(m["game"], "mahjong");
     assert_eq!(m["seats"], json!([4, 4]));
     assert_eq!(m["bot_levels"][0], "random");
-    assert_eq!(m["bot_levels"].as_array().unwrap().len(), 5);
+    assert_eq!(m["bot_levels"].as_array().unwrap().len(), 6);
+    assert_eq!(m["bot_levels"][5], "selfplay");
     assert_eq!(m["variants"]["payout"][0], "half_spicy");
     assert_eq!(m["variants"]["flowers"], json!(["on", "off"]));
     assert_eq!(m["has_hint"], true);
@@ -945,6 +946,47 @@ fn hint_and_expert_work_with_the_belief_model_set() {
     ok(&api.apply(&id, &played.to_string()));
     let r = ok(&api.review(&id, 0, 3000));
     assert!(!r["items"].as_array().unwrap().is_empty());
+}
+
+// -- the selfplay level (hk-games D135) ---------------------------------------------
+
+#[test]
+fn the_selfplay_level_needs_a_policy_network() {
+    let (_cpu, mut api) = shared();
+    let id = mid_hand(&mut api, 9, 10);
+    assert_eq!(
+        error_code(&api.bot_action(&id, "selfplay", 0)),
+        "error.no_net"
+    );
+    assert_eq!(error_code(&api.set_net(b"not a network")), "error.bad_net");
+    if let Some(belief) = belief_bytes() {
+        // A real network, but with no policy output: refused, never played.
+        assert_eq!(error_code(&api.set_net(&belief)), "error.bad_net");
+    }
+    assert_eq!(
+        error_code(&api.bot_action(&id, "selfplay", 0)),
+        "error.no_net"
+    );
+}
+
+#[test]
+fn the_selfplay_level_plays_a_hand_with_the_network_set() {
+    // Any policy network will do; the lab's test network is not in git either.
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/cnn-test.mjnn");
+    let Ok(bytes) = std::fs::read(p) else {
+        eprintln!("models/cnn-test.mjnn missing: skipped");
+        return;
+    };
+    let (_cpu, mut api) = shared();
+    assert_eq!(ok(&api.set_net(&bytes))["net"], true);
+    let id = new_game(&mut api, 3);
+    // The same position gives the same move (the server replays the phone's deals).
+    let a = ok(&api.bot_action(&id, "selfplay", 0));
+    let b = ok(&api.bot_action(&id, "selfplay", 0));
+    assert_eq!(a["code"], b["code"]);
+    let (n, events) = play_out(&mut api, &id, "selfplay");
+    assert!(n > 0);
+    hand_over(&events);
 }
 
 /// `cargo test -p mahjong-app-api --release -- --ignored --nocapture belief_timing`.

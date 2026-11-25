@@ -49,6 +49,11 @@ pub mod python {
             self.inner.set_belief(bytes)
         }
 
+        /// Sets the policy network (bytes of a `.mjnn` file) the `selfplay` bot plays.
+        pub fn set_net(&mut self, bytes: &[u8]) -> String {
+            self.inner.set_net(bytes)
+        }
+
         pub fn new_game(&mut self, config: &str) -> String {
             self.inner.new_game(config)
         }
@@ -181,6 +186,11 @@ pub mod wasm {
         /// expert bot deal their guesses with.
         pub fn set_belief(&mut self, bytes: &[u8]) -> String {
             self.inner.set_belief(bytes)
+        }
+
+        /// Sets the policy network (bytes of a `.mjnn` file) the `selfplay` bot plays.
+        pub fn set_net(&mut self, bytes: &[u8]) -> String {
+            self.inner.set_net(bytes)
         }
 
         pub fn new_game(&mut self, config: &str) -> String {

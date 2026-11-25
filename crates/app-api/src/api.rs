@@ -17,8 +17,8 @@ use crate::solver::{
     TEACHER_SAMPLES,
 };
 use mahjong_games::{Game, Policy};
-use mahjong_hk::{Action, RuleSet, State};
-use mahjong_search::{ActionStats, Analysis, BeliefModel, Bot, Mlp};
+use mahjong_hk::{Action, RuleSet, State, NUM_ACTION_CODES};
+use mahjong_search::{ActionStats, Analysis, BeliefModel, Bot, Mlp, NetPolicy};
 use mahjong_tiles::Tile;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,8 +28,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use web_time::Instant;
 
-/// Bot levels, weakest first (`GameMeta.bot_levels`).
-pub const BOT_LEVELS: [&str; 5] = ["random", "easy", "medium", "hard", "expert"];
+/// Bot levels (`GameMeta.bot_levels`): the five graded levels weakest first, then
+/// `selfplay`, the trained network set with `set_net` (hk-games D135). New levels go
+/// last: a level's place seeds its bot's random draws, so moving one changes its moves.
+pub const BOT_LEVELS: [&str; 6] = ["random", "easy", "medium", "hard", "expert", "selfplay"];
+
+/// The level that plays the network given to `set_net`.
+const NET_LEVEL: &str = "selfplay";
 
 /// The engine bot behind each rule-based level (see `README.md`, "Bot levels").
 fn bot_name(level: &str) -> Option<&'static str> {
@@ -196,6 +201,8 @@ pub struct Api {
     /// The belief model `hint`, `review` and the expert bot deal their guesses
     /// with (`set_belief`); `None` keeps the hand-written best-of-K sampler.
     belief: Option<Arc<BeliefModel>>,
+    /// The policy network the `selfplay` level plays (`set_net`); `None` until set.
+    net: Option<NetPolicy>,
 }
 
 impl std::fmt::Debug for Api {
@@ -203,6 +210,7 @@ impl std::fmt::Debug for Api {
         f.debug_struct("Api")
             .field("games", &self.games.len())
             .field("belief", &self.belief.is_some())
+            .field("net", &self.net.is_some())
             .finish()
     }
 }
@@ -267,6 +275,25 @@ impl Api {
                 .map(|m| {
                     self.belief = Some(Arc::new(m));
                     json!({"belief": true})
+                }),
+        )
+    }
+
+    /// Sets the policy network (the bytes of a `.mjnn` file with a `policy` output of
+    /// one value per action code) that the `selfplay` bot plays: the legal move it
+    /// scores highest, a legal win always. A bad blob returns an error and leaves the
+    /// earlier setting.
+    pub fn set_net(&mut self, bytes: &[u8]) -> String {
+        respond(
+            Mlp::from_bytes(bytes)
+                .and_then(|m| match m.output("policy") {
+                    Some(r) if r.len() == NUM_ACTION_CODES => Ok(m),
+                    _ => Err("not a policy network".to_string()),
+                })
+                .map_err(|e| ApiError::new("error.bad_net", e))
+                .map(|m| {
+                    self.net = Some(NetPolicy(Arc::new(m)));
+                    json!({"net": true})
                 }),
         )
     }
@@ -417,6 +444,11 @@ impl Api {
             // same everywhere, so the server can replay the phone's random bot (hk-games D28).
             let i = g.rng(level_index).gen_range(0..legal.len() as u32);
             legal[i as usize]
+        } else if level == NET_LEVEL {
+            let net = self.net.as_ref().ok_or_else(|| {
+                ApiError::new("error.no_net", "the selfplay level needs set_net first")
+            })?;
+            net.choose(&g.state, &legal, &mut g.rng(level_index))
         } else if let Some(name) = bot_name(level) {
             let bot = Bot::by_name(name).expect("a known engine bot");
             bot.choose(&g.state, &legal, &mut g.rng(level_index))
