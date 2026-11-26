@@ -544,6 +544,12 @@ watch session's plain work copy into this repository first, so the work has a hi
     `cargo fmt --check`, `cargo clippy` and `cargo test` pass; pushed to main. Tell the orchestrator the commit, so
     hk-games can move its pin.
 
+- [ ] **Task 34: 24 more hours of the `oracle` self-play, after big2's run** (opus) (checkpoint) `[parallel-ok]`
+  - Why: Brian, 2026-11-27: "honestly mahjong needs the continuation training more than big2, but I guess it can wait behind big2 given our timeframe". Task 29's hourly copies were still rising at hour 24 (hour 20 +1.00, hour 24 +1.19 against three strict `stage`).
+  - What: resume Task 29's `oracle` run (`experiments/stage/luckless.ps1 -Setting oracle`, from its hour-24 checkpoint, same settings, same engine as main now; say if the engine changed since and what that means for the comparison) for 24 more hours, a copy every hour, in 4-hour gpu jobs so other short jobs can pass between them. Queue the first gpu job with a dependency on big2's last training job (queue job 364, `big2-36-train24`) so it never takes the GPU between big2's jobs; if big2's run stops early, 364 is skipped: then make the dependency the last big2 job that ran (check `jobq.ps1 status`). Measure like Task 29: the end network and the copies at hours 28/32/36/40/44/48 against three strict `stage` (40,000 deals for the end, Task 29's hourly set for the copies), and the end network head to head against the hour-24 network (`runs/luckless/final.mjnn`), seats rotated, paired, with ranges.
+  - Done when: the jobs are queued (ids here, with the dependency shown in `jobq.ps1 status`); after the run, the table and a verdict (still rising / flat) in `docs/study-results/self-play-network.md` and an inbox question (keep the new network for the app / keep hour 24). Never start a third 24 h run without Brian's word. No network goes into the app in this task.
+  - Notes: CPUs 4-19 only; local only, no paid API; no sound.
+
 ## Shared files and safety
 - Orchestrator's calls on worker questions, 2026-11-16 (Brian may change them): Task 5 adds one
   additive method `HkVecEnv.observe_history()` to `crates/pybind/src/rl.rs` and owns it; Task 4
