@@ -459,3 +459,40 @@ most. Nothing is a default and no network is in the app: `final.mjnn` and `final
 hourly copies are in `runs\luckless` of checkout `hk-mahjong-lab-workers` (not in git). What next
 is Brian's question in `docs/inbox.md` (another 24 h of `oracle` from hour 24, 24 h of `both`,
 stop and take it, each with its hours).
+
+## 24 more hours of `oracle` (Task 34, queued 2026-11-27)
+
+Brian, 2026-11-27: "honestly mahjong needs the continuation training more than big2, but I guess it
+can wait behind big2 given our timeframe"; and "during the queued continuation training it should
+also match against its older version like in big2 to gain a more comprehensive view of its gain
+over the course of training".
+
+Setup (slot 1):
+- The run goes on from Task 29's hour-24 checkpoint (`ckpt-001232.pt`, 5,048,304 hands) with the
+  same settings (`luckless.ps1 -Setting oracle`: unpaired, oracle critic, no pool, learning rate
+  3e-5, pull 0.02, 4,096 hands per update, an hourly copy), in its own folder `runs\luckless48`
+  (checkout `hk-mahjong-lab-workers`), so Task 29's `runs\luckless` and its `final.mjnn` (the
+  network on the game server) stay as they are. Its hour-24 network is copied in as
+  `hour-24.mjnn`; copies go on from `hour-25`.
+- Engine: unchanged since Task 29. The only commits to `crates/` or `python/` after Task 29's
+  freeze (612fdd0) touch `crates/app-api` (hk-games Tasks N1 and N4), which the trainer does not
+  use; the trainer code is byte for byte the frozen one. So the run is frozen again from main
+  (`-Run luckless48 -Freeze`) and plays the same game as hours 0 to 24: the figures compare
+  directly.
+- Resume checked on a copy of the folder (CPU, 0.02 h more): it loads the checkpoint, clears the
+  time stop, trains, writes `hour-25` and stops on its new time.
+- Six gpu jobs of 4 hours (`-Hours 28`, `32`, ... `48`), each after the one before, the first
+  after big2's last training job (queue job 364), so other gpu jobs can pass between them.
+- After each gpu job, one cpu job (`-Copy <hour>`): the copy plus three strict `stage` on Task 29's
+  20,000 deals (seed 2, comparable with its hourly-copy figures), and head to head, networks only,
+  against the copy 4 hours before and against hour 24: two of each, both seatings (A B A B and
+  A A B B, each rotated), the same 7,500 walls (seed 4), new example `h2h` (95 % range over walls).
+  Size from a 300-wall pilot (hour 24 against hour 20: +1.04 ± 1.49 a hand, so the spread of a
+  wall's score is about 13 points): 7,500 walls gives about ± 0.3 a hand. After the last gpu job,
+  `-Final`: the end network plus three strict `stage` on Task 29's 40,000 deals (seed 1).
+- Cost: about 24.3 GPU h and 22.5 CPU h (copy jobs about 2.2 h for hour 28, 4 h for each other,
+  final 0.3 h); local only, no paid API calls.
+
+Results: RESULT-PLACEHOLDER-T34 (the table: hour, vs three `stage` (20,000 deals), vs the copy 4
+hours before, vs hour 24; the end network vs three `stage` over 40,000 deals; verdict: still
+rising / flat).
