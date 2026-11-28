@@ -410,11 +410,19 @@ class Buffer:
         """All rows of finished hands with rewards attached; the rest stay."""
         if not self.chunks:
             return None
-        d = {k: np.concatenate([c[k] for c in self.chunks]) for k in self.chunks[0]}
-        done = np.array([u in self.outcomes for u in d["uid"].tolist()], dtype=bool)
-        rest = {k: v[~done] for k, v in d.items()}
+        # One key at a time, freeing each key's chunks as it is split, so the batch is
+        # never held twice (a full second copy once killed a 48 h run out of memory).
+        chunks, self.chunks = self.chunks, []
+        done = np.array([u in self.outcomes for c in chunks for u in c["uid"].tolist()], dtype=bool)
+        d: dict[str, np.ndarray] = {}
+        rest: dict[str, np.ndarray] = {}
+        for k in list(chunks[0]):
+            full = np.concatenate([c.pop(k) for c in chunks])
+            d[k] = full[done]
+            rest[k] = full[~done]
+            del full
+        del chunks
         self.chunks = [rest] if len(rest["uid"]) else []
-        d = {k: v[done] for k, v in d.items()}
         if not len(d["uid"]):
             return None
         outs = [self.outcomes[u] for u in d["uid"].tolist()]

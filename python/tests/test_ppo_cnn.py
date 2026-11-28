@@ -192,3 +192,35 @@ def test_frozen_opponents_run(tmp_path: Path) -> None:
     )
     log = json.loads((out / "log.json").read_text())
     assert len(log) == 2 and all(np.isfinite(e["policy_loss"]) for e in log)
+
+
+def test_buffer_take_splits_finished_rows_and_keeps_the_rest() -> None:
+    """Task 34m: the memory-lean take gives the rows a concatenate-then-mask take would."""
+    from mahjong.rl.ppo_cnn import Buffer, Outcome
+
+    buf = Buffer(3)
+    rng = np.random.default_rng(0)
+    all_x: list[np.ndarray] = []
+    all_uid: list[np.ndarray] = []
+    all_seat: list[np.ndarray] = []
+    for _ in range(4):
+        ids = np.array([0, 2, 1, 2], dtype=np.int64)
+        x = rng.random((4, 5)).astype(np.float16)
+        seat = rng.integers(0, 4, 4).astype(np.int64)
+        all_x.append(x)
+        all_seat.append(seat)
+        all_uid.append(buf.uid[ids].copy())
+        buf.add({"x": x.copy(), "seat": seat.copy()}, ids)
+        if len(all_x) == 2:  # hand of env 2 ends half way: later rows get a new uid
+            buf.finish(2, Outcome(np.array([5, -5, 0, 0]), 0.5, np.full(4, -1)))
+    uid, x, seat = np.concatenate(all_uid), np.concatenate(all_x), np.concatenate(all_seat)
+    done = np.isin(uid, list(buf.outcomes))
+    out = buf.take(paired=True)
+    assert out is not None
+    assert np.array_equal(out["uid"], uid[done])
+    assert np.array_equal(out["x"], x[done])
+    assert np.array_equal(out["seat"], seat[done])
+    assert out["reward"].shape == (int(done.sum()),)
+    (rest,) = buf.chunks
+    assert np.array_equal(rest["uid"], uid[~done])
+    assert np.array_equal(rest["x"], x[~done])
